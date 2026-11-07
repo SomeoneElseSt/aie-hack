@@ -1,0 +1,17 @@
+{
+	"default": "meta",
+	"sets": {
+		"meta": {
+			"one_shot": { "provider": "meta", "model": "muse-spark-1.3-contributor" },
+			"straightforward": { "provider": "meta", "model": "muse-spark-1.3" },
+			"complex": { "provider": "meta", "model": "muse-wonder-1.0" },
+			"direct": "straightforward"
+		},
+		"google": {
+			"one_shot": { "provider": "google", "model": "gemini-flash-lite-latest" },
+			"straightforward": { "provider": "google", "model": "gemini-flash-latest" },
+			"complex": { "provider": "google", "model": "gemini-pro-latest" },
+			"direct": "straightforward"
+		}
+	}
+}

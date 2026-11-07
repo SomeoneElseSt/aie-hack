@@ -1,0 +1,6 @@
+[submodule "vendors/pi"]
+	path = vendors/pi
+	url = https://github.com/earendil-works/pi.git
+[submodule "vendors/opencode"]
+	path = vendors/opencode
+	url = https://github.com/anomalyco/opencode.git

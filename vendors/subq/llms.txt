@@ -1,0 +1,40 @@
+# SubQ API
+
+> SubQ serves its models over an HTTP API at `https://api.subq.ai/v1`. SubQ Snap 1.1 (`subq-snap-1.1`, public preview) is the default Decision model and returns typed decisions with probabilities from the Decisions API. SubQ Preview (`subq-preview`, early access) is a long-context model that takes text and images and generates text behind OpenAI-compatible Chat Completions and Responses endpoints.
+
+- Send `Authorization: Bearer <API key>` on every request. The examples read the key from the `SUBQ_API_KEY` environment variable.
+- The Decisions API (`POST /v1/systemone`) has its own typed contract: noul (yes/no), choice, and score questions, with errors in a `detail` object. It is not OpenAI-compatible.
+- Chat Completions and Responses are OpenAI-compatible. Use an OpenAI SDK with its base URL set to `https://api.subq.ai/v1`.
+- Release stages: public preview is open to every account. Early access is enabled per organization; other keys get `403` `model_not_allowed`. Request access at https://subq.ai/small#waitlist. Both can change before general availability. `GET /v1/models` lists the models your key can use.
+- Every link below is the page as Markdown. A page with a release stage starts with a `Status:` line.
+
+## Get started
+
+- [Quickstart](https://docs.subq.ai/markdown/index.md): Send your first SubQ Decisions API request. Public preview.
+- [API overview](https://docs.subq.ai/markdown/using-the-api.md): How SubQ's OpenAI-compatible API fits into a developer integration.
+- [Authentication](https://docs.subq.ai/markdown/using-the-api/authentication.md): Authenticate SubQ API requests with bearer tokens.
+- [Data retention](https://docs.subq.ai/markdown/using-the-api/data-retention.md): How long SubQ stores prompts, completions, and conversation history.
+- [Models](https://docs.subq.ai/markdown/using-the-api/models.md): Supported SubQ model IDs and what each one accepts.
+- [Support](https://docs.subq.ai/markdown/using-the-api/support.md): Get help with the SubQ API, billing, or your account.
+
+## SubQ Snap (public preview)
+
+- [Decisions API](https://docs.subq.ai/markdown/endpoints/decisions-api.md): Turn text or structured state into typed decisions with probabilities and confidence.
+
+## SubQ Preview (early access)
+
+- [Sending files](https://docs.subq.ai/markdown/using-the-api/file-inputs.md): Send documents inline as base64, or upload once and reference them by file_id on Chat Completions or Responses.
+- [Structured outputs](https://docs.subq.ai/markdown/using-the-api/structured-outputs.md): Return JSON that matches your schema, from the Responses API or Chat Completions.
+- [Function calling](https://docs.subq.ai/markdown/using-the-api/function-calling.md): Connect SubQ models to your application with OpenAI-compatible tools, on Chat Completions or the Responses API.
+- [Responses API](https://docs.subq.ai/markdown/endpoints/responses-api.md): Stateful inference with system instructions, web search, and server-managed conversation history.
+- [Chat Completions API](https://docs.subq.ai/markdown/endpoints/chat-completions-api.md): Create OpenAI-compatible chat completions with SubQ.
+- [Files API](https://docs.subq.ai/markdown/endpoints/files-api.md): Upload, list, retrieve, and delete org-scoped files for use with Chat Completions and Responses.
+- [Conversations API](https://docs.subq.ai/markdown/endpoints/conversations-api.md): Manage conversation history as a stored resource — create, retrieve, update, delete, and manage the items inside it.
+
+## API reference
+
+- [Models API](https://docs.subq.ai/markdown/endpoints/models-api.md): List the model IDs available to your API key.
+
+## Optional
+
+- [All pages in one file](https://docs.subq.ai/llms-full.txt): Every page above as Markdown, in this order.
