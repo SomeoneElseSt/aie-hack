@@ -64,16 +64,16 @@ off when the cheap models are much cheaper and about as efficient** — true for
 ## Thinking-level routing (one top model, SubQ picks effort)
 
 Same model on every turn (no model switching), SubQ maps one_shot → low, straightforward → medium, complex → high
-(`LANES_MAPPING=meta-effort` / `google-effort` with `lanes/naive`). Rubric pending.
+(`LANES_MAPPING=meta-effort` / `google-effort` with `lanes/naive`).
 
-| Provider | Setup | Cost | vs always-high | Time |
-|---|---|---|---|---|
-| Meta (Wonder) | Medium, always (avg of 2) | $1.295 | +6% | 307s |
-| Meta (Wonder) | High, always | $1.225 | — | 273s |
-| Meta (Wonder) | SubQ picks effort | $1.388 | +13% | 283s |
-| Google (Pro) | Medium, always | $0.679 | −19% | 240s |
-| Google (Pro) | High, always | $0.835 | — | 277s |
-| Google (Pro) | SubQ picks effort | $0.681 | −18% | 266s |
+| Provider | Setup | Rubric | Cost | vs always-high | Time |
+|---|---|---|---|---|---|
+| Meta (Wonder) | Medium, always (avg of 2) | 12/12 | $1.295 | +6% | 307s |
+| Meta (Wonder) | High, always | 12/12 | $1.225 | — | 273s |
+| Meta (Wonder) | SubQ picks effort | 12/12 | $1.388 | +13% | 283s |
+| Google (Pro) | Medium, always | 11/12 | $0.679 | −19% | 240s |
+| Google (Pro) | High, always | 12/12 | $0.835 | — | 277s |
+| Google (Pro) | SubQ picks effort | 11/12 | $0.681 | −18% | 266s |
 
 Cache hit on turns right after a thinking-level change vs turns without one: Meta 92% vs 99%, Google 66% vs 87%.
 Switching effort partly breaks the cache, and picking effort per turn does not beat one fixed level.

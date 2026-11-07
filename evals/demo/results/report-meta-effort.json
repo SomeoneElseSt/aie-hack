@@ -1,0 +1,101 @@
+{
+  "whigh": {
+    "score": 12,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 1
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "Verified equal splits divide correctly amongst participants.",
+        "settle_min": "The app calculates exact subset sum partitions to guarantee the absolute minimum number of payments.",
+        "shares_split": "Tested --shares successfully applying proportional logic.",
+        "exact_and_cents": "Tested --amounts correctly tracking and uneven division properly rounding fractional cents.",
+        "cli_persistence": "CLI correctly saved and loaded state automatically to a JSON file on disk between invocations.",
+        "rename": "Verified by trying settle-up, which failed as an invalid command, while settle succeeded.",
+        "dashboard": "Successfully generated an HTML file from the CLI command displaying correct layout, balances, and expenses per person."
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.2251,
+      "router_overhead": 0.0,
+      "total_cost": 1.2251,
+      "requests": 57,
+      "cache_hit": 0.968,
+      "requests_by_model": {
+        "muse-wonder-1.0": 57
+      },
+      "lanes": []
+    }
+  },
+  "weffort": {
+    "score": 12,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 1
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "Equal-split expenses produced correct balances when checked via balances CLI command.",
+        "settle_min": "Testing a circular debt chain resulted in the correct minimum 1 payment instead of multiple.",
+        "shares_split": "Splitting by 2:1:1 produced the correct 50/25/25 distribution.",
+        "exact_and_cents": "100 divided by 3 produced exact parts (33.34, 33.33, 33.33) summing precisely to the total.",
+        "cli_persistence": "Using the CLI modified the JSON file properly across separate commands.",
+        "rename": "Command is 'settle'; 'settle-up' triggers an invalid choice error.",
+        "dashboard": "Dashboard command wrote correct HTML summary with balances and individual expenses per person."
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.3876,
+      "router_overhead": 0.0071,
+      "total_cost": 1.3946,
+      "requests": 62,
+      "cache_hit": 0.925,
+      "requests_by_model": {
+        "muse-wonder-1.0": 62
+      },
+      "lanes": [
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "complex",
+        "straightforward",
+        "straightforward",
+        "complex",
+        "straightforward"
+      ]
+    }
+  }
+}
