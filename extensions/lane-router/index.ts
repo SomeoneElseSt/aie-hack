@@ -26,6 +26,7 @@ import { ensureScratchpad, isEmptyDelta, readScratchpad, SCRATCHPAD_INSTRUCTIONS
 import { buildConversation } from "./transcript.ts";
 import { summarizeRun } from "./usage.ts";
 import { setQuietFooter } from "./quiet-footer.ts";
+import { registerLocalLane } from "./local-lane.ts";
 import { registerVerboseRenderer, setVerbose } from "./verbose.ts";
 
 /** The user turn in flight. Classification runs in the background; routing awaits it. */
@@ -121,6 +122,7 @@ export default function laneRouter(pi: ExtensionAPI) {
 	}
 
 	registerVerboseRenderer(pi);
+	registerLocalLane(pi);
 
 	/** Verbose labels each turn; quiet hides every trace of routing (including the footer's routed model). */
 	function applyDisplayMode(model: Model<any> | undefined, ctx: ExtensionContext): void {

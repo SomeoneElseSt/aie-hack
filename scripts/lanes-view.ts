@@ -65,12 +65,27 @@ function renderRow(record: LogRecord, turn: number): string {
 	].join(" │ ");
 }
 
+interface LocalRecord {
+	timestamp: string;
+	prompt: string;
+	model: string;
+	ok: boolean;
+	ms: number;
+}
+
+// Turns handled by the adopted local model: no cloud LLM call at all.
+function renderLocalRow(record: LocalRecord, turn: number): string {
+	const time = new Date(record.timestamp).toLocaleTimeString([], { hour12: false });
+	const status = record.ok ? `\x1b[1;36mLOCAL ${record.model}\x1b[0m on this Mac, no cloud call` : `local failed -> cloud fallback`;
+	return [`${DIM}${String(turn).padStart(2)}  ${time}${RESET}`, fit(record.prompt, PROMPT_WIDTH), `${BOLD}\x1b[36m(L)${RESET} `, status.padEnd(44), `${DIM}${`${record.ms}ms`.padStart(6)}${RESET}`].join(" │ ");
+}
+
 function renderHeader(): string[] {
 	const legend = LANES.map((lane, index) => `${BOLD}${lane.color}(${index + 1}) ${lane.label}${RESET}`).join("    ");
 	const cellWidth = BAR_WIDTH + 5;
 	const probabilityHeads = LANES.map((_, index) => `(${index + 1})`.padEnd(cellWidth)).join("  ");
 	const columns = `${BOLD} #  TIME     │ ${"PROMPT".padEnd(PROMPT_WIDTH)} │ LANE │ ${probabilityHeads} │ SUBQ${RESET}`;
-	return [`${BOLD}SubQ lane routing${RESET}   ${legend}`, "", columns, DIM + "─".repeat(118) + RESET];
+	return [`${BOLD}SubQ lane routing${RESET}   ${legend}    ${BOLD}\x1b[36m(L) LOCAL${RESET}`, "", columns, DIM + "─".repeat(118) + RESET];
 }
 
 function redraw(): void {
@@ -85,6 +100,10 @@ function ingest(chunk: string): void {
 		try {
 			record = JSON.parse(line);
 		} catch {
+			continue;
+		}
+		if (record.type === "local") {
+			rows.push(renderLocalRow(record as unknown as LocalRecord, rows.length + 1));
 			continue;
 		}
 		// Usage records are kept for cost analysis; only classifications are shown.

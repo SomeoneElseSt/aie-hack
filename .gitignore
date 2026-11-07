@@ -7,3 +7,5 @@ evals/demo/runs/
 evals/demo/run-*.log
 evals/EvoCodeBench/
 __pycache__/
+distill/data/
+distill/adapters/

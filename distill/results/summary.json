@@ -1,0 +1,54 @@
+{
+ "teacher": {
+  "pass_rate": 0.65,
+  "by_intent": {
+   "commit": 0.7,
+   "commit_push": 0.8,
+   "push": 1.0,
+   "undo_last_commit": 0.1
+  },
+  "avg_seconds": 5.92
+ },
+ "base": {
+  "pass_rate": 0.475,
+  "by_intent": {
+   "commit": 0.8,
+   "commit_push": 0.5,
+   "push": 0.6,
+   "undo_last_commit": 0.0
+  },
+  "avg_seconds": 0.32
+ },
+ "v1": {
+  "pass_rate": 1.0,
+  "by_intent": {
+   "commit": 1.0,
+   "commit_push": 1.0,
+   "push": 1.0,
+   "undo_last_commit": 1.0
+  },
+  "avg_seconds": 0.38
+ },
+ "v2-candidate": {
+  "pass_rate": 0.875,
+  "by_intent": {
+   "commit": 1.0,
+   "commit_push": 0.8,
+   "push": 1.0,
+   "undo_last_commit": 0.7
+  },
+  "avg_seconds": 0.36
+ },
+ "mining": {
+  "messages_with_git_keywords": 104,
+  "unique": 91,
+  "git_mechanics": 17,
+  "by_intent": {
+   "undo_last_commit": 2,
+   "commit_push": 8,
+   "commit": 4,
+   "push": 3
+  }
+ },
+ "training_examples_verified": 128
+}

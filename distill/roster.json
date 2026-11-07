@@ -1,0 +1,72 @@
+{
+ "active": {
+  "name": "v1",
+  "adapter": "models/v1",
+  "base": "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
+  "intents": [
+   "commit",
+   "commit_push",
+   "push",
+   "undo_last_commit"
+  ],
+  "pass_rate": 1.0
+ },
+ "history": [
+  {
+   "name": "teacher",
+   "adapter": null,
+   "pass_rate": 0.65,
+   "by_intent": {
+    "commit": 0.7,
+    "commit_push": 0.8,
+    "push": 1.0,
+    "undo_last_commit": 0.1
+   },
+   "avg_seconds": 5.92,
+   "decision": "reference",
+   "at": "2026-11-07 15:25:43"
+  },
+  {
+   "name": "base",
+   "adapter": null,
+   "pass_rate": 0.475,
+   "by_intent": {
+    "commit": 0.8,
+    "commit_push": 0.5,
+    "push": 0.6,
+    "undo_last_commit": 0.0
+   },
+   "avg_seconds": 0.32,
+   "decision": "reference",
+   "at": "2026-11-07 15:37:01"
+  },
+  {
+   "name": "v1",
+   "adapter": "models/v1",
+   "pass_rate": 1.0,
+   "by_intent": {
+    "commit": 1.0,
+    "commit_push": 1.0,
+    "push": 1.0,
+    "undo_last_commit": 1.0
+   },
+   "avg_seconds": 0.38,
+   "decision": "adopted",
+   "at": "2026-11-07 15:37:28"
+  },
+  {
+   "name": "v2-candidate",
+   "adapter": "adapters/v2-candidate",
+   "pass_rate": 0.875,
+   "by_intent": {
+    "commit": 1.0,
+    "commit_push": 0.8,
+    "push": 1.0,
+    "undo_last_commit": 0.7
+   },
+   "avg_seconds": 0.36,
+   "decision": "rolled_back",
+   "at": "2026-11-07 15:39:20"
+  }
+ ]
+}
