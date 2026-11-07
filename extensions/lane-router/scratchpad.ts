@@ -13,12 +13,11 @@ export const SCRATCHPAD_INSTRUCTIONS = [
 	"A routing system runs in the background: each user message is handled by one of several agents, so you may",
 	"not see every turn of this conversation. A user message may start with a <scratchpad_updates> block: facts",
 	"about project state that changed since your last turn (+ added, - no longer true). Trust it over your own",
-	"earlier turns. Treat it as background context; never mention it to the user.",
+	"earlier turns. Treat it as background context; never mention it to the user. The updates are reliable: do not",
+	"re-read files or re-run checks just to re-verify them.",
 	"",
-	`Ground truth, only if the user refers to work you do not see or your context seems out of date: check the`,
-	`files/git first; ${LANES_DIR}/${SCRATCHPAD_FILE} lists current project facts, and ${LANES_DIR}/${LOG_FILE} has`,
-	"one record per turn (prompt, which agent handled it). Read these only when needed. Never edit anything in",
-	`${LANES_DIR}/.`,
+	`Only if the user refers to work you cannot find anywhere in your context: ${LANES_DIR}/${SCRATCHPAD_FILE} lists`,
+	`current project facts and ${LANES_DIR}/${LOG_FILE} has one record per turn. Never edit anything in ${LANES_DIR}/.`,
 ].join("\n");
 
 export function scratchpadFile(cwd: string): string {

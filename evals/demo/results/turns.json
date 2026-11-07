@@ -1,0 +1,590 @@
+{
+  "wonder": {
+    "1": {
+      "cost": 0.02673,
+      "requests": 2,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 9
+    },
+    "2": {
+      "cost": 0.06368,
+      "requests": 5,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 39
+    },
+    "3": {
+      "cost": 0.22739,
+      "requests": 8,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 79
+    },
+    "4": {
+      "cost": 0.00882,
+      "requests": 1,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 4
+    },
+    "5": {
+      "cost": 0.04159,
+      "requests": 6,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 12
+    },
+    "6": {
+      "cost": 0.2393,
+      "requests": 10,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 54
+    },
+    "7": {
+      "cost": 0.01187,
+      "requests": 1,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 5
+    },
+    "8": {
+      "cost": 0.2377,
+      "requests": 9,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 55
+    },
+    "9": {
+      "cost": 0.01817,
+      "requests": 1,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 6
+    },
+    "10": {
+      "cost": 0.09199,
+      "requests": 7,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 20
+    },
+    "11": {
+      "cost": 0.20993,
+      "requests": 9,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 41
+    },
+    "12": {
+      "cost": 0.04656,
+      "requests": 3,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 10
+    }
+  },
+  "wonder2": {
+    "1": {
+      "cost": 0.01688,
+      "requests": 2,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 10
+    },
+    "2": {
+      "cost": 0.07794,
+      "requests": 6,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 23
+    },
+    "3": {
+      "cost": 0.2302,
+      "requests": 10,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 48
+    },
+    "4": {
+      "cost": 0.01012,
+      "requests": 1,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 4
+    },
+    "5": {
+      "cost": 0.02157,
+      "requests": 3,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 5
+    },
+    "6": {
+      "cost": 0.28319,
+      "requests": 13,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 57
+    },
+    "7": {
+      "cost": 0.01245,
+      "requests": 1,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 5
+    },
+    "8": {
+      "cost": 0.27108,
+      "requests": 12,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 53
+    },
+    "9": {
+      "cost": 0.0194,
+      "requests": 1,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 5
+    },
+    "10": {
+      "cost": 0.14313,
+      "requests": 10,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 24
+    },
+    "11": {
+      "cost": 0.23252,
+      "requests": 9,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 36
+    },
+    "12": {
+      "cost": 0.04729,
+      "requests": 3,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 9
+    }
+  },
+  "naive": {
+    "1": {
+      "cost": 0.00045,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 6
+    },
+    "2": {
+      "cost": 0.13943,
+      "requests": 10,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 52
+    },
+    "3": {
+      "cost": 0.29227,
+      "requests": 13,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 90
+    },
+    "4": {
+      "cost": 0.00168,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 4
+    },
+    "5": {
+      "cost": 0.03125,
+      "requests": 3,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 9
+    },
+    "6": {
+      "cost": 0.46492,
+      "requests": 13,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 100
+    },
+    "7": {
+      "cost": 0.0018,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 7
+    },
+    "8": {
+      "cost": 0.38153,
+      "requests": 13,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 71
+    },
+    "9": {
+      "cost": 0.04,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 5
+    },
+    "10": {
+      "cost": 0.06834,
+      "requests": 7,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 24
+    },
+    "11": {
+      "cost": 0.32632,
+      "requests": 10,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 52
+    },
+    "12": {
+      "cost": 0.04433,
+      "requests": 3,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 8
+    }
+  },
+  "lanes": {
+    "1": {
+      "cost": 0.00052,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 10
+    },
+    "2": {
+      "cost": 0.07007,
+      "requests": 5,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 28
+    },
+    "3": {
+      "cost": 0.29761,
+      "requests": 15,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 96
+    },
+    "4": {
+      "cost": 5e-05,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 5
+    },
+    "5": {
+      "cost": 0.00446,
+      "requests": 3,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 11
+    },
+    "6": {
+      "cost": 0.40117,
+      "requests": 12,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 112
+    },
+    "7": {
+      "cost": 0.00019,
+      "requests": 2,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 9
+    },
+    "8": {
+      "cost": 0.43333,
+      "requests": 12,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 94
+    },
+    "9": {
+      "cost": 0.00583,
+      "requests": 2,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 7
+    },
+    "10": {
+      "cost": 0.04076,
+      "requests": 10,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 31
+    },
+    "11": {
+      "cost": 0.36384,
+      "requests": 11,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 72
+    },
+    "12": {
+      "cost": 0.01284,
+      "requests": 4,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 20
+    }
+  },
+  "lanes2": {
+    "1": {
+      "cost": 0.00051,
+      "requests": 2,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 6
+    },
+    "2": {
+      "cost": 0.02653,
+      "requests": 7,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 32
+    },
+    "3": {
+      "cost": 0.23601,
+      "requests": 8,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 60
+    },
+    "4": {
+      "cost": 4e-05,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 4
+    },
+    "5": {
+      "cost": 0.00989,
+      "requests": 4,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 13
+    },
+    "6": {
+      "cost": 0.24653,
+      "requests": 8,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 53
+    },
+    "7": {
+      "cost": 0.00066,
+      "requests": 3,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 11
+    },
+    "8": {
+      "cost": 0.33464,
+      "requests": 12,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 61
+    },
+    "9": {
+      "cost": 0.00893,
+      "requests": 2,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 9
+    },
+    "10": {
+      "cost": 0.0394,
+      "requests": 8,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 24
+    },
+    "11": {
+      "cost": 0.3222,
+      "requests": 9,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 46
+    },
+    "12": {
+      "cost": 0.01245,
+      "requests": 3,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 16
+    }
+  },
+  "lanes3": {
+    "1": {
+      "cost": 0.00048,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 7
+    },
+    "2": {
+      "cost": 0.06914,
+      "requests": 6,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 31
+    },
+    "3": {
+      "cost": 0.1662,
+      "requests": 8,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 48
+    },
+    "4": {
+      "cost": 6e-05,
+      "requests": 1,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 4
+    },
+    "5": {
+      "cost": 0.00749,
+      "requests": 4,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 11
+    },
+    "6": {
+      "cost": 0.24166,
+      "requests": 9,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 52
+    },
+    "7": {
+      "cost": 0.00061,
+      "requests": 3,
+      "models": [
+        "muse-spark-1.3-contributor"
+      ],
+      "seconds": 9
+    },
+    "8": {
+      "cost": 0.37481,
+      "requests": 15,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 77
+    },
+    "9": {
+      "cost": 0.00594,
+      "requests": 2,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 8
+    },
+    "10": {
+      "cost": 0.08186,
+      "requests": 16,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 42
+    },
+    "11": {
+      "cost": 0.33423,
+      "requests": 9,
+      "models": [
+        "muse-wonder-1.0"
+      ],
+      "seconds": 40
+    },
+    "12": {
+      "cost": 0.01421,
+      "requests": 3,
+      "models": [
+        "muse-spark-1.3"
+      ],
+      "seconds": 15
+    }
+  }
+}

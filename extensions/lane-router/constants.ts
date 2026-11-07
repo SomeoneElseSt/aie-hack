@@ -28,6 +28,8 @@ export const FALLBACK_LANE: Lane = "complex";
 export const ROUTER_PROVIDER = "lanes";
 export const QUIET_MODEL_ID = "auto";
 export const VERBOSE_MODEL_ID = "auto-verbose";
+// Baseline for the demo: same per-turn model choices, but one shared thread and no scratchpad (cache lost on switch).
+export const NAIVE_MODEL_ID = "naive";
 
 // Lane → model targets live in mappings.json (select a set with LANES_MAPPING).
 

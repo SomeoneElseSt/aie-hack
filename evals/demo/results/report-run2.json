@@ -1,0 +1,161 @@
+{
+  "lanes2": {
+    "score": 11,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 1
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 0,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "Equal-split correctly computes balances (e.g. +20 for payer, -10 for others on 30 total).",
+        "settle_min": "Settle-up correctly generates the minimum 2 payments for a 4-person zero-sum test case.",
+        "shares_split": "Splitting 100 by 2:1:1 correctly yields 50, 25, 25.",
+        "exact_and_cents": "100 divided by 3 cleanly splits into 33.34, 33.33, 33.33 and exact amounts are parsed and applied correctly.",
+        "cli_persistence": "CLI correctly saves and loads person/expense state from the JSON file across separate invocations.",
+        "rename": "The 'settle-up' command still exists as an alias and runs without error.",
+        "dashboard": "CLI dashboard command generates a static HTML file showing correct balances and per-person expenses."
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.2378,
+      "router_overhead": 0.0153,
+      "total_cost": 1.2531,
+      "requests": 67,
+      "cache_hit": 0.944,
+      "requests_by_model": {
+        "muse-spark-1.3-contributor": 6,
+        "muse-spark-1.3": 24,
+        "muse-wonder-1.0": 37
+      },
+      "lanes": [
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "complex",
+        "straightforward",
+        "straightforward",
+        "complex",
+        "straightforward"
+      ]
+    }
+  },
+  "lanes3": {
+    "score": 12,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 1
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "Verified equal splits produce correct positive and negative balances",
+        "settle_min": "Settle correctly finds the minimum number of payments for 3-4 people",
+        "shares_split": "Splitting by shares accurately divides the amount according to weight",
+        "exact_and_cents": "Uneven splits properly distribute exact cents without fractional loss, and exact splits work",
+        "cli_persistence": "State correctly saves and loads across independent CLI calls using a JSON file",
+        "rename": "Settle command is renamed to 'settle' and 'settle-up' is removed",
+        "dashboard": "Dashboard command correctly writes an HTML file with correct totals, balances, and expenses"
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.2967,
+      "router_overhead": 0.0136,
+      "total_cost": 1.3103,
+      "requests": 77,
+      "cache_hit": 0.947,
+      "requests_by_model": {
+        "muse-spark-1.3-contributor": 5,
+        "muse-wonder-1.0": 47,
+        "muse-spark-1.3": 25
+      },
+      "lanes": [
+        "one_shot",
+        "complex",
+        "complex",
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "complex",
+        "straightforward",
+        "straightforward",
+        "complex",
+        "straightforward"
+      ]
+    }
+  },
+  "wonder2": {
+    "score": 12,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 1
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "Equal-split amounts accurately update balances",
+        "settle_min": "Correctly calculates and returns the minimal payments to settle",
+        "shares_split": "Proportional split calculation yields the correct balances",
+        "exact_and_cents": "Uneven totals strictly conserve cents with parts exactly summing to total",
+        "cli_persistence": "Ledger state persists correctly via JSON file across invocations",
+        "rename": "The command is 'settle' and 'settle-up' is correctly removed",
+        "dashboard": "Produces static dashboard.html displaying correct per-person balances and expenses"
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.3657,
+      "router_overhead": 0.0,
+      "total_cost": 1.3657,
+      "requests": 71,
+      "cache_hit": 0.974,
+      "requests_by_model": {
+        "muse-wonder-1.0": 71
+      },
+      "lanes": []
+    }
+  }
+}

@@ -1,2 +1,9 @@
 .env
 .lanes/
+evals/runs/
+evals/EvoCodeBench/data/
+evals/runs-*.log
+evals/demo/runs/
+evals/demo/run-*.log
+evals/EvoCodeBench/
+__pycache__/

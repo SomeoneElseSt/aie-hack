@@ -12,6 +12,7 @@ import {
 	type Lane,
 	LANES_DIR,
 	LOG_FILE,
+	NAIVE_MODEL_ID,
 	QUIET_MODEL_ID,
 	ROUTER_CONTEXT_WINDOW,
 	ROUTER_PROVIDER,
@@ -48,6 +49,10 @@ function sizeOf(text: string): { chars: number; estTokens: number } {
 
 function isRouterModel(model: Model<any> | undefined): boolean {
 	return model?.provider === ROUTER_PROVIDER;
+}
+
+function isNaiveModel(model: Model<any> | undefined): boolean {
+	return isRouterModel(model) && model?.id === NAIVE_MODEL_ID;
 }
 
 function lastUserTimestamp(request: ModelRouteRequest): number | undefined {
@@ -103,6 +108,7 @@ export default function laneRouter(pi: ExtensionAPI) {
 	for (const [id, name] of [
 		[QUIET_MODEL_ID, "Lanes (auto)"],
 		[VERBOSE_MODEL_ID, "Lanes (auto, verbose)"],
+		[NAIVE_MODEL_ID, "Naive switching (baseline)"],
 	] as const) {
 		pi.registerVirtualModel({
 			provider: ROUTER_PROVIDER,
@@ -148,13 +154,13 @@ export default function laneRouter(pi: ExtensionAPI) {
 				: Promise.resolve({ ok: false as const, error: "SUBQ_API_KEY is not set", latencyMs: 0 }),
 		};
 
-		event.systemPromptOptions.sections.lane_scratchpad = SCRATCHPAD_INSTRUCTIONS;
+		if (!isNaiveModel(ctx.model)) event.systemPromptOptions.sections.lane_scratchpad = SCRATCHPAD_INSTRUCTIONS;
 	});
 
 	// Every LLM request: show the routed lane only its own thread (+ unseen scratchpad updates).
 	pi.on("context", (event, ctx) => {
 		const lane = pendingTurn?.lane;
-		if (!lane || !isRouterModel(ctx.model)) return;
+		if (!lane || !isRouterModel(ctx.model) || isNaiveModel(ctx.model)) return;
 		return { messages: buildLaneView(event.messages, ctx.sessionManager.getBranch(), lane) };
 	});
 
@@ -192,10 +198,12 @@ export default function laneRouter(pi: ExtensionAPI) {
 		const apiKey = process.env.SUBQ_API_KEY ?? "";
 		const empty = { added: [], removed: [] };
 
+		const skipped: BookkeepingResult = { gate: { ok: false, error: "skipped", latencyMs: 0 }, updated: false, delta: empty };
+		const naive = isNaiveModel(ctx.model);
+
 		pendingBookkeeping = (async () => {
-			const bookkeeping: BookkeepingResult = writer
-				? await runBookkeeping(apiKey, ctx, writer, summary)
-				: { gate: { ok: false, error: "writer model not found", latencyMs: 0 }, updated: false, delta: empty };
+			const bookkeeping: BookkeepingResult =
+				writer && !naive ? await runBookkeeping(apiKey, ctx, writer, summary) : { ...skipped, gate: { ...skipped.gate, error: naive ? "naive baseline: no scratchpad" : "writer model not found" } };
 			recordTurn(ctx, turn, lane, usage, bookkeeping);
 		})();
 	});

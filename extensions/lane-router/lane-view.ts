@@ -77,6 +77,10 @@ export function buildLaneView(messages: AgentMessage[], branch: SessionEntry[], 
 	const { turns, deltas } = readBranch(branch);
 	const turnIndexByTimestamp = new Map(turns.map((turn, index) => [turn.userTimestamp, index]));
 
+	// The premium lane keeps the whole conversation: cheap turns are appended to the end of its thread (its cached
+	// prefix is untouched), so it never has to re-read the project to catch up. Cheap lanes stay small and isolated.
+	if (lane === "complex") return messages;
+
 	if (lane === "one_shot") {
 		const lastTurn = turns.at(-1);
 		const start = messages.findIndex((message) => message.role === "user" && messageTimestamp(message) === lastTurn?.userTimestamp);
