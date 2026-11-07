@@ -102,7 +102,7 @@ export default function laneRouter(pi: ExtensionAPI) {
 	async function route(request: ModelRouteRequest, ctx: ExtensionContext): Promise<ModelRoute> {
 		if ("error" in mapping) throw new Error(mapping.error);
 		const lane = request.reason === "direct" ? mapping.direct : await resolveLane(request, ctx);
-		return { model: targetModel(ctx, mapping, lane), thinkingLevel: request.thinkingLevel };
+		return { model: targetModel(ctx, mapping, lane), thinkingLevel: mapping.lanes[lane].thinking ?? request.thinkingLevel };
 	}
 
 	for (const [id, name] of [

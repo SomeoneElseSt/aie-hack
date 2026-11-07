@@ -18,7 +18,8 @@ from pathlib import Path
 
 DEMO_DIR = Path(__file__).resolve().parent
 RUN_SH = DEMO_DIR.parents[1] / "run.sh"
-JUDGE_MODEL = "google/gemini-pro-latest"
+# The judge must be a different model family than the runs it grades (JUDGE_MODEL=meta/muse-wonder-1.0 for Google runs).
+JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "google/gemini-pro-latest")
 JUDGE_TIMEOUT_SEC = 900
 SUBQ_PRICE_PER_M = 0.04
 

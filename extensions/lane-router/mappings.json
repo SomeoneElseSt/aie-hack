@@ -2,15 +2,69 @@
 	"default": "meta",
 	"sets": {
 		"meta": {
-			"one_shot": { "provider": "meta", "model": "muse-spark-1.3-contributor" },
-			"straightforward": { "provider": "meta", "model": "muse-spark-1.3" },
-			"complex": { "provider": "meta", "model": "muse-wonder-1.0" },
+			"one_shot": {
+				"provider": "meta",
+				"model": "muse-spark-1.3-contributor"
+			},
+			"straightforward": {
+				"provider": "meta",
+				"model": "muse-spark-1.3"
+			},
+			"complex": {
+				"provider": "meta",
+				"model": "muse-wonder-1.0"
+			},
 			"direct": "straightforward"
 		},
 		"google": {
-			"one_shot": { "provider": "google", "model": "gemini-flash-lite-latest" },
-			"straightforward": { "provider": "google", "model": "gemini-flash-latest" },
-			"complex": { "provider": "google", "model": "gemini-pro-latest" },
+			"one_shot": {
+				"provider": "google",
+				"model": "gemini-flash-lite-latest"
+			},
+			"straightforward": {
+				"provider": "google",
+				"model": "gemini-flash-latest"
+			},
+			"complex": {
+				"provider": "google",
+				"model": "gemini-pro-latest"
+			},
+			"direct": "straightforward"
+		},
+		"meta-effort": {
+			"one_shot": {
+				"provider": "meta",
+				"model": "muse-wonder-1.0",
+				"thinking": "low"
+			},
+			"straightforward": {
+				"provider": "meta",
+				"model": "muse-wonder-1.0",
+				"thinking": "medium"
+			},
+			"complex": {
+				"provider": "meta",
+				"model": "muse-wonder-1.0",
+				"thinking": "high"
+			},
+			"direct": "straightforward"
+		},
+		"google-effort": {
+			"one_shot": {
+				"provider": "google",
+				"model": "gemini-pro-latest",
+				"thinking": "low"
+			},
+			"straightforward": {
+				"provider": "google",
+				"model": "gemini-pro-latest",
+				"thinking": "medium"
+			},
+			"complex": {
+				"provider": "google",
+				"model": "gemini-pro-latest",
+				"thinking": "high"
+			},
 			"direct": "straightforward"
 		}
 	}

@@ -1,590 +1,2382 @@
 {
-  "wonder": {
-    "1": {
-      "cost": 0.02673,
-      "requests": 2,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 9
-    },
-    "2": {
-      "cost": 0.06368,
-      "requests": 5,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 39
-    },
-    "3": {
-      "cost": 0.22739,
-      "requests": 8,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 79
-    },
-    "4": {
-      "cost": 0.00882,
-      "requests": 1,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 4
-    },
-    "5": {
-      "cost": 0.04159,
-      "requests": 6,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 12
-    },
-    "6": {
-      "cost": 0.2393,
-      "requests": 10,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 54
-    },
-    "7": {
-      "cost": 0.01187,
-      "requests": 1,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 5
-    },
-    "8": {
-      "cost": 0.2377,
-      "requests": 9,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 55
-    },
-    "9": {
-      "cost": 0.01817,
-      "requests": 1,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 6
-    },
-    "10": {
-      "cost": 0.09199,
-      "requests": 7,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 20
-    },
-    "11": {
-      "cost": 0.20993,
-      "requests": 9,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 41
-    },
-    "12": {
-      "cost": 0.04656,
-      "requests": 3,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 10
-    }
+ "wonder": {
+  "1": {
+   "cost": 0.02673,
+   "requests": 2,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3988,
+   "cacheRead": 3572,
+   "output": 503,
+   "seconds": 9
   },
-  "wonder2": {
-    "1": {
-      "cost": 0.01688,
-      "requests": 2,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 10
-    },
-    "2": {
-      "cost": 0.07794,
-      "requests": 6,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 23
-    },
-    "3": {
-      "cost": 0.2302,
-      "requests": 10,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 48
-    },
-    "4": {
-      "cost": 0.01012,
-      "requests": 1,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 4
-    },
-    "5": {
-      "cost": 0.02157,
-      "requests": 3,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 5
-    },
-    "6": {
-      "cost": 0.28319,
-      "requests": 13,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 57
-    },
-    "7": {
-      "cost": 0.01245,
-      "requests": 1,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 5
-    },
-    "8": {
-      "cost": 0.27108,
-      "requests": 12,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 53
-    },
-    "9": {
-      "cost": 0.0194,
-      "requests": 1,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 5
-    },
-    "10": {
-      "cost": 0.14313,
-      "requests": 10,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 24
-    },
-    "11": {
-      "cost": 0.23252,
-      "requests": 9,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 36
-    },
-    "12": {
-      "cost": 0.04729,
-      "requests": 3,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 9
-    }
+  "2": {
+   "cost": 0.06368,
+   "requests": 5,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3755,
+   "cacheRead": 24516,
+   "output": 2188,
+   "seconds": 39
   },
-  "naive": {
-    "1": {
-      "cost": 0.00045,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 6
-    },
-    "2": {
-      "cost": 0.13943,
-      "requests": 10,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 52
-    },
-    "3": {
-      "cost": 0.29227,
-      "requests": 13,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 90
-    },
-    "4": {
-      "cost": 0.00168,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 4
-    },
-    "5": {
-      "cost": 0.03125,
-      "requests": 3,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 9
-    },
-    "6": {
-      "cost": 0.46492,
-      "requests": 13,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 100
-    },
-    "7": {
-      "cost": 0.0018,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 7
-    },
-    "8": {
-      "cost": 0.38153,
-      "requests": 13,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 71
-    },
-    "9": {
-      "cost": 0.04,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 5
-    },
-    "10": {
-      "cost": 0.06834,
-      "requests": 7,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 24
-    },
-    "11": {
-      "cost": 0.32632,
-      "requests": 10,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 52
-    },
-    "12": {
-      "cost": 0.04433,
-      "requests": 3,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 8
-    }
+  "3": {
+   "cost": 0.22739,
+   "requests": 8,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 9601,
+   "cacheRead": 98848,
+   "output": 8461,
+   "seconds": 79
   },
-  "lanes": {
-    "1": {
-      "cost": 0.00052,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 10
-    },
-    "2": {
-      "cost": 0.07007,
-      "requests": 5,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 28
-    },
-    "3": {
-      "cost": 0.29761,
-      "requests": 15,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 96
-    },
-    "4": {
-      "cost": 5e-05,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 5
-    },
-    "5": {
-      "cost": 0.00446,
-      "requests": 3,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 11
-    },
-    "6": {
-      "cost": 0.40117,
-      "requests": 12,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 112
-    },
-    "7": {
-      "cost": 0.00019,
-      "requests": 2,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 9
-    },
-    "8": {
-      "cost": 0.43333,
-      "requests": 12,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 94
-    },
-    "9": {
-      "cost": 0.00583,
-      "requests": 2,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 7
-    },
-    "10": {
-      "cost": 0.04076,
-      "requests": 10,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 31
-    },
-    "11": {
-      "cost": 0.36384,
-      "requests": 11,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 72
-    },
-    "12": {
-      "cost": 0.01284,
-      "requests": 4,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 20
-    }
+  "4": {
+   "cost": 0.00882,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 534,
+   "cacheRead": 16500,
+   "output": 169,
+   "seconds": 4
   },
-  "lanes2": {
-    "1": {
-      "cost": 0.00051,
-      "requests": 2,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 6
-    },
-    "2": {
-      "cost": 0.02653,
-      "requests": 7,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 32
-    },
-    "3": {
-      "cost": 0.23601,
-      "requests": 8,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 60
-    },
-    "4": {
-      "cost": 4e-05,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 4
-    },
-    "5": {
-      "cost": 0.00989,
-      "requests": 4,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 13
-    },
-    "6": {
-      "cost": 0.24653,
-      "requests": 8,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 53
-    },
-    "7": {
-      "cost": 0.00066,
-      "requests": 3,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 11
-    },
-    "8": {
-      "cost": 0.33464,
-      "requests": 12,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 61
-    },
-    "9": {
-      "cost": 0.00893,
-      "requests": 2,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 9
-    },
-    "10": {
-      "cost": 0.0394,
-      "requests": 8,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 24
-    },
-    "11": {
-      "cost": 0.3222,
-      "requests": 9,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 46
-    },
-    "12": {
-      "cost": 0.01245,
-      "requests": 3,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 16
-    }
+  "5": {
+   "cost": 0.04159,
+   "requests": 6,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 1461,
+   "cacheRead": 105272,
+   "output": 734,
+   "seconds": 12
   },
-  "lanes3": {
-    "1": {
-      "cost": 0.00048,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 7
-    },
-    "2": {
-      "cost": 0.06914,
-      "requests": 6,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 31
-    },
-    "3": {
-      "cost": 0.1662,
-      "requests": 8,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 48
-    },
-    "4": {
-      "cost": 6e-05,
-      "requests": 1,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 4
-    },
-    "5": {
-      "cost": 0.00749,
-      "requests": 4,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 11
-    },
-    "6": {
-      "cost": 0.24166,
-      "requests": 9,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 52
-    },
-    "7": {
-      "cost": 0.00061,
-      "requests": 3,
-      "models": [
-        "muse-spark-1.3-contributor"
-      ],
-      "seconds": 9
-    },
-    "8": {
-      "cost": 0.37481,
-      "requests": 15,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 77
-    },
-    "9": {
-      "cost": 0.00594,
-      "requests": 2,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 8
-    },
-    "10": {
-      "cost": 0.08186,
-      "requests": 16,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 42
-    },
-    "11": {
-      "cost": 0.33423,
-      "requests": 9,
-      "models": [
-        "muse-wonder-1.0"
-      ],
-      "seconds": 40
-    },
-    "12": {
-      "cost": 0.01421,
-      "requests": 3,
-      "models": [
-        "muse-spark-1.3"
-      ],
-      "seconds": 15
-    }
+  "6": {
+   "cost": 0.2393,
+   "requests": 10,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 10725,
+   "cacheRead": 241288,
+   "output": 7407,
+   "seconds": 54
+  },
+  "7": {
+   "cost": 0.01187,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 468,
+   "cacheRead": 28404,
+   "output": 216,
+   "seconds": 5
+  },
+  "8": {
+   "cost": 0.2377,
+   "requests": 9,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 8714,
+   "cacheRead": 298644,
+   "output": 7156,
+   "seconds": 55
+  },
+  "9": {
+   "cost": 0.01817,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 563,
+   "cacheRead": 36980,
+   "output": 426,
+   "seconds": 6
+  },
+  "10": {
+   "cost": 0.09199,
+   "requests": 7,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3052,
+   "cacheRead": 272172,
+   "output": 1267,
+   "seconds": 20
+  },
+  "11": {
+   "cost": 0.20993,
+   "requests": 9,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 7821,
+   "cacheRead": 398868,
+   "output": 4943,
+   "seconds": 41
+  },
+  "12": {
+   "cost": 0.04656,
+   "requests": 3,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 971,
+   "cacheRead": 143068,
+   "output": 703,
+   "seconds": 10
   }
+ },
+ "wonder2": {
+  "1": {
+   "cost": 0.01688,
+   "requests": 2,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 443,
+   "cacheRead": 7144,
+   "output": 684,
+   "seconds": 10
+  },
+  "2": {
+   "cost": 0.07794,
+   "requests": 6,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 4561,
+   "cacheRead": 33080,
+   "output": 2653,
+   "seconds": 23
+  },
+  "3": {
+   "cost": 0.2302,
+   "requests": 10,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 10422,
+   "cacheRead": 128392,
+   "output": 8142,
+   "seconds": 48
+  },
+  "4": {
+   "cost": 0.01012,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 508,
+   "cacheRead": 17524,
+   "output": 229,
+   "seconds": 4
+  },
+  "5": {
+   "cost": 0.02157,
+   "requests": 3,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 1261,
+   "cacheRead": 54620,
+   "output": 280,
+   "seconds": 5
+  },
+  "6": {
+   "cost": 0.28319,
+   "requests": 13,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 11016,
+   "cacheRead": 324324,
+   "output": 8712,
+   "seconds": 57
+  },
+  "7": {
+   "cost": 0.01245,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 450,
+   "cacheRead": 29044,
+   "output": 242,
+   "seconds": 5
+  },
+  "8": {
+   "cost": 0.27108,
+   "requests": 12,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 10679,
+   "cacheRead": 417392,
+   "output": 7243,
+   "seconds": 53
+  },
+  "9": {
+   "cost": 0.0194,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 502,
+   "cacheRead": 39284,
+   "output": 477,
+   "seconds": 5
+  },
+  "10": {
+   "cost": 0.14313,
+   "requests": 10,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 5515,
+   "cacheRead": 425480,
+   "output": 1798,
+   "seconds": 24
+  },
+  "11": {
+   "cost": 0.23252,
+   "requests": 9,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 9672,
+   "cacheRead": 452244,
+   "output": 5169,
+   "seconds": 36
+  },
+  "12": {
+   "cost": 0.04729,
+   "requests": 3,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 984,
+   "cacheRead": 162140,
+   "output": 546,
+   "seconds": 9
+  }
+ },
+ "naive": {
+  "1": {
+   "cost": 0.00045,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3716,
+   "cacheRead": 0,
+   "output": 385,
+   "seconds": 6
+  },
+  "2": {
+   "cost": 0.13943,
+   "requests": 10,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 10462,
+   "cacheRead": 62228,
+   "output": 4257,
+   "seconds": 52
+  },
+  "3": {
+   "cost": 0.29227,
+   "requests": 13,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 13114,
+   "cacheRead": 214756,
+   "output": 9843,
+   "seconds": 90
+  },
+  "4": {
+   "cost": 0.00168,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 16207,
+   "cacheRead": 3697,
+   "output": 282,
+   "seconds": 4
+  },
+  "5": {
+   "cost": 0.03125,
+   "requests": 3,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 17187,
+   "cacheRead": 43603,
+   "output": 757,
+   "seconds": 9
+  },
+  "6": {
+   "cost": 0.46492,
+   "requests": 13,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 21724,
+   "cacheRead": 470500,
+   "output": 14196,
+   "seconds": 100
+  },
+  "7": {
+   "cost": 0.0018,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 16797,
+   "cacheRead": 19825,
+   "output": 413,
+   "seconds": 7
+  },
+  "8": {
+   "cost": 0.38153,
+   "requests": 13,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 15962,
+   "cacheRead": 673636,
+   "output": 9148,
+   "seconds": 71
+  },
+  "9": {
+   "cost": 0.04,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 28429,
+   "cacheRead": 20849,
+   "output": 314,
+   "seconds": 5
+  },
+  "10": {
+   "cost": 0.06834,
+   "requests": 7,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3979,
+   "cacheRead": 357399,
+   "output": 2298,
+   "seconds": 24
+  },
+  "11": {
+   "cost": 0.32632,
+   "requests": 10,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 15219,
+   "cacheRead": 680328,
+   "output": 6469,
+   "seconds": 52
+  },
+  "12": {
+   "cost": 0.04433,
+   "requests": 3,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 11644,
+   "cacheRead": 180179,
+   "output": 647,
+   "seconds": 8
+  }
+ },
+ "lanes": {
+  "1": {
+   "cost": 0.00052,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3890,
+   "cacheRead": 0,
+   "output": 664,
+   "seconds": 10
+  },
+  "2": {
+   "cost": 0.07007,
+   "requests": 5,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 6540,
+   "cacheRead": 18128,
+   "output": 2014,
+   "seconds": 28
+  },
+  "3": {
+   "cost": 0.29761,
+   "requests": 15,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 12838,
+   "cacheRead": 205260,
+   "output": 10260,
+   "seconds": 96
+  },
+  "4": {
+   "cost": 5e-05,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 48,
+   "cacheRead": 3825,
+   "output": 192,
+   "seconds": 5
+  },
+  "5": {
+   "cost": 0.00446,
+   "requests": 3,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 993,
+   "cacheRead": 12115,
+   "output": 330,
+   "seconds": 11
+  },
+  "6": {
+   "cost": 0.40117,
+   "requests": 12,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 19462,
+   "cacheRead": 353904,
+   "output": 12628,
+   "seconds": 112
+  },
+  "7": {
+   "cost": 0.00019,
+   "requests": 2,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 746,
+   "cacheRead": 7650,
+   "output": 506,
+   "seconds": 9
+  },
+  "8": {
+   "cost": 0.43333,
+   "requests": 12,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 19416,
+   "cacheRead": 588784,
+   "output": 11895,
+   "seconds": 94
+  },
+  "9": {
+   "cost": 0.00583,
+   "requests": 2,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 1996,
+   "cacheRead": 9442,
+   "output": 451,
+   "seconds": 7
+  },
+  "10": {
+   "cost": 0.04076,
+   "requests": 10,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 10113,
+   "cacheRead": 128490,
+   "output": 2081,
+   "seconds": 31
+  },
+  "11": {
+   "cost": 0.36384,
+   "requests": 11,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 15512,
+   "cacheRead": 722044,
+   "output": 7869,
+   "seconds": 72
+  },
+  "12": {
+   "cost": 0.01284,
+   "requests": 4,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 1043,
+   "cacheRead": 65476,
+   "output": 405,
+   "seconds": 20
+  }
+ },
+ "lanes2": {
+  "1": {
+   "cost": 0.00051,
+   "requests": 2,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 4241,
+   "cacheRead": 3825,
+   "output": 391,
+   "seconds": 6
+  },
+  "2": {
+   "cost": 0.02653,
+   "requests": 7,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 5011,
+   "cacheRead": 37399,
+   "output": 3445,
+   "seconds": 32
+  },
+  "3": {
+   "cost": 0.23601,
+   "requests": 8,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 17062,
+   "cacheRead": 95020,
+   "output": 7438,
+   "seconds": 60
+  },
+  "4": {
+   "cost": 4e-05,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 43,
+   "cacheRead": 3825,
+   "output": 133,
+   "seconds": 4
+  },
+  "5": {
+   "cost": 0.00989,
+   "requests": 4,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 1695,
+   "cacheRead": 35396,
+   "output": 580,
+   "seconds": 13
+  },
+  "6": {
+   "cost": 0.24653,
+   "requests": 8,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 13292,
+   "cacheRead": 191520,
+   "output": 7753,
+   "seconds": 53
+  },
+  "7": {
+   "cost": 0.00066,
+   "requests": 3,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 4622,
+   "cacheRead": 12243,
+   "output": 889,
+   "seconds": 11
+  },
+  "8": {
+   "cost": 0.33464,
+   "requests": 12,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 19427,
+   "cacheRead": 510704,
+   "output": 7740,
+   "seconds": 61
+  },
+  "9": {
+   "cost": 0.00893,
+   "requests": 2,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 2814,
+   "cacheRead": 19682,
+   "output": 578,
+   "seconds": 9
+  },
+  "10": {
+   "cost": 0.0394,
+   "requests": 8,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 8370,
+   "cacheRead": 137480,
+   "output": 1954,
+   "seconds": 24
+  },
+  "11": {
+   "cost": 0.3222,
+   "requests": 9,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 23399,
+   "cacheRead": 588820,
+   "output": 5542,
+   "seconds": 46
+  },
+  "12": {
+   "cost": 0.01245,
+   "requests": 3,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 927,
+   "cacheRead": 61651,
+   "output": 481,
+   "seconds": 16
+  }
+ },
+ "lanes3": {
+  "1": {
+   "cost": 0.00048,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3885,
+   "cacheRead": 0,
+   "output": 453,
+   "seconds": 7
+  },
+  "2": {
+   "cost": 0.06914,
+   "requests": 6,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 7092,
+   "cacheRead": 24644,
+   "output": 1792,
+   "seconds": 31
+  },
+  "3": {
+   "cost": 0.1662,
+   "requests": 8,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 7258,
+   "cacheRead": 81824,
+   "output": 6040,
+   "seconds": 48
+  },
+  "4": {
+   "cost": 6e-05,
+   "requests": 1,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 43,
+   "cacheRead": 3825,
+   "output": 238,
+   "seconds": 4
+  },
+  "5": {
+   "cost": 0.00749,
+   "requests": 4,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 2442,
+   "cacheRead": 18372,
+   "output": 396,
+   "seconds": 11
+  },
+  "6": {
+   "cost": 0.24166,
+   "requests": 9,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 13237,
+   "cacheRead": 195732,
+   "output": 7478,
+   "seconds": 52
+  },
+  "7": {
+   "cost": 0.00061,
+   "requests": 3,
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 4308,
+   "cacheRead": 12243,
+   "output": 770,
+   "seconds": 9
+  },
+  "8": {
+   "cost": 0.37481,
+   "requests": 15,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 18776,
+   "cacheRead": 582860,
+   "output": 9156,
+   "seconds": 77
+  },
+  "9": {
+   "cost": 0.00594,
+   "requests": 2,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 1541,
+   "cacheRead": 12258,
+   "output": 513,
+   "seconds": 8
+  },
+  "10": {
+   "cost": 0.08186,
+   "requests": 16,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 17728,
+   "cacheRead": 291344,
+   "output": 3763,
+   "seconds": 42
+  },
+  "11": {
+   "cost": 0.33423,
+   "requests": 9,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 28378,
+   "cacheRead": 594068,
+   "output": 5095,
+   "seconds": 40
+  },
+  "12": {
+   "cost": 0.01421,
+   "requests": 3,
+   "models": [
+    "muse-spark-1.3"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 1161,
+   "cacheRead": 73299,
+   "output": 415,
+   "seconds": 15
+  }
+ },
+ "gpro": {
+  "1": {
+   "cost": 0.01543,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3442,
+   "cacheRead": 0,
+   "output": 712,
+   "seconds": 10
+  },
+  "2": {
+   "cost": 0.04835,
+   "requests": 2,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 10198,
+   "cacheRead": 0,
+   "output": 2329,
+   "seconds": 21
+  },
+  "3": {
+   "cost": 0.0818,
+   "requests": 2,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 15593,
+   "cacheRead": 0,
+   "output": 4218,
+   "seconds": 34
+  },
+  "4": {
+   "cost": 0.017,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 8270,
+   "cacheRead": 0,
+   "output": 38,
+   "seconds": 4
+  },
+  "5": {
+   "cost": 0.05272,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 25826,
+   "cacheRead": 0,
+   "output": 89,
+   "seconds": 9
+  },
+  "6": {
+   "cost": 0.16002,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 26470,
+   "cacheRead": 20815,
+   "output": 8577,
+   "seconds": 59
+  },
+  "7": {
+   "cost": 0.02543,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 9636,
+   "cacheRead": 4340,
+   "output": 441,
+   "seconds": 8
+  },
+  "8": {
+   "cost": 0.06476,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 9124,
+   "cacheRead": 40891,
+   "output": 3194,
+   "seconds": 30
+  },
+  "9": {
+   "cost": 0.02839,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 12046,
+   "cacheRead": 4411,
+   "output": 285,
+   "seconds": 5
+  },
+  "10": {
+   "cost": 0.0448,
+   "requests": 5,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 13760,
+   "cacheRead": 71372,
+   "output": 250,
+   "seconds": 18
+  },
+  "11": {
+   "cost": 0.08574,
+   "requests": 5,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 15294,
+   "cacheRead": 88439,
+   "output": 3122,
+   "seconds": 31
+  },
+  "12": {
+   "cost": 0.05444,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 21195,
+   "cacheRead": 39681,
+   "output": 343,
+   "seconds": 11
+  }
+ },
+ "gnaive": {
+  "1": {
+   "cost": 0.00211,
+   "requests": 1,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3442,
+   "cacheRead": 0,
+   "output": 831,
+   "seconds": 6
+  },
+  "2": {
+   "cost": 0.05241,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 14430,
+   "cacheRead": 0,
+   "output": 1962,
+   "seconds": 20
+  },
+  "3": {
+   "cost": 0.20026,
+   "requests": 5,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 38427,
+   "cacheRead": 66857,
+   "output": 9169,
+   "seconds": 76
+  },
+  "4": {
+   "cost": 0.00453,
+   "requests": 1,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 17399,
+   "cacheRead": 0,
+   "output": 122,
+   "seconds": 4
+  },
+  "5": {
+   "cost": 0.00545,
+   "requests": 1,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 2050,
+   "cacheRead": 14791,
+   "output": 17,
+   "seconds": 8
+  },
+  "6": {
+   "cost": 0.20406,
+   "requests": 6,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 35909,
+   "cacheRead": 130689,
+   "output": 8842,
+   "seconds": 68
+  },
+  "7": {
+   "cost": 0.00203,
+   "requests": 1,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 4888,
+   "cacheRead": 16288,
+   "output": 264,
+   "seconds": 4
+  },
+  "8": {
+   "cost": 0.14463,
+   "requests": 5,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 34053,
+   "cacheRead": 113440,
+   "output": 4485,
+   "seconds": 42
+  },
+  "9": {
+   "cost": 0.01608,
+   "requests": 1,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 6642,
+   "cacheRead": 16109,
+   "output": 411,
+   "seconds": 6
+  },
+  "10": {
+   "cost": 0.01398,
+   "requests": 2,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 4595,
+   "cacheRead": 41851,
+   "output": 90,
+   "seconds": 7
+  },
+  "11": {
+   "cost": 0.11438,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 31022,
+   "cacheRead": 63068,
+   "output": 3310,
+   "seconds": 28
+  },
+  "12": {
+   "cost": 0.0393,
+   "requests": 5,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 12034,
+   "cacheRead": 112338,
+   "output": 489,
+   "seconds": 13
+  }
+ },
+ "glanes": {
+  "1": {
+   "cost": 0.00225,
+   "requests": 1,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3621,
+   "cacheRead": 0,
+   "output": 897,
+   "seconds": 6
+  },
+  "2": {
+   "cost": 0.17912,
+   "requests": 27,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 70391,
+   "cacheRead": 154133,
+   "output": 5602,
+   "seconds": 85
+  },
+  "3": {
+   "cost": 0.06466,
+   "requests": 4,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 18996,
+   "cacheRead": 30713,
+   "output": 1711,
+   "seconds": 28
+  },
+  "4": {
+   "cost": 0.00091,
+   "requests": 1,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3604,
+   "cacheRead": 0,
+   "output": 7,
+   "seconds": 3
+  },
+  "5": {
+   "cost": 0.07123,
+   "requests": 12,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 27997,
+   "cacheRead": 153240,
+   "output": 695,
+   "seconds": 39
+  },
+  "6": {
+   "cost": 0.14442,
+   "requests": 10,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 29864,
+   "cacheRead": 174053,
+   "output": 4157,
+   "seconds": 53
+  },
+  "7": {
+   "cost": 0.0037,
+   "requests": 3,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 12157,
+   "cacheRead": 0,
+   "output": 439,
+   "seconds": 5
+  },
+  "8": {
+   "cost": 0.22449,
+   "requests": 13,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 50140,
+   "cacheRead": 338352,
+   "output": 4712,
+   "seconds": 66
+  },
+  "9": {
+   "cost": 0.05568,
+   "requests": 8,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 18469,
+   "cacheRead": 124614,
+   "output": 1032,
+   "seconds": 24
+  },
+  "10": {
+   "cost": 0.16836,
+   "requests": 24,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 54873,
+   "cacheRead": 475929,
+   "output": 1629,
+   "seconds": 68
+  },
+  "11": {
+   "cost": 0.16177,
+   "requests": 7,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 46395,
+   "cacheRead": 209275,
+   "output": 2261,
+   "seconds": 41
+  },
+  "12": {
+   "cost": 0.09238,
+   "requests": 10,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 24135,
+   "cacheRead": 238413,
+   "output": 2269,
+   "seconds": 43
+  }
+ },
+ "glanes2": {
+  "1": {
+   "cost": 0.00246,
+   "requests": 1,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3622,
+   "cacheRead": 0,
+   "output": 1036,
+   "seconds": 7
+  },
+  "2": {
+   "cost": 0.03806,
+   "requests": 2,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 9903,
+   "cacheRead": 0,
+   "output": 1521,
+   "seconds": 17
+  },
+  "3": {
+   "cost": 0.10277,
+   "requests": 2,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 24102,
+   "cacheRead": 0,
+   "output": 4547,
+   "seconds": 66
+  },
+  "4": {
+   "cost": 0.00092,
+   "requests": 1,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3605,
+   "cacheRead": 0,
+   "output": 13,
+   "seconds": 3
+  },
+  "5": {
+   "cost": 0.08643,
+   "requests": 16,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 41126,
+   "cacheRead": 60844,
+   "output": 1734,
+   "seconds": 50
+  },
+  "6": {
+   "cost": 0.16944,
+   "requests": 8,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 35755,
+   "cacheRead": 163685,
+   "output": 5433,
+   "seconds": 63
+  },
+  "7": {
+   "cost": 0.00327,
+   "requests": 2,
+   "models": [
+    "gemini-flash-lite-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 7397,
+   "cacheRead": 0,
+   "output": 950,
+   "seconds": 7
+  },
+  "8": {
+   "cost": 0.17535,
+   "requests": 8,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 40821,
+   "cacheRead": 200118,
+   "output": 4474,
+   "seconds": 48
+  },
+  "9": {
+   "cost": 0.05102,
+   "requests": 9,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 22288,
+   "cacheRead": 74486,
+   "output": 711,
+   "seconds": 23
+  },
+  "10": {
+   "cost": 0.10388,
+   "requests": 18,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 40565,
+   "cacheRead": 216027,
+   "output": 1180,
+   "seconds": 47
+  },
+  "11": {
+   "cost": 0.24314,
+   "requests": 12,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 60205,
+   "cacheRead": 420093,
+   "output": 3225,
+   "seconds": 53
+  },
+  "12": {
+   "cost": 0.03936,
+   "requests": 6,
+   "models": [
+    "gemini-flash-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 13140,
+   "cacheRead": 83297,
+   "output": 797,
+   "seconds": 26
+  }
+ },
+ "whigh": {
+  "1": {
+   "cost": 0.03017,
+   "requests": 2,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 3994,
+   "cacheRead": 3572,
+   "output": 674,
+   "seconds": 11
+  },
+  "2": {
+   "cost": 0.05742,
+   "requests": 4,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 3462,
+   "cacheRead": 19792,
+   "output": 1980,
+   "seconds": 25
+  },
+  "3": {
+   "cost": 0.19644,
+   "requests": 7,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 8504,
+   "cacheRead": 78508,
+   "output": 7336,
+   "seconds": 48
+  },
+  "4": {
+   "cost": 0.00874,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 474,
+   "cacheRead": 15220,
+   "output": 190,
+   "seconds": 4
+  },
+  "5": {
+   "cost": 0.02051,
+   "requests": 3,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 1054,
+   "cacheRead": 47580,
+   "output": 339,
+   "seconds": 6
+  },
+  "6": {
+   "cost": 0.22658,
+   "requests": 8,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 11291,
+   "cacheRead": 182816,
+   "output": 7243,
+   "seconds": 47
+  },
+  "7": {
+   "cost": 0.01257,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 489,
+   "cacheRead": 27252,
+   "output": 258,
+   "seconds": 10
+  },
+  "8": {
+   "cost": 0.26571,
+   "requests": 11,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 11681,
+   "cacheRead": 380028,
+   "output": 7149,
+   "seconds": 52
+  },
+  "9": {
+   "cost": 0.01872,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 427,
+   "cacheRead": 38772,
+   "output": 463,
+   "seconds": 6
+  },
+  "10": {
+   "cost": 0.07667,
+   "requests": 5,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 2664,
+   "cacheRead": 201028,
+   "output": 1290,
+   "seconds": 12
+  },
+  "11": {
+   "cost": 0.26389,
+   "requests": 11,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 10688,
+   "cacheRead": 523900,
+   "output": 5818,
+   "seconds": 44
+  },
+  "12": {
+   "cost": 0.04765,
+   "requests": 3,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 1307,
+   "cacheRead": 154844,
+   "output": 573,
+   "seconds": 8
+  }
+ },
+ "weffort": {
+  "1": {
+   "cost": 0.02769,
+   "requests": 2,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "low"
+   ],
+   "input": 3980,
+   "cacheRead": 3572,
+   "output": 553,
+   "seconds": 8
+  },
+  "2": {
+   "cost": 0.06365,
+   "requests": 5,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 6856,
+   "cacheRead": 20432,
+   "output": 1607,
+   "seconds": 18
+  },
+  "3": {
+   "cost": 0.18672,
+   "requests": 7,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 13274,
+   "cacheRead": 61240,
+   "output": 6068,
+   "seconds": 43
+  },
+  "4": {
+   "cost": 0.04264,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "low"
+   ],
+   "input": 9578,
+   "cacheRead": 3828,
+   "output": 178,
+   "seconds": 4
+  },
+  "5": {
+   "cost": 0.04503,
+   "requests": 3,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 7657,
+   "cacheRead": 33756,
+   "output": 382,
+   "seconds": 7
+  },
+  "6": {
+   "cost": 0.22732,
+   "requests": 12,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 10599,
+   "cacheRead": 232304,
+   "output": 6923,
+   "seconds": 54
+  },
+  "7": {
+   "cost": 0.04719,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "low"
+   ],
+   "input": 10072,
+   "cacheRead": 13300,
+   "output": 212,
+   "seconds": 9
+  },
+  "8": {
+   "cost": 0.25947,
+   "requests": 11,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 11627,
+   "cacheRead": 327548,
+   "output": 7372,
+   "seconds": 58
+  },
+  "9": {
+   "cost": 0.09085,
+   "requests": 1,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 20460,
+   "cacheRead": 13940,
+   "output": 311,
+   "seconds": 6
+  },
+  "10": {
+   "cost": 0.08682,
+   "requests": 7,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 3201,
+   "cacheRead": 251308,
+   "output": 1188,
+   "seconds": 20
+  },
+  "11": {
+   "cost": 0.23199,
+   "requests": 9,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 12514,
+   "cacheRead": 377748,
+   "output": 5319,
+   "seconds": 45
+  },
+  "12": {
+   "cost": 0.07822,
+   "requests": 3,
+   "models": [
+    "muse-wonder-1.0"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 9636,
+   "cacheRead": 129500,
+   "output": 689,
+   "seconds": 11
+  }
+ },
+ "phigh": {
+  "1": {
+   "cost": 0.0163,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 3442,
+   "cacheRead": 0,
+   "output": 785,
+   "seconds": 9
+  },
+  "2": {
+   "cost": 0.07431,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 16176,
+   "cacheRead": 0,
+   "output": 3496,
+   "seconds": 26
+  },
+  "3": {
+   "cost": 0.1452,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 22647,
+   "cacheRead": 17069,
+   "output": 8041,
+   "seconds": 59
+  },
+  "4": {
+   "cost": 0.02386,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 9255,
+   "cacheRead": 4170,
+   "output": 376,
+   "seconds": 7
+  },
+  "5": {
+   "cost": 0.03362,
+   "requests": 4,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 10691,
+   "cacheRead": 45263,
+   "output": 265,
+   "seconds": 12
+  },
+  "6": {
+   "cost": 0.14734,
+   "requests": 6,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 28727,
+   "cacheRead": 94790,
+   "output": 5910,
+   "seconds": 58
+  },
+  "7": {
+   "cost": 0.03468,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 15742,
+   "cacheRead": 4179,
+   "output": 197,
+   "seconds": 8
+  },
+  "8": {
+   "cost": 0.09085,
+   "requests": 4,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 12375,
+   "cacheRead": 81964,
+   "output": 4142,
+   "seconds": 33
+  },
+  "9": {
+   "cost": 0.04965,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 18736,
+   "cacheRead": 4209,
+   "output": 945,
+   "seconds": 10
+  },
+  "10": {
+   "cost": 0.05361,
+   "requests": 5,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 13493,
+   "cacheRead": 105515,
+   "output": 460,
+   "seconds": 17
+  },
+  "11": {
+   "cost": 0.10786,
+   "requests": 5,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 33364,
+   "cacheRead": 98366,
+   "output": 1788,
+   "seconds": 26
+  },
+  "12": {
+   "cost": 0.05767,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 20674,
+   "cacheRead": 61953,
+   "output": 328,
+   "seconds": 12
+  }
+ },
+ "peffort": {
+  "1": {
+   "cost": 0.01295,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "low"
+   ],
+   "input": 3443,
+   "cacheRead": 0,
+   "output": 505,
+   "seconds": 7
+  },
+  "2": {
+   "cost": 0.04137,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 13412,
+   "cacheRead": 0,
+   "output": 1212,
+   "seconds": 15
+  },
+  "3": {
+   "cost": 0.12447,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 20264,
+   "cacheRead": 12689,
+   "output": 6784,
+   "seconds": 48
+  },
+  "4": {
+   "cost": 0.01473,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "low"
+   ],
+   "input": 6693,
+   "cacheRead": 4091,
+   "output": 44,
+   "seconds": 9
+  },
+  "5": {
+   "cost": 0.02166,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 7819,
+   "cacheRead": 25574,
+   "output": 75,
+   "seconds": 10
+  },
+  "6": {
+   "cost": 0.13607,
+   "requests": 4,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 16449,
+   "cacheRead": 56780,
+   "output": 7651,
+   "seconds": 61
+  },
+  "7": {
+   "cost": 0.03199,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "low"
+   ],
+   "input": 12340,
+   "cacheRead": 4251,
+   "output": 538,
+   "seconds": 9
+  },
+  "8": {
+   "cost": 0.08105,
+   "requests": 5,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 16287,
+   "cacheRead": 79215,
+   "output": 2719,
+   "seconds": 35
+  },
+  "9": {
+   "cost": 0.03474,
+   "requests": 1,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 15362,
+   "cacheRead": 4220,
+   "output": 264,
+   "seconds": 13
+  },
+  "10": {
+   "cost": 0.03931,
+   "requests": 4,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 10726,
+   "cacheRead": 69849,
+   "output": 324,
+   "seconds": 14
+  },
+  "11": {
+   "cost": 0.08937,
+   "requests": 3,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "high"
+   ],
+   "input": 10517,
+   "cacheRead": 61701,
+   "output": 4666,
+   "seconds": 34
+  },
+  "12": {
+   "cost": 0.05326,
+   "requests": 2,
+   "models": [
+    "gemini-pro-latest"
+   ],
+   "thinking": [
+    "medium"
+   ],
+   "input": 21483,
+   "cacheRead": 24746,
+   "output": 445,
+   "seconds": 11
+  }
+ }
 }

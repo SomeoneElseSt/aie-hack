@@ -1,0 +1,16 @@
+
+## theme_d11_w2_scientific_numerical_brownfield_modification__not_1234
+lanes   rounds=5 pass=0.40 [1.0, 1.0, 0.0, 0.0, 0.0] cost=$3.391 (router $0.0130) cached=96%  naive-switch≥$3.391
+        lanes=['complex', 'complex', 'complex', 'complex', 'complex'] requests={'muse-wonder-1.0': 67}
+lanes_fixed rounds=5 pass=1.00 [1.0, 1.0, 1.0, 1.0, 1.0] cost=$2.640 (router $0.0110) cached=97%
+        lanes=['complex', 'complex', 'complex', 'complex', 'complex'] requests={'muse-wonder-1.0': 54}
+wonder  rounds=5 pass=1.00 [1.0, 1.0, 1.0, 1.0, 1.0] cost=$3.510 (router $0.0000) cached=95%
+        lanes=[] requests={'muse-wonder-1.0': 69}
+
+## theme_d3_w9_testing_quality_reproducibility_verification
+lanes   rounds=7 pass=0.00 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] cost=$2.626 (router $0.0222) cached=97%  naive-switch≥$2.626
+        lanes=['complex', 'complex', 'complex', 'complex', 'complex', 'complex', 'complex'] requests={'muse-wonder-1.0': 53}
+lanes_fixed rounds=7 pass=1.00 [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0] cost=$2.950 (router $0.0259) cached=98%
+        lanes=['complex', 'complex', 'complex', 'complex', 'complex', 'complex', 'straightforward'] requests={'muse-wonder-1.0': 73, 'muse-spark-1.3': 8}
+wonder  rounds=7 pass=0.00 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] cost=$3.195 (router $0.0000) cached=98%
+        lanes=[] requests={'muse-wonder-1.0': 74}

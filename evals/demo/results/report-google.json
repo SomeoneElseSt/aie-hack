@@ -1,0 +1,219 @@
+{
+  "gpro": {
+    "score": 11,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 0
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "CLI: A pays 30 for A,B,C gave A +20.00, B -10.00, C -10.00",
+        "settle_min": "CLI/core settle gave minimum 2 payments for 3-person and 2 for balanced 4-person cases",
+        "shares_split": "Core Expense 100 split 2:1:1 gave A +50, B -25, C -25",
+        "exact_and_cents": "Core exact split verified; 100/3 gave 33.34/33.33/33.33 allocations summing to 100 with zero balance sum",
+        "cli_persistence": "Separate CLI invocations added people/expense and data.json persisted them for later balances",
+        "rename": "CLI lists settle, and settle-up is an invalid choice",
+        "dashboard": "CLI dashboard generated dashboard.html with correct balances table and expense rows per payer/split"
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 0.6789,
+      "router_overhead": 0.0,
+      "total_cost": 0.6789,
+      "requests": 30,
+      "cache_hit": 0.612,
+      "requests_by_model": {
+        "gemini-pro-latest": 30
+      },
+      "lanes": []
+    }
+  },
+  "gnaive": {
+    "score": 11,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 0
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "CLI fresh data: A pays 30 for A,B,C gave A +20, B -10, C -10",
+        "settle_min": "CLI settle gave 2 payments for 3p case and 3 payments for 4p A+30/B,C,D-10, minimum n-1",
+        "shares_split": "Logic verified 100 at 2:1:1 gave balances +50/-25/-25 (parts 50,25,25)",
+        "exact_and_cents": "Exact 40/35/25 verified; CLI 100/3 gave A +66.66, B/C -33.33 summing to zero/total",
+        "cli_persistence": "Separate add-person/add-expense invocations persisted persons/expenses/participants in fresh data.json and balances read them back",
+        "rename": "Help lists settle; settle-up exits 2 with No such command",
+        "dashboard": "CLI dashboard generated dashboard.html showing per-person balances (+30/-10s) and Group $40 expense with payer/participants"
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 0.7992,
+      "router_overhead": 0.0063,
+      "total_cost": 0.8055,
+      "requests": 34,
+      "cache_hit": 0.737,
+      "requests_by_model": {
+        "gemini-flash-lite-latest": 3,
+        "gemini-pro-latest": 22,
+        "gemini-flash-latest": 9
+      },
+      "lanes": [
+        "one_shot",
+        "complex",
+        "complex",
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "complex",
+        "straightforward",
+        "straightforward",
+        "complex",
+        "straightforward"
+      ]
+    }
+  },
+  "glanes": {
+    "score": 11,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 0
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "Fresh CLI: A pays 30 for A,B,C gave A owed 20, B/C owe 10 each",
+        "settle_min": "4-person case (A+75,C-50,D-25) settled in exactly 2 payments: C->A 50, D->A 25",
+        "shares_split": "API verified 100 at 2:1:1 gave 50/25/25 (no CLI flag, tracker API works)",
+        "exact_and_cents": "Exact 20/50/30 gave correct balances; 100/3 gave 33.34/33.33/33.33 summing to 100.00 via API and CLI",
+        "cli_persistence": "Separate CLI invocations wrote splitwise.json and later balances invocation read it correctly",
+        "rename": "Help lists 'settle'; 'settle-up' rejected as invalid choice (exit 2), settle works",
+        "dashboard": "CLI dashboard generated dashboard.html showing A gets back 20, B/C owe 10, Dinner 30 paid by A with 10 per person"
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.169,
+      "router_overhead": 0.0109,
+      "total_cost": 1.1799,
+      "requests": 120,
+      "cache_hit": 0.84,
+      "requests_by_model": {
+        "gemini-flash-lite-latest": 5,
+        "gemini-flash-latest": 81,
+        "gemini-pro-latest": 34
+      },
+      "lanes": [
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "complex",
+        "straightforward",
+        "straightforward",
+        "complex",
+        "straightforward"
+      ]
+    }
+  },
+  "glanes2": {
+    "score": 11,
+    "out_of": 12,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_4": 1,
+      "answer_turn_7": 0
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "CLI fresh DB: A pays 30 for A,B,C gave A +20, B -10, C -10",
+        "settle_min": "Complex CLI case A+40,B-5,C-35 settled in minimal 2 payments B->A 5, C->A 35",
+        "shares_split": "Verified via calculator API: 100 shares 2:1:1 gave A +50, B -25, C -25",
+        "exact_and_cents": "Exact API split worked; CLI/API 100/3 gave 33.34+33.33+33.33 summing to 100",
+        "cli_persistence": "Separate CLI invocations persisted people/expenses to SPLITWISE_DB JSON and balances persisted",
+        "rename": "CLI help lists settle; settle-up rejected as invalid choice",
+        "dashboard": "CLI dashboard generated HTML with correct per-person balances and expense entries"
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.0161,
+      "router_overhead": 0.0108,
+      "total_cost": 1.0268,
+      "requests": 85,
+      "cache_hit": 0.801,
+      "requests_by_model": {
+        "gemini-flash-lite-latest": 4,
+        "gemini-pro-latest": 32,
+        "gemini-flash-latest": 49
+      },
+      "lanes": [
+        "one_shot",
+        "complex",
+        "complex",
+        "one_shot",
+        "straightforward",
+        "complex",
+        "one_shot",
+        "complex",
+        "straightforward",
+        "straightforward",
+        "complex",
+        "straightforward"
+      ]
+    }
+  }
+}

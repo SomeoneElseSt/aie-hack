@@ -46,6 +46,52 @@ Small turns = 1, 4, 5, 7, 9, 10, 12. Big turns = 2, 3, 6, 8, 11.
 - Time: big turns take the same time; small turns look slower mostly because the benchmark waits for the
   post-turn scratchpad update before exiting each run (in interactive use it runs after the reply).
 
+## Google models (same 12 turns)
+
+Lanes = Gemini Flash-Lite / Flash / Pro (`LANES_MAPPING=google`). Judge: `meta/muse-wonder-1.0` (different family).
+
+| Run | Setup | Rubric | Small turns | Big turns | Total | Requests | Time |
+|---|---|---|---|---|---|---|---|
+| gpro | Gemini Pro always | 11/12 | $0.238 | $0.441 | $0.679 | 30 | 240s |
+| gnaive | Naive switching | 11/12 | $0.083 | $0.716 | $0.805 | 34 | 282s |
+| glanes | Lanes | 11/12 | $0.395 | $0.774 | $1.180 | 120 | 461s |
+| glanes2 | Lanes | 11/12 | $0.287 | $0.729 | $1.027 | 85 | 410s |
+
+All four missed the same item (the SQLite answer). Lanes cost **+63%** vs Gemini Pro always: Gemini Flash is only
+~25% cheaper than Pro and loops far more (49–81 requests vs Pro's 30 for the whole session). **The router only pays
+off when the cheap models are much cheaper and about as efficient** — true for Meta's lineup, not Google's.
+
+## Thinking-level routing (one top model, SubQ picks effort)
+
+Same model on every turn (no model switching), SubQ maps one_shot → low, straightforward → medium, complex → high
+(`LANES_MAPPING=meta-effort` / `google-effort` with `lanes/naive`). Rubric pending.
+
+| Provider | Setup | Cost | vs always-high | Time |
+|---|---|---|---|---|
+| Meta (Wonder) | Medium, always (avg of 2) | $1.295 | +6% | 307s |
+| Meta (Wonder) | High, always | $1.225 | — | 273s |
+| Meta (Wonder) | SubQ picks effort | $1.388 | +13% | 283s |
+| Google (Pro) | Medium, always | $0.679 | −19% | 240s |
+| Google (Pro) | High, always | $0.835 | — | 277s |
+| Google (Pro) | SubQ picks effort | $0.681 | −18% | 266s |
+
+Cache hit on turns right after a thinking-level change vs turns without one: Meta 92% vs 99%, Google 66% vs 87%.
+Switching effort partly breaks the cache, and picking effort per turn does not beat one fixed level.
+
+## EvoCode-Bench (hard, all-complex sessions), lanes after the fix
+
+| Task | Setup | Pass | Cost |
+|---|---|---|---|
+| nlsolve (5 rounds) | Always Wonder | 5/5 | $3.51 |
+| nlsolve | Lanes, before fix | 2/5 | $3.39 |
+| nlsolve | Lanes, after fix | 5/5 | $2.64 |
+| repro-verify (7 rounds) | Always Wonder | 0/7 | $3.20 |
+| repro-verify | Lanes, before fix | 0/7 | $2.63 |
+| repro-verify | Lanes, after fix | 7/7 | $2.95 |
+
+Nearly every round routes to the complex lane, so these show the fix removed the regression on hard sessions; with one
+run each, cost and pass differences are mostly run-to-run variation. Summary: `evals/results/evocode-summary.txt`.
+
 ## Reproduce
 
 ```bash

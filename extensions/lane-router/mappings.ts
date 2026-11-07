@@ -4,6 +4,8 @@ import { type Lane, LANES } from "./constants.ts";
 export interface LaneTarget {
 	provider: string;
 	model: string;
+	/** Optional fixed thinking level for this lane (effort routing); otherwise the session's level is used. */
+	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 export interface MappingSet {
