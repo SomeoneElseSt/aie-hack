@@ -1,0 +1,273 @@
+<title>Lane Router Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column; two thread-by-turn grids (before / after) drawn as a ledger of what each model must read. */
+:root {
+	--bg: #f6f7f9;
+	--surface: #ffffff;
+	--fg: #1b2230;
+	--muted: #5d6779;
+	--rule: #dde2ea;
+	--one: #1f9d6b;      /* one-shot lane */
+	--mid: #c98a12;      /* straightforward lane */
+	--big: #6d4fd8;      /* complex lane */
+	--bad: #c2412d;
+	--good: #1f9d6b;
+	--cell-empty: #eef1f5;
+	--font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+	--font-body: "Source Sans 3", "Helvetica Neue", system-ui, sans-serif;
+	--font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #12151c; --surface: #1a1f29; --fg: #e7eaf0; --muted: #9aa3b5; --rule: #2a3140;
+		--one: #3cc28c; --mid: #e3a83a; --big: #9b83f5; --bad: #f0735e; --good: #3cc28c; --cell-empty: #222836;
+		color-scheme: dark;
+	}
+}
+:root[data-theme="dark"] {
+	--bg: #12151c; --surface: #1a1f29; --fg: #e7eaf0; --muted: #9aa3b5; --rule: #2a3140;
+	--one: #3cc28c; --mid: #e3a83a; --big: #9b83f5; --bad: #f0735e; --good: #3cc28c; --cell-empty: #222836;
+	color-scheme: dark;
+}
+body {
+	background: var(--bg); color: var(--fg); font: 17px/1.55 var(--font-body);
+	padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+	padding-block: 40px 64px;
+}
+main { max-width: 920px; margin: 0 auto; display: grid; gap: 44px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 44px); font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 24px; font-weight: 600; }
+p { margin: 0; max-width: 66ch; }
+.lede { color: var(--muted); font-size: 19px; margin-top: 10px; }
+section { display: grid; gap: 14px; }
+.eyebrow { font: 600 12px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+
+/* The core trade: two balanced ledgers */
+.trade { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: stretch; }
+.ledger { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; display: grid; gap: 10px; min-width: 0; }
+.ledger h3 { margin: 0; font: 600 15px/1.3 var(--font-body); }
+.ledger ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.arrow { align-self: center; font: 600 28px/1 var(--font-display); color: var(--muted); }
+.removed { color: var(--bad); }
+.added { color: var(--good); }
+
+/* Thread grids */
+.grid-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; }
+.threads { display: grid; grid-template-columns: 150px repeat(12, minmax(34px, 1fr)); gap: 5px; min-width: 620px; font-variant-numeric: tabular-nums; }
+.threads .head { font: 600 11px/1 var(--font-mono); color: var(--muted); text-align: center; padding-bottom: 4px; }
+.threads .label { font: 600 13px/1.2 var(--font-body); display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+.threads .label small { font: 400 11px/1.2 var(--font-mono); color: var(--muted); }
+.cell { height: 34px; border-radius: 5px; background: var(--cell-empty); }
+.cell.one { background: var(--one); }
+.cell.mid { background: var(--mid); }
+.cell.big { background: var(--big); }
+/* A turn copied into another lane's thread: read once, at that lane's input price */
+.cell.read-one, .cell.read-mid {
+	background: repeating-linear-gradient(135deg, var(--cell-empty) 0 5px, transparent 5px 10px), var(--c);
+	opacity: 0.55;
+}
+.cell.read-one { --c: var(--one); }
+.cell.read-mid { --c: var(--mid); }
+.cell.facts { background: repeating-linear-gradient(90deg, var(--big) 0 2px, transparent 2px 7px); opacity: 0.45; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 14px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend i { width: 18px; height: 14px; border-radius: 3px; display: inline-block; }
+
+.verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.stat { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; min-width: 0; }
+.stat b { font: 600 24px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 14px; }
+
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 15px; }
+th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font: 600 12px/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+tr.total td { font-weight: 600; border-bottom: none; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 6px 10px; }
+.note { font-size: 14px; color: var(--muted); }
+
+@media (max-width: 640px) {
+	.trade { grid-template-columns: 1fr; }
+	.arrow { transform: rotate(90deg); justify-self: center; }
+}
+</style>
+
+<main>
+	<header>
+		<p class="eyebrow">SubQ-routed lanes for Pi · Splitwise-lite demo, 12 turns</p>
+		<h1>Before and after: who reads what</h1>
+		<p class="lede">The router saves money on small turns by moving their work to cheaper models. The first design lost that saving on the big turns. The fix keeps the expensive model's thread whole, which brought the session from 35% more expensive to break-even at the same quality.</p>
+	</header>
+
+	<section>
+		<p class="eyebrow">The core trade, on one small turn ("ok, run the tests and commit")</p>
+		<div class="trade">
+			<div class="ledger">
+				<h3>Always the big model pays for</h3>
+				<ul>
+					<li class="removed">Writing the answer at <span class="mono">$20/M</span> output</li>
+					<li class="removed">Re-reading its whole long conversation on every request of the turn</li>
+				</ul>
+			</div>
+			<div class="arrow" aria-hidden="true">→</div>
+			<div class="ledger">
+				<h3>With lanes, instead</h3>
+				<ul>
+					<li class="added">A small model writes it at <span class="mono">$0.20–4.25/M</span></li>
+					<li class="added">over its own tiny thread</li>
+					<li>The big model later reads that turn's text once, as input at <span class="mono">$4/M</span></li>
+				</ul>
+			</div>
+		</div>
+		<p>Measured on the 7 small turns: <b>$0.247</b> with the big model, <b>$0.065</b> with lanes. About 74% less money, and 83% less on an average small turn.</p>
+	</section>
+
+	<section>
+		<h2>Before: every lane isolated</h2>
+		<p>Each lane saw only its own turns. The big model got terse scratchpad facts about the rest, so on each big turn it re-read files to get its bearings: twice the file reads and 2 to 5 times more tool output than the big model alone.</p>
+		<div class="grid-wrap" role="img" aria-label="Before: the complex lane's thread holds only turns 2, 3, 6, 8 and 11 plus scratchpad facts; other lanes hold only their own turns.">
+			<div class="threads" id="before"></div>
+		</div>
+	</section>
+
+	<section>
+		<h2>After: the big model keeps the whole conversation</h2>
+		<p>Cheap lanes stay small and isolated, which is where the savings come from. The complex lane's thread is the full conversation: small turns are appended to its end, so its cached beginning never changes and it never has to re-orient.</p>
+		<div class="grid-wrap" role="img" aria-label="After: the complex lane's thread holds all 12 turns; turns done by cheap lanes are appended and read once at input price.">
+			<div class="threads" id="after"></div>
+		</div>
+		<div class="legend">
+			<span><i style="background:var(--big)"></i>Complex lane does the work (Muse Wonder)</span>
+			<span><i style="background:var(--mid)"></i>Straightforward (Muse Spark)</span>
+			<span><i style="background:var(--one)"></i>One-shot (Spark Contributor)</span>
+			<span><i style="background:repeating-linear-gradient(135deg,var(--cell-empty) 0 5px,transparent 5px 10px),var(--mid);opacity:.55"></i>Turn copied in, read once at input price</span>
+			<span><i style="background:repeating-linear-gradient(90deg,var(--big) 0 2px,transparent 2px 7px);opacity:.45"></i>Only scratchpad facts</span>
+		</div>
+	</section>
+
+	<section>
+		<h2>Results: six runs, graded</h2>
+		<div class="verdict">
+			<div class="stat"><b>23 / 24</b><span>Rubric points for fixed lanes over two runs, against 24 / 24 for always-Wonder</span></div>
+			<div class="stat"><b>−65%</b><span>Cost of small turns with fixed lanes vs always-Wonder</span></div>
+			<div class="stat"><b>−1%</b><span>Session total vs always-Wonder: break-even, within run-to-run noise</span></div>
+			<div class="stat"><b>−29%</b><span>Session total vs naive switching, which loses the cache on every switch</span></div>
+		</div>
+		<p class="eyebrow">Averages</p>
+		<div class="table-wrap">
+			<table>
+				<thead><tr><th></th><th>Always Wonder</th><th>Lanes, after fix</th><th>Naive switching</th></tr></thead>
+				<tbody>
+					<tr><td>Rubric (out of 12)</td><td>12</td><td>11.5</td><td>12</td></tr>
+					<tr><td>Small turns (1, 4, 5, 7, 9, 10, 12)</td><td>$0.259</td><td>$0.092</td><td>$0.188</td></tr>
+					<tr><td>Big turns (2, 3, 6, 8, 11)</td><td>$1.037</td><td>$1.176</td><td>$1.604</td></tr>
+					<tr class="total"><td>Session total</td><td>$1.295</td><td>$1.282</td><td>$1.807</td></tr>
+					<tr><td>Wall-clock time</td><td>307s</td><td>340s</td><td>428s</td></tr>
+				</tbody>
+			</table>
+		</div>
+		<p class="eyebrow">Every run</p>
+		<div class="table-wrap">
+			<table>
+				<thead><tr><th>Run</th><th>Setup</th><th>Rubric</th><th>Small turns</th><th>Big turns</th><th>Total</th><th>Time</th></tr></thead>
+				<tbody>
+					<tr><td>wonder</td><td>Always Wonder</td><td>12/12</td><td>$0.246</td><td>$0.978</td><td>$1.224</td><td>334s</td></tr>
+					<tr><td>wonder2</td><td>Always Wonder</td><td>12/12</td><td>$0.271</td><td>$1.095</td><td>$1.366</td><td>279s</td></tr>
+					<tr><td>naive</td><td>Naive switching</td><td>12/12</td><td>$0.188</td><td>$1.604</td><td>$1.807</td><td>428s</td></tr>
+					<tr><td>lanes</td><td>Lanes, before fix</td><td>12/12</td><td>$0.065</td><td>$1.566</td><td>$1.647</td><td>495s</td></tr>
+					<tr><td>lanes2</td><td>Lanes, after fix</td><td>11/12</td><td>$0.072</td><td>$1.166</td><td>$1.253</td><td>335s</td></tr>
+					<tr><td>lanes3</td><td>Lanes, after fix</td><td>12/12</td><td>$0.111</td><td>$1.186</td><td>$1.310</td><td>344s</td></tr>
+				</tbody>
+			</table>
+		</div>
+		<p class="note">These are Meta runs. The one lost point: in lanes2 the cheap lane renamed <span class="mono">settle-up</span> to <span class="mono">settle</span> but kept the old name as an alias. Costs are provider-reported usage on Meta's API plus router overhead (SubQ and the scratchpad writer, about $0.015 per session). Small turns look slower mainly because the benchmark waits for the post-turn scratchpad update before each run exits; in interactive use it runs after the reply.</p>
+	</section>
+
+	<section>
+		<h2>Does it hold on Google? No.</h2>
+		<p>Same 12 turns with Gemini Flash-Lite, Flash and Pro. Quality was equal (11 / 12 for every setup, all missing the same answer), but lanes cost more. Gemini Flash is only about 25% cheaper than Pro and took 49 to 81 requests where Pro needed 30 for the whole session. The router pays off only when the cheap models are much cheaper and about as efficient.</p>
+		<div class="table-wrap">
+			<table>
+				<thead><tr><th>Session total vs always-biggest</th><th>Lanes</th><th>Naive switching</th></tr></thead>
+				<tbody>
+					<tr><td>Meta (Spark / Wonder)</td><td>−1%</td><td>+40%</td></tr>
+					<tr><td>Google (Flash / Pro)</td><td>+63%</td><td>+19%</td></tr>
+				</tbody>
+			</table>
+		</div>
+	</section>
+
+	<section>
+		<h2>Switching thinking effort instead of models</h2>
+		<p>One top model the whole session; SubQ picks low, medium or high thinking per turn. Changing the level partly breaks the cache, and it did not beat a single fixed level. Quality held everywhere.</p>
+		<div class="table-wrap">
+			<table>
+				<thead><tr><th>Thinking level</th><th>Meta rubric</th><th>Meta cost</th><th>Meta vs high</th><th>Google rubric</th><th>Google cost</th><th>Google vs high</th></tr></thead>
+				<tbody>
+					<tr><td>Medium, always</td><td>12/12</td><td>$1.295</td><td>+6%</td><td>11/12</td><td>$0.679</td><td>−19%</td></tr>
+					<tr><td>High, always</td><td>12/12</td><td>$1.225</td><td>—</td><td>12/12</td><td>$0.835</td><td>—</td></tr>
+					<tr><td>SubQ picks per turn</td><td>12/12</td><td>$1.388</td><td>+13%</td><td>11/12</td><td>$0.681</td><td>−18%</td></tr>
+				</tbody>
+			</table>
+		</div>
+		<div class="table-wrap">
+			<table>
+				<thead><tr><th>Cache hit</th><th>Right after a level change</th><th>No change</th></tr></thead>
+				<tbody>
+					<tr><td>Meta</td><td>92%</td><td>99%</td></tr>
+					<tr><td>Google</td><td>66%</td><td>87%</td></tr>
+				</tbody>
+			</table>
+		</div>
+	</section>
+
+	<section>
+		<h2>Hard sessions (EvoCode-Bench), lanes after the fix</h2>
+		<p>Two long, all-hard tasks from a public benchmark. Nearly every round goes to the complex lane, so this checks that the fix removed the regression rather than measuring savings. One run each.</p>
+		<div class="table-wrap">
+			<table>
+				<thead><tr><th>Task</th><th>Always Wonder</th><th>Lanes, before fix</th><th>Lanes, after fix</th></tr></thead>
+				<tbody>
+					<tr><td>nlsolve, 5 rounds</td><td>5/5 · $3.51</td><td>2/5 · $3.39</td><td>5/5 · $2.64</td></tr>
+					<tr><td>repro-verify, 7 rounds</td><td>0/7 · $3.20</td><td>0/7 · $2.63</td><td>7/7 · $2.95</td></tr>
+				</tbody>
+			</table>
+		</div>
+	</section>
+</main>
+
+<script>
+// Lane per turn as SubQ classified it in run 1.
+const LANES = ["one", "big", "big", "one", "mid", "big", "one", "big", "mid", "mid", "big", "mid"];
+const ROWS = [
+	{ lane: "big", name: "Complex", model: "muse-wonder" },
+	{ lane: "mid", name: "Straightforward", model: "muse-spark" },
+	{ lane: "one", name: "One-shot", model: "spark-contributor" },
+];
+
+function cellClass(rowLane, turnLane, design) {
+	if (turnLane === rowLane) return rowLane;
+	if (rowLane !== "big") return "";
+	return design === "after" ? `read-${turnLane}` : "facts";
+}
+
+function draw(id, design) {
+	const grid = document.getElementById(id);
+	const parts = ['<div class="head"></div>'];
+	LANES.forEach((_, i) => parts.push(`<div class="head">T${i + 1}</div>`));
+	for (const row of ROWS) {
+		parts.push(`<div class="label">${row.name}<small>${row.model}</small></div>`);
+		LANES.forEach((turnLane) => parts.push(`<div class="cell ${cellClass(row.lane, turnLane, design)}"></div>`));
+	}
+	grid.innerHTML = parts.join("");
+}
+
+draw("before", "before");
+draw("after", "after");
+</script>

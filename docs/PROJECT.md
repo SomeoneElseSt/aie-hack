@@ -74,7 +74,12 @@ Loop: user turn → SubQ classify → pick lane → lane executes (+ scratchpad 
 - [x] Model sets: `extensions/lane-router/mappings.json` (`meta`, `google`; each lane = provider + model, plus
   `direct` lane for compaction). Pick with `LANES_MAPPING=google ./run.sh ...` (default `meta`). Log records
   the set and target per turn. Google needs `GEMINI_API_KEY` in `.env`.
-- [ ] Benchmarking / cost comparison
+- [x] Benchmarking: see `evals/demo/RESULTS.md` (12-turn Splitwise-lite session, rubric + independent judge).
+  Meta: equal quality, small turns -65%, session break-even with always-Wonder after the complex-lane fix,
+  -29% vs naive switching. Google: lanes +63% (Flash barely cheaper, loops more). Thinking-effort routing does
+  not beat a fixed level (switching effort partly breaks the cache). Page: `docs/lane-architecture.html`.
+- [ ] Next (track "The System That Gets Better"): learn the user's repetitive turns from real sessions, train a
+  tiny local model for them (Tinker), and admit it to the lane roster only if it passes held-out evaluation.
 
 ## Key references
 
