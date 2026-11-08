@@ -1,0 +1,1 @@
+{"isConditionalPasskeysEnabled() is called without arguments, but the only overload defined in UsernamePasswordForm requires a UserModel parameter, causing compilation failure": 0.8647492527961731}

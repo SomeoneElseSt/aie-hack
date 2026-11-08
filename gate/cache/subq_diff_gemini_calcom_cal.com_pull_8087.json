@@ -1,0 +1,1 @@
+{"Using forEach with async callback doesn't wait for asynchronous operations to complete and can lead to race conditions and unhandled promise rejections": 0.932708203792572, "The getVideoAdapters function uses a for...of loop which processes credentials sequentially instead of concurrently with Promise.all and map": 0.7124074697494507}

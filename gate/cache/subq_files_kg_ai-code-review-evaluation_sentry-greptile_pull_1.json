@@ -1,0 +1,1 @@
+{"Calling math.floor on a datetime object will raise TypeError - the value needs to be converted to a numeric timestamp first": 0.9273233413696289, "value_from_cursor should convert the cursor value back to a datetime object for consistency with DateTimePaginator": 0.8182377815246582}

@@ -1,0 +1,1 @@
+{"Missing nil check on s.search in History() method causes nil pointer panic when search feature flag is disabled": 0.8674481511116028, "Missing nil check on s.search in Origin() method causes nil pointer panic when search feature flag is disabled": 0.8755886554718018}

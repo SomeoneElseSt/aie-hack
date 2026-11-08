@@ -1,0 +1,1 @@
+{"Case-sensitive backup code comparison rejects valid uppercase input - the indexOf comparison in both login (next-auth-options.ts:144) and disable (totp/disable.ts:61) endpoints doesn't apply toLowerCase() before comparing, so users entering uppercase hex backup codes (like A1B2C3D4E5) will get IncorrectBackupCode errors despite having valid codes": 0.8843674063682556}

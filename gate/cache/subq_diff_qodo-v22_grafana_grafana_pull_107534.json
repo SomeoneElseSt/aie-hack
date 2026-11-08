@@ -1,0 +1,1 @@
+{"runSplitQuery() calls datasource.applyTemplateVariables() up-front, but the executed request still goes through DataSourceWithBackend.query() which calls applyTemplateVariables() again on each target, causing duplicate ad-hoc label filters (e.g., repeated | key=... segments) and adding avoidable per-subrequest work": 0.8759387731552124}

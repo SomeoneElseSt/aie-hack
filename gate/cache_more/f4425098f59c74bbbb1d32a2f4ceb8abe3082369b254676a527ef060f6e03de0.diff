@@ -1,0 +1,851 @@
+diff --git a/docker-compose.yml b/docker-compose.yml
+index b7751d73..34c23840 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -44,6 +44,45 @@ services:
+           cpus: "0.5"
+           memory: 256M
+ 
++  copilot-review-mcp:
++    build:
++      context: ./services/copilot-review-mcp
++      dockerfile: Dockerfile
++    image: copilot-review-mcp:local
++    container_name: copilot-review-mcp
++    restart: unless-stopped
++
++    environment:
++      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
++      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
++      - BASE_URL=${BASE_URL:-http://localhost:8083}
++      - GITHUB_OAUTH_SCOPES=${GITHUB_OAUTH_SCOPES:-repo,user}
++      - MCP_PORT=${COPILOT_REVIEW_MCP_PORT:-8083}
++      - LOG_LEVEL=${LOG_LEVEL:-info}
++      - SESSION_TTL_MIN=${SESSION_TTL_MIN:-10}
++      - TOKEN_CACHE_TTL_MIN=${TOKEN_CACHE_TTL_MIN:-5}
++    ports:
++      - "127.0.0.1:${COPILOT_REVIEW_MCP_PORT:-8083}:${COPILOT_REVIEW_MCP_PORT:-8083}"
++
++    networks:
++      - mcp-network
++
++    # Note: distroless image has no shell/wget. Health is validated host-side.
++    healthcheck:
++      disable: true
++
++    logging:
++      driver: "json-file"
++      options:
++        max-size: "10m"
++        max-file: "3"
++
++    deploy:
++      resources:
++        limits:
++          cpus: "0.5"
++          memory: 256M
++
+ volumes:
+   github-mcp-cache:
+     driver: local
+diff --git a/services/copilot-review-mcp/Dockerfile b/services/copilot-review-mcp/Dockerfile
+new file mode 100644
+index 00000000..08caab4f
+--- /dev/null
++++ b/services/copilot-review-mcp/Dockerfile
+@@ -0,0 +1,16 @@
++# syntax=docker/dockerfile:1
++FROM golang:1.24-alpine AS builder
++WORKDIR /src
++COPY go.mod go.sum ./
++RUN go mod download
++COPY . .
++RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
++    -o /out/copilot-review-mcp ./cmd/server
++
++# distroless: no shell, no package manager
++FROM gcr.io/distroless/static-debian12:nonroot
++COPY --from=builder /out/copilot-review-mcp /copilot-review-mcp
++EXPOSE 8083
++# Trivy DS-0002: explicitly declare non-root user (distroless:nonroot UID=65532)
++USER nonroot:nonroot
++ENTRYPOINT ["/copilot-review-mcp"]
+diff --git a/services/copilot-review-mcp/cmd/server/main.go b/services/copilot-review-mcp/cmd/server/main.go
+new file mode 100644
+index 00000000..08e3afe7
+--- /dev/null
++++ b/services/copilot-review-mcp/cmd/server/main.go
+@@ -0,0 +1,133 @@
++package main
++
++import (
++	"fmt"
++	"log/slog"
++	"net/http"
++	"os"
++	"strconv"
++	"time"
++
++	"github.com/scottlz0310/copilot-review-mcp/internal/auth"
++	"github.com/scottlz0310/copilot-review-mcp/internal/middleware"
++)
++
++func main() {
++	cfg := loadConfig()
++
++	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
++		Level: parseLogLevel(cfg.logLevel),
++	})))
++
++	oauthHandler := auth.NewHandler(auth.Config{
++		GitHubClientID:     cfg.githubClientID,
++		GitHubClientSecret: cfg.githubClientSecret,
++		BaseURL:            cfg.baseURL,
++		Scopes:             cfg.oauthScopes,
++		SessionTTL:         time.Duration(cfg.sessionTTLMin) * time.Minute,
++		CacheTTL:           time.Duration(cfg.tokenCacheTTLMin) * time.Minute,
++	})
++
++	authMiddleware := middleware.Auth(oauthHandler)
++
++	mux := http.NewServeMux()
++
++	// OAuth façade endpoints (no auth required)
++	mux.HandleFunc("GET /.well-known/oauth-authorization-server", oauthHandler.Discovery)
++	mux.HandleFunc("GET /authorize", oauthHandler.Authorize)
++	mux.HandleFunc("GET /callback", oauthHandler.Callback)
++	mux.HandleFunc("POST /token", oauthHandler.Token)
++
++	// Health check (no auth required)
++	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
++		w.Header().Set("Content-Type", "application/json")
++		fmt.Fprintln(w, `{"status":"ok"}`)
++	})
++
++	// MCP endpoints (auth required) — placeholder until Tools 1-3 are implemented
++	mcpMux := http.NewServeMux()
++	mcpMux.HandleFunc("GET /mcp", func(w http.ResponseWriter, r *http.Request) {
++		w.Header().Set("Content-Type", "application/json")
++		fmt.Fprintln(w, `{"jsonrpc":"2.0","result":{"serverInfo":{"name":"copilot-review-mcp","version":"0.1.0"}}}`)
++	})
++	mux.Handle("/mcp", authMiddleware(mcpMux))
++	mux.Handle("/mcp/", authMiddleware(mcpMux))
++
++	addr := ":" + cfg.port
++	slog.Info("copilot-review-mcp starting", "addr", addr, "base_url", cfg.baseURL)
++	server := &http.Server{
++		Addr:              addr,
++		Handler:           mux,
++		ReadHeaderTimeout: 5 * time.Second,
++		ReadTimeout:       10 * time.Second,
++		WriteTimeout:      30 * time.Second,
++		IdleTimeout:       120 * time.Second,
++	}
++	if err := server.ListenAndServe(); err != nil {
++		slog.Error("server error", "err", err)
++		os.Exit(1)
++	}
++}
++
++type config struct {
++	githubClientID     string
++	githubClientSecret string
++	baseURL            string
++	oauthScopes        string
++	port               string
++	logLevel           string
++	sessionTTLMin      int
++	tokenCacheTTLMin   int
++}
++
++func loadConfig() config {
++	c := config{
++		githubClientID:     mustEnv("GITHUB_CLIENT_ID"),
++		githubClientSecret: mustEnv("GITHUB_CLIENT_SECRET"),
++		baseURL:            getEnv("BASE_URL", "http://localhost:8083"),
++		oauthScopes:        getEnv("GITHUB_OAUTH_SCOPES", "repo,user"),
++		port:               getEnv("MCP_PORT", "8083"),
++		logLevel:           getEnv("LOG_LEVEL", "info"),
++		sessionTTLMin:      getEnvInt("SESSION_TTL_MIN", 10),
++		tokenCacheTTLMin:   getEnvInt("TOKEN_CACHE_TTL_MIN", 5),
++	}
++	return c
++}
++
++func mustEnv(key string) string {
++	v := os.Getenv(key)
++	if v == "" {
++		slog.Error("required environment variable not set", "key", key)
++		os.Exit(1)
++	}
++	return v
++}
++
++func getEnv(key, fallback string) string {
++	if v := os.Getenv(key); v != "" {
++		return v
++	}
++	return fallback
++}
++
++func getEnvInt(key string, fallback int) int {
++	if v := os.Getenv(key); v != "" {
++		if n, err := strconv.Atoi(v); err == nil {
++			return n
++		}
++	}
++	return fallback
++}
++
++func parseLogLevel(level string) slog.Level {
++	switch level {
++	case "debug":
++		return slog.LevelDebug
++	case "warn":
++		return slog.LevelWarn
++	case "error":
++		return slog.LevelError
++	default:
++		return slog.LevelInfo
++	}
++}
+diff --git a/services/copilot-review-mcp/go.mod b/services/copilot-review-mcp/go.mod
+new file mode 100644
+index 00000000..8f826282
+--- /dev/null
++++ b/services/copilot-review-mcp/go.mod
+@@ -0,0 +1,3 @@
++module github.com/scottlz0310/copilot-review-mcp
++
++go 1.24
+diff --git a/services/copilot-review-mcp/go.sum b/services/copilot-review-mcp/go.sum
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/services/copilot-review-mcp/internal/auth/handler.go b/services/copilot-review-mcp/internal/auth/handler.go
+new file mode 100644
+index 00000000..9f5fb157
+--- /dev/null
++++ b/services/copilot-review-mcp/internal/auth/handler.go
+@@ -0,0 +1,323 @@
++package auth
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++	"net/url"
++	"strings"
++	"time"
++
++	"log/slog"
++)
++
++// githubClient is a shared HTTP client with timeouts to avoid hanging requests.
++var githubClient = &http.Client{Timeout: 15 * time.Second}
++
++// Config holds OAuth façade configuration.
++type Config struct {
++	GitHubClientID       string
++	GitHubClientSecret   string
++	BaseURL              string // e.g. http://localhost:8083
++	Scopes               string // e.g. "repo,user"
++	SessionTTL           time.Duration
++	CacheTTL             time.Duration
++	AllowedRedirectHosts []string // allowlist of permitted redirect_uri hostnames; defaults to ["localhost","127.0.0.1"]
++}
++
++// UpstreamError represents a failure contacting an upstream service (e.g. GitHub API
++// network error or 5xx response). The auth middleware uses this to return 503 instead of 401.
++type UpstreamError struct {
++	err error
++}
++
++func (e *UpstreamError) Error() string         { return e.err.Error() }
++func (e *UpstreamError) Unwrap() error         { return e.err }
++func (e *UpstreamError) IsUpstreamError() bool { return true }
++
++// Handler implements the OAuth façade endpoints.
++type Handler struct {
++	cfg   Config
++	store *Store
++}
++
++func NewHandler(cfg Config) *Handler {
++	// Normalize BaseURL: strip trailing slash to prevent double-slash in endpoint URLs.
++	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
++	if len(cfg.AllowedRedirectHosts) == 0 {
++		cfg.AllowedRedirectHosts = []string{"localhost", "127.0.0.1"}
++	}
++	return &Handler{
++		cfg:   cfg,
++		store: NewStore(cfg.SessionTTL, cfg.CacheTTL),
++	}
++}
++
++// Discovery returns RFC 8414 metadata.
++func (h *Handler) Discovery(w http.ResponseWriter, r *http.Request) {
++	doc := map[string]any{
++		"issuer":                           h.cfg.BaseURL,
++		"authorization_endpoint":           h.cfg.BaseURL + "/authorize",
++		"token_endpoint":                   h.cfg.BaseURL + "/token",
++		"response_types_supported":         []string{"code"},
++		"grant_types_supported":            []string{"authorization_code"},
++		"code_challenge_methods_supported": []string{"S256"},
++	}
++	w.Header().Set("Content-Type", "application/json")
++	_ = json.NewEncoder(w).Encode(doc)
++}
++
++// Authorize redirects the MCP client to GitHub OAuth.
++func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
++	q := r.URL.Query()
++	state := q.Get("state")
++	redirectURI := q.Get("redirect_uri")
++	codeChallenge := q.Get("code_challenge")
++	responseType := q.Get("response_type")
++	codeChallengeMethod := q.Get("code_challenge_method")
++
++	// Validate required OAuth 2.0 parameters.
++	if responseType != "code" {
++		oauthError(w, "unsupported_response_type", "response_type must be 'code'", http.StatusBadRequest)
++		return
++	}
++	if state == "" || redirectURI == "" {
++		oauthError(w, "invalid_request", "missing state or redirect_uri", http.StatusBadRequest)
++		return
++	}
++	// If code_challenge is provided, enforce S256 method.
++	if codeChallenge != "" && codeChallengeMethod != "S256" {
++		oauthError(w, "invalid_request", "code_challenge_method must be S256", http.StatusBadRequest)
++		return
++	}
++
++	// Validate redirect_uri: must be an absolute URL with http/https scheme,
++	// non-empty host, no fragment (RFC 6749 §3.1.2), and host in the allowlist.
++	parsedRedirect, err := url.Parse(redirectURI)
++	if err != nil ||
++		(parsedRedirect.Scheme != "http" && parsedRedirect.Scheme != "https") ||
++		parsedRedirect.Host == "" ||
++		parsedRedirect.Fragment != "" {
++		oauthError(w, "invalid_request", "invalid redirect_uri: must be absolute http/https URL without fragment", http.StatusBadRequest)
++		return
++	}
++	if !isAllowedRedirectHost(parsedRedirect.Hostname(), h.cfg.AllowedRedirectHosts) {
++		oauthError(w, "invalid_request", "redirect_uri host not permitted", http.StatusBadRequest)
++		return
++	}
++
++	h.store.SaveSession(state, redirectURI, codeChallenge)
++
++	ghURL, _ := url.Parse("https://github.com/login/oauth/authorize")
++	ghq := ghURL.Query()
++	ghq.Set("client_id", h.cfg.GitHubClientID)
++	ghq.Set("redirect_uri", h.cfg.BaseURL+"/callback")
++	ghq.Set("state", state)
++	ghq.Set("scope", h.cfg.Scopes)
++	ghURL.RawQuery = ghq.Encode()
++
++	http.Redirect(w, r, ghURL.String(), http.StatusFound)
++}
++
++// Callback receives GitHub's authorization code and exchanges it for an access token.
++func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
++	q := r.URL.Query()
++	code := q.Get("code")
++	state := q.Get("state")
++
++	if code == "" || state == "" {
++		http.Error(w, "missing code or state", http.StatusBadRequest)
++		return
++	}
++
++	// Verify state maps to a live session BEFORE calling GitHub to avoid unnecessary outbound calls.
++	if !h.store.HasSession(state) {
++		http.Error(w, "invalid state", http.StatusBadRequest)
++		return
++	}
++
++	accessToken, grantedScope, err := h.exchangeGitHubCode(r.Context(), code)
++	if err != nil {
++		slog.Error("GitHub token exchange failed", "err", err)
++		http.Error(w, "token exchange failed", http.StatusBadGateway)
++		return
++	}
++
++	internalCode, err := h.store.CompleteCallback(state, accessToken, grantedScope)
++	if err != nil {
++		slog.Error("session completion failed", "err", err)
++		http.Error(w, "invalid state", http.StatusBadRequest)
++		return
++	}
++
++	// Retrieve redirect_uri from session to redirect back to MCP client.
++	// We need to look it up before ExchangeCode consumes it.
++	// Re-read via a separate lookup (session still exists at this point).
++	sess := h.store.lookupByCode(internalCode)
++	if sess == nil {
++		http.Error(w, "session lost", http.StatusInternalServerError)
++		return
++	}
++
++	redirect, _ := url.Parse(sess.RedirectURI)
++	rq := redirect.Query()
++	rq.Set("code", internalCode)
++	rq.Set("state", state)
++	redirect.RawQuery = rq.Encode()
++
++	http.Redirect(w, r, redirect.String(), http.StatusFound)
++}
++
++// Token handles the authorization_code grant and returns the access token.
++// Note on client_id: this façade authenticates exclusively via GitHub OAuth App (single-client).
++// The client_id presented by MCP clients is the GitHub OAuth App Client ID, which is
++// validated by GitHub during the code-exchange step. No separate façade-level client
++// registry is needed for phase 1. Multi-client support can be added in a future iteration.
++func (h *Handler) Token(w http.ResponseWriter, r *http.Request) {
++	if err := r.ParseForm(); err != nil {
++		oauthError(w, "invalid_request", "malformed request body", http.StatusBadRequest)
++		return
++	}
++	grantType := r.FormValue("grant_type")
++	if grantType != "authorization_code" {
++		oauthError(w, "unsupported_grant_type", "only authorization_code is supported", http.StatusBadRequest)
++		return
++	}
++
++	code := r.FormValue("code")
++	redirectURI := r.FormValue("redirect_uri")
++	codeVerifier := r.FormValue("code_verifier")
++
++	token, grantedScope, err := h.store.ExchangeCode(code, redirectURI, codeVerifier)
++	if err != nil {
++		slog.Warn("token exchange rejected", "err", err)
++		oauthError(w, "invalid_grant", err.Error(), http.StatusBadRequest)
++		return
++	}
++
++	tokenResp := map[string]any{
++		"access_token": token,
++		"token_type":   "Bearer",
++	}
++	// RFC 6749 §5.1: include the scope actually granted by GitHub rather than the requested scope.
++	if grantedScope != "" {
++		tokenResp["scope"] = grantedScope
++	}
++	w.Header().Set("Content-Type", "application/json")
++	// RFC 6749 §5.1: token responses MUST NOT be cached.
++	w.Header().Set("Cache-Control", "no-store")
++	w.Header().Set("Pragma", "no-cache")
++	_ = json.NewEncoder(w).Encode(tokenResp)
++}
++
++// ValidateToken checks the bearer token against GitHub API (with cache).
++func (h *Handler) ValidateToken(ctx context.Context, token string) (string, error) {
++	if login, ok := h.store.LookupToken(token); ok {
++		return login, nil
++	}
++
++	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)
++	req.Header.Set("Authorization", "Bearer "+token)
++	req.Header.Set("Accept", "application/vnd.github+json")
++
++	resp, err := githubClient.Do(req)
++	if err != nil {
++		return "", &UpstreamError{err: fmt.Errorf("GitHub API unreachable: %w", err)}
++	}
++	defer resp.Body.Close()
++
++	if resp.StatusCode != http.StatusOK {
++		if resp.StatusCode >= 500 {
++			return "", &UpstreamError{err: fmt.Errorf("GitHub API returned %d", resp.StatusCode)}
++		}
++		return "", fmt.Errorf("invalid token: GitHub returned %d", resp.StatusCode)
++	}
++
++	body, err := io.ReadAll(resp.Body)
++	if err != nil {
++		return "", &UpstreamError{err: fmt.Errorf("reading GitHub user response: %w", err)}
++	}
++	var user struct {
++		Login string `json:"login"`
++	}
++	if err := json.Unmarshal(body, &user); err != nil || user.Login == "" {
++		return "", fmt.Errorf("unexpected GitHub user response")
++	}
++
++	h.store.CacheToken(token, user.Login)
++	return user.Login, nil
++}
++
++// exchangeGitHubCode exchanges GitHub's authorization code for an access token and scope.
++func (h *Handler) exchangeGitHubCode(ctx context.Context, code string) (string, string, error) {
++	form := url.Values{
++		"client_id":     {h.cfg.GitHubClientID},
++		"client_secret": {h.cfg.GitHubClientSecret},
++		"code":          {code},
++		"redirect_uri":  {h.cfg.BaseURL + "/callback"},
++	}
++
++	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
++		"https://github.com/login/oauth/access_token",
++		strings.NewReader(form.Encode()))
++	req.Header.Set("Accept", "application/json")
++	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
++
++	resp, err := githubClient.Do(req)
++	if err != nil {
++		return "", "", err
++	}
++	defer resp.Body.Close()
++
++	if resp.StatusCode != http.StatusOK {
++		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
++		return "", "", fmt.Errorf("GitHub OAuth returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
++	}
++
++	var result struct {
++		AccessToken string `json:"access_token"`
++		Scope       string `json:"scope"`
++		Error       string `json:"error"`
++	}
++	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
++		return "", "", fmt.Errorf("decoding GitHub OAuth response: %w", err)
++	}
++	if result.Error != "" {
++		return "", "", fmt.Errorf("GitHub OAuth error: %s", result.Error)
++	}
++	if result.AccessToken == "" {
++		return "", "", fmt.Errorf("empty access_token from GitHub")
++	}
++	return result.AccessToken, result.Scope, nil
++}
++
++// lookupByCode is a helper for Callback to read redirect_uri without consuming the code.
++func (s *Store) lookupByCode(code string) *Session {
++	s.mu.RLock()
++	defer s.mu.RUnlock()
++	return s.codes[code]
++}
++
++// isAllowedRedirectHost returns true when hostname is in the configured allowlist.
++func isAllowedRedirectHost(hostname string, allowed []string) bool {
++	for _, h := range allowed {
++		if h == hostname {
++			return true
++		}
++	}
++	return false
++}
++
++// oauthError writes an RFC 6749-compliant JSON error response.
++func oauthError(w http.ResponseWriter, code, description string, status int) {
++	w.Header().Set("Content-Type", "application/json")
++	w.Header().Set("Cache-Control", "no-store")
++	w.Header().Set("Pragma", "no-cache")
++	w.WriteHeader(status)
++	_ = json.NewEncoder(w).Encode(map[string]string{
++		"error":             code,
++		"error_description": description,
++	})
++}
+diff --git a/services/copilot-review-mcp/internal/auth/session.go b/services/copilot-review-mcp/internal/auth/session.go
+new file mode 100644
+index 00000000..7fa32e3e
+--- /dev/null
++++ b/services/copilot-review-mcp/internal/auth/session.go
+@@ -0,0 +1,206 @@
++package auth
++
++import (
++	"crypto/rand"
++	"crypto/sha256"
++	"encoding/base64"
++	"fmt"
++	"sync"
++	"time"
++)
++
++// Session holds OAuth flow state between /authorize and /token.
++type Session struct {
++	State         string
++	RedirectURI   string
++	CodeChallenge string
++	InternalCode  string // base64url-encoded 32-byte random string, issued at /callback
++	AccessToken   string // GitHub access_token stored at /callback
++	Scope         string // OAuth scope actually granted by GitHub
++	ExpiresAt     time.Time
++}
++
++// TokenCache caches validated GitHub tokens to reduce API calls.
++type TokenCache struct {
++	mu      sync.RWMutex
++	entries map[string]tokenEntry
++}
++
++type tokenEntry struct {
++	login     string
++	expiresAt time.Time
++}
++
++type Store struct {
++	mu       sync.RWMutex
++	sessions map[string]*Session // keyed by state
++	codes    map[string]*Session // keyed by internal code
++	ttl      time.Duration
++
++	cache    *TokenCache
++	cacheTTL time.Duration
++}
++
++func NewStore(sessionTTL, cacheTTL time.Duration) *Store {
++	s := &Store{
++		sessions: make(map[string]*Session),
++		codes:    make(map[string]*Session),
++		ttl:      sessionTTL,
++		cache:    &TokenCache{entries: make(map[string]tokenEntry)},
++		cacheTTL: cacheTTL,
++	}
++	go s.janitor()
++	return s
++}
++
++// SaveSession stores a new OAuth session keyed by state.
++func (s *Store) SaveSession(state, redirectURI, codeChallenge string) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	s.sessions[state] = &Session{
++		State:         state,
++		RedirectURI:   redirectURI,
++		CodeChallenge: codeChallenge,
++		ExpiresAt:     time.Now().Add(s.ttl),
++	}
++}
++
++// HasSession returns true if state maps to a live (non-expired) session.
++func (s *Store) HasSession(state string) bool {
++	s.mu.RLock()
++	defer s.mu.RUnlock()
++	sess, ok := s.sessions[state]
++	return ok && !time.Now().After(sess.ExpiresAt)
++}
++
++// CompleteCallback attaches an internal code + access token to the session.
++func (s *Store) CompleteCallback(state, accessToken, scope string) (string, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++
++	sess, ok := s.sessions[state]
++	if !ok || time.Now().After(sess.ExpiresAt) {
++		delete(s.sessions, state)
++		return "", fmt.Errorf("session not found or expired for state %q", state)
++	}
++
++	code, err := generateCode()
++	if err != nil {
++		return "", err
++	}
++	sess.InternalCode = code
++	sess.AccessToken = accessToken
++	sess.Scope = scope
++	s.codes[code] = sess
++	return code, nil
++}
++
++// ExchangeCode validates PKCE and returns the access token and granted scope for the given code.
++func (s *Store) ExchangeCode(code, redirectURI, codeVerifier string) (string, string, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++
++	sess, ok := s.codes[code]
++	if !ok || time.Now().After(sess.ExpiresAt) {
++		delete(s.codes, code)
++		return "", "", fmt.Errorf("code not found or expired")
++	}
++	if sess.RedirectURI != redirectURI {
++		return "", "", fmt.Errorf("redirect_uri mismatch")
++	}
++	if sess.CodeChallenge != "" {
++		if err := verifyPKCE(codeVerifier, sess.CodeChallenge); err != nil {
++			return "", "", err
++		}
++	}
++
++	token := sess.AccessToken
++	scope := sess.Scope
++	// one-time use
++	delete(s.codes, code)
++	delete(s.sessions, sess.State)
++	return token, scope, nil
++}
++
++// CacheToken stores a validated login for a token.
++func (s *Store) CacheToken(token, login string) {
++	s.cache.mu.Lock()
++	defer s.cache.mu.Unlock()
++	s.cache.entries[token] = tokenEntry{login: login, expiresAt: time.Now().Add(s.cacheTTL)}
++}
++
++// LookupToken returns (login, true) if token is cached and not expired.
++func (s *Store) LookupToken(token string) (string, bool) {
++	s.cache.mu.RLock()
++	defer s.cache.mu.RUnlock()
++	e, ok := s.cache.entries[token]
++	if !ok || time.Now().After(e.expiresAt) {
++		return "", false
++	}
++	return e.login, true
++}
++
++func (s *Store) janitor() {
++	ticker := time.NewTicker(time.Minute)
++	for range ticker.C {
++		now := time.Now()
++		s.mu.Lock()
++		for k, v := range s.sessions {
++			if now.After(v.ExpiresAt) {
++				delete(s.sessions, k)
++			}
++		}
++		for k, v := range s.codes {
++			if now.After(v.ExpiresAt) {
++				delete(s.codes, k)
++			}
++		}
++		s.mu.Unlock()
++
++		s.cache.mu.Lock()
++		for k, v := range s.cache.entries {
++			if now.After(v.expiresAt) {
++				delete(s.cache.entries, k)
++			}
++		}
++		s.cache.mu.Unlock()
++	}
++}
++
++func generateCode() (string, error) {
++	b := make([]byte, 32)
++	if _, err := rand.Read(b); err != nil {
++		return "", fmt.Errorf("generating code: %w", err)
++	}
++	return base64.RawURLEncoding.EncodeToString(b), nil
++}
++
++// isValidPKCEVerifier checks RFC 7636 requirements: 43-128 chars, unreserved charset only.
++func isValidPKCEVerifier(verifier string) bool {
++	if len(verifier) < 43 || len(verifier) > 128 {
++		return false
++	}
++	for i := 0; i < len(verifier); i++ {
++		c := verifier[i]
++		if (c >= 'A' && c <= 'Z') ||
++			(c >= 'a' && c <= 'z') ||
++			(c >= '0' && c <= '9') ||
++			c == '-' || c == '.' || c == '_' || c == '~' {
++			continue
++		}
++		return false
++	}
++	return true
++}
++
++func verifyPKCE(verifier, challenge string) error {
++	if !isValidPKCEVerifier(verifier) {
++		return fmt.Errorf("invalid_grant")
++	}
++	h := sha256.Sum256([]byte(verifier))
++	got := base64.RawURLEncoding.EncodeToString(h[:])
++	if got != challenge {
++		return fmt.Errorf("PKCE verification failed")
++	}
++	return nil
++}
+diff --git a/services/copilot-review-mcp/internal/middleware/auth.go b/services/copilot-review-mcp/internal/middleware/auth.go
+new file mode 100644
+index 00000000..fb5dd3b3
+--- /dev/null
++++ b/services/copilot-review-mcp/internal/middleware/auth.go
+@@ -0,0 +1,81 @@
++package middleware
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"net/http"
++	"strings"
++
++	"log/slog"
++)
++
++type contextKey string
++
++const ContextKeyLogin contextKey = "github_login"
++const ContextKeyToken contextKey = "github_token"
++
++// TokenValidator is implemented by auth.Handler.
++type TokenValidator interface {
++	ValidateToken(ctx context.Context, token string) (string, error)
++}
++
++// upstreamErrorer is satisfied by errors that represent upstream service failures
++// (network errors, GitHub 5xx), allowing the middleware to return 503 instead of 401.
++type upstreamErrorer interface {
++	IsUpstreamError() bool
++}
++
++// Auth returns a middleware that validates Bearer tokens via the GitHub API.
++func Auth(v TokenValidator) func(http.Handler) http.Handler {
++	return func(next http.Handler) http.Handler {
++		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++			token := extractBearer(r)
++			if token == "" {
++				writeUnauthorized(w, "missing_token")
++				return
++			}
++
++			login, err := v.ValidateToken(r.Context(), token)
++			if err != nil {
++				var ue upstreamErrorer
++				if errors.As(err, &ue) {
++					slog.Error("upstream error during auth", "err", err, "path", r.URL.Path)
++					w.Header().Set("Content-Type", "application/json")
++					w.WriteHeader(http.StatusServiceUnavailable)
++					_ = json.NewEncoder(w).Encode(map[string]string{"error": "upstream_error"})
++					return
++				}
++				slog.Warn("auth failed", "err", err, "path", r.URL.Path)
++				writeUnauthorized(w, "invalid_token")
++				return
++			}
++
++			ctx := context.WithValue(r.Context(), ContextKeyLogin, login)
++			ctx = context.WithValue(ctx, ContextKeyToken, token)
++			next.ServeHTTP(w, r.WithContext(ctx))
++		})
++	}
++}
++
++func writeUnauthorized(w http.ResponseWriter, errCode string) {
++	w.Header().Set("Content-Type", "application/json")
++	w.Header().Set("WWW-Authenticate", `Bearer realm="copilot-review-mcp"`)
++	w.WriteHeader(http.StatusUnauthorized)
++	_ = json.NewEncoder(w).Encode(map[string]string{"error": errCode})
++}
++
++func extractBearer(r *http.Request) string {
++	h := r.Header.Get("Authorization")
++	fields := strings.Fields(h)
++	if len(fields) == 2 && strings.EqualFold(fields[0], "bearer") {
++		return fields[1]
++	}
++	return ""
++}
++
++// TokenFromContext retrieves the GitHub token injected by Auth middleware.
++func TokenFromContext(ctx context.Context) string {
++	v, _ := ctx.Value(ContextKeyToken).(string)
++	return v
++}

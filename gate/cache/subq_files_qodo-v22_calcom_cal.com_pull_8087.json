@@ -1,0 +1,1 @@
+{"In handleCancelBooking's recurring-event branch, deletions run in an async forEach and push into apiDeletes after awaiting deleteEvent, but the handler later awaits Promise.all on apiDeletes which may still be empty/incomplete at that time. This can finish cancellation while external deletions are still running or have failed silently.": 0.9153894782066345}

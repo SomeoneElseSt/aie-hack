@@ -1,0 +1,1 @@
+{"The config copy with human-readable schedule_type substituted on line 162 is never used in the returned dict - monitor_environment.monitor.config returns the original unmodified config instead, making the schedule_type transformation have no effect": 0.547275960445404}

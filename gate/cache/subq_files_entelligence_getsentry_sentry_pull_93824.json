@@ -1,0 +1,1 @@
+{"Breaking out of the loop when the deadline is exceeded means any remaining processes are never terminated, leaving orphaned workers alive after join(). The early break should be removed and replaced with a timed_out flag that skips waiting but still reaches the terminate call for each process.": 0.9682605862617493}

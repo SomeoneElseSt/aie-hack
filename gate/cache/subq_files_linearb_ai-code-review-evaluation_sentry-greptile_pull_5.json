@@ -1,0 +1,1 @@
+{"Dictionary values() order doesn't guarantee alignment with the original error_ids order - get_multi returns a dictionary and events.values() may not maintain the same order as the input error_ids array, causing error IDs to be paired with incorrect event data in the ErrorEvent objects": 0.8284717798233032}

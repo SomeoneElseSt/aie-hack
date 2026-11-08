@@ -1,0 +1,1 @@
+{"The default value `queued: datetime = timezone.now()` is evaluated at class definition time, so all `AssignmentSource` instances share the same timestamp from when the module was first imported rather than getting a fresh timestamp per instance. Use `field(default_factory=timezone.now)` instead.": 0.933144211769104}

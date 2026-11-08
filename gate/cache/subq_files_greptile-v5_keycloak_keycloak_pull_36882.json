@@ -1,0 +1,1 @@
+{"Changing recreate-required from exit code 4 to 3 while reusing 4 for feature-disabled can break automation that already handles 4 as the recreate signal, causing callers to receive an unrecognized code for an incompatible update and choose the wrong upgrade path": 0.7033959031105042}

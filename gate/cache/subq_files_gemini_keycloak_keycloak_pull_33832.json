@@ -1,0 +1,1 @@
+{"Two lines create new ASN1Encoder instances, write to them, and immediately discard them - they have no effect on the final result and are redundant, should be removed": 0.6702810525894165, "Logging implementation for ignored crypto providers produces a log message with a trailing comma and space, should use stream and Collectors.joining for cleaner output": 0.18428950011730194}

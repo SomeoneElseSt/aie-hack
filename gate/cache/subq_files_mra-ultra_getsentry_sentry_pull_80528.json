@@ -1,0 +1,1 @@
+{"Sensitive monitor config exposed in incident event payload - get_monitor_environment_context returns monitor.config which gets embedded in event_data contexts and produced to Kafka, potentially leaking secrets/tokens to downstream systems or logs": 0.047437120229005814}

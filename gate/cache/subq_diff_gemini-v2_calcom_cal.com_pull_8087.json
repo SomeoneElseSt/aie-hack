@@ -1,0 +1,1 @@
+{"Using `forEach` with an `async` callback is problematic because `forEach` does not wait for the promises to resolve, resulting in floating promises and potential race conditions where the function might return before the deletions are completed. Use `Promise.all` with `map` to ensure all deletions are awaited.": 0.960838794708252}

@@ -1,0 +1,1 @@
+{"MetricAlertDetectorHandler is registered as MetricAlertFire.detector_handler but subclasses StatefulDetectorHandler without implementing its abstract methods (counter_names, get_dedupe_value, get_group_key_values, build_occurrence_and_event_data), making it uninstantiable and causing TypeError when any Detector has type=\"metric_alert_fire\"": 0.9577705264091492}

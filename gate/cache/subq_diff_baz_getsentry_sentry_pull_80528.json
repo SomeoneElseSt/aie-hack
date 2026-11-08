@@ -1,0 +1,1 @@
+{"The function copies config and rewrites schedule_type, but returns monitor_environment.monitor.config instead of the mutated copy, so the formatted schedule type is never used in the returned context": 0.834793210029602}

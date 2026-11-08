@@ -1,0 +1,60 @@
+diff --git a/src/API/Dockerfile b/src/API/Dockerfile
+index 0f67815..64c05f2 100644
+--- a/src/API/Dockerfile
++++ b/src/API/Dockerfile
+@@ -28,8 +28,9 @@ FROM base AS final
+ WORKDIR /app
+ 
+ # Install gosu for privilege de-escalation in the entrypoint
++# and iputils-ping for ICMP ping support in DeviceMonitoringService
+ RUN apt-get update \
+-    && apt-get install -y --no-install-recommends gosu \
++    && apt-get install -y --no-install-recommends gosu iputils-ping \
+     && rm -rf /var/lib/apt/lists/*
+ 
+ # Create system user/group
+diff --git a/src/API/Services/DeviceMonitoringService.cs b/src/API/Services/DeviceMonitoringService.cs
+index 7ca3296..221fd3c 100644
+--- a/src/API/Services/DeviceMonitoringService.cs
++++ b/src/API/Services/DeviceMonitoringService.cs
+@@ -1,6 +1,4 @@
+-using Microsoft.Extensions.Hosting;
+-using Microsoft.Extensions.Logging;
+-using Microsoft.Extensions.Options;
++﻿using Microsoft.Extensions.Options;
+ using System.Net.NetworkInformation;
+ using Microsoft.AspNetCore.SignalR;
+ using API.Hubs;
+@@ -13,6 +11,8 @@ public class DeviceMonitoringService : BackgroundService, IDeviceMonitoringServi
+         private readonly DeviceMonitoringOptions _options;
+         private readonly IHubContext<DeviceStatusHub> _hubContext;
+ 
++        private int _platformNotSupportedLogged = 0;
++
+         public bool IsEnabled => _options.Enabled;
+         public int IntervalSeconds => _options.IntervalSeconds;
+         public int TimeoutMilliseconds => _options.TimeoutMilliseconds;
+@@ -165,10 +165,21 @@ private async Task CheckDeviceAsync(
+         private async Task<bool> PingDeviceAsync(System.Net.IPAddress ipAddress, CancellationToken cancellationToken) {
+             try {
+                 using var ping = new Ping();
+-                var reply = await ping.SendPingAsync(ipAddress, _options.TimeoutMilliseconds);
++                var reply = await ping.SendPingAsync(
++                    address: ipAddress,
++                    timeout: TimeSpan.FromMilliseconds(_options.TimeoutMilliseconds),
++                    buffer: null,
++                    options: null,
++                    cancellationToken: cancellationToken
++                );
+                 return reply.Status == IPStatus.Success;
++            } catch (PlatformNotSupportedException ex) {
++                if (Interlocked.CompareExchange(ref _platformNotSupportedLogged, 1, 0) == 0) {
++                    _logger.LogWarning(ex, "Ping is not supported on this platform or runtime.");
++                }
++                return false;
+             } catch (PingException ex) {
+-                _logger.LogDebug(ex, "Ping failed for {IpAddress}", ipAddress);
++                _logger.LogDebug(ex, "Ping failed for {IpAddress}. If running on Linux, ensure 'iputils-ping' is installed and the process has CAP_NET_RAW capability if required.", ipAddress);
+                 return false;
+             } catch (Exception ex) {
+                 _logger.LogWarning(ex, "Unexpected error pinging {IpAddress}", ipAddress);

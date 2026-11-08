@@ -1,0 +1,1 @@
+{"AssignmentSource.queued uses timezone.now() as a dataclass default value, which is evaluated once at import time and reused for all instances created without an explicit queued parameter, causing AssignmentSource.from_integration(...) to produce sources with incorrect/stale queued timestamps": 0.9196845293045044}

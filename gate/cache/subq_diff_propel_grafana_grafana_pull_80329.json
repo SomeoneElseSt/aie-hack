@@ -1,0 +1,1 @@
+{"t.Cleanup is registered after createTestAnnotations/assert* functions which use require internally, so any failure before the cleanup handler is added will abort the subtest and leave rows in annotation/annotation_tag tables, causing subsequent subtests to inherit a dirty database and potentially fail for unrelated reasons": 0.8598343729972839}

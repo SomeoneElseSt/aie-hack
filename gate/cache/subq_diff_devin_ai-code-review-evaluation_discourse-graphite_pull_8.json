@@ -1,0 +1,1 @@
+{"totalPages calculation is off-by-one when user_count is evenly divisible by limit - using Math.floor(user_count / limit) + 1 instead of Math.ceil(user_count / limit) causes an extra phantom page to be calculated, keeping the 'next' button enabled on the real last page and allowing navigation to an empty final page": 0.894037663936615}

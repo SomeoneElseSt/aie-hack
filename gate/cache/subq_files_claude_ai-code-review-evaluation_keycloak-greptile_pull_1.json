@@ -1,0 +1,1 @@
+{"Compilation error - missing required parameter in method call: isConditionalPasskeysEnabled() is called without arguments in UsernameForm.java line 47, but the method signature requires a UserModel user parameter. Should be changed to isConditionalPasskeysEnabled(context.getUser())": 0.9299942851066589}

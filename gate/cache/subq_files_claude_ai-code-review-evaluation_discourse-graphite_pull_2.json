@@ -1,0 +1,1 @@
+{"List-Unsubscribe header not updated to use per-topic unsubscribe URL - the PR adds per-topic unsubscribe functionality and passes unsubscribe_url in email template arguments, but the List-Unsubscribe header still points to the global user preferences URL instead of the new per-topic unsubscribe URL": 0.8076171875}

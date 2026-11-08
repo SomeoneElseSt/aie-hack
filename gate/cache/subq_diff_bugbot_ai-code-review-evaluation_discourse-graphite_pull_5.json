@@ -1,0 +1,1 @@
+{"The button element inside .small-action has float: right which is ignored after the parent becomes a flex container via @include flexbox(), causing the button to lose its right alignment. Should use margin-left: auto instead of float: right for proper flexbox alignment.": 0.6289492845535278}

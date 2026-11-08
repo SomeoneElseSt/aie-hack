@@ -1,0 +1,1 @@
+{"Both UpdateCompatibilityCheck.run() and UpdateCompatibilityMetadata.run() repeat the Profile.Feature.ROLLING_UPDATES guard that calls printFeatureDisabled() and returns CompatibilityResult.FEATURE_DISABLED - should extract it into AbstractUpdatesCommand.ensureRollingUpdatesEnabled() and call that from each run()": 0.0424162857234478}

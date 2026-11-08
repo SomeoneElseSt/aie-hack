@@ -1,0 +1,1 @@
+{"request.filters is passed to applyTemplateVariables but the test helper createRequest never sets up filters on the request, meaning ad-hoc filter application is untested in the query-splitting path": 0.2558649778366089, "Stores interpolated targets that runQuery() interpolates again, so split queries can get ad hoc filters appended twice": 0.6644510626792908}

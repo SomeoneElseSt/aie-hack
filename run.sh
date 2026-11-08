@@ -6,4 +6,4 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -a
 source "$ROOT/.env"
 set +a
-exec "$ROOT/vendors/pi/pi-test.sh" -e "$ROOT/extensions/lane-router/index.ts" "$@"
+exec "$ROOT/vendors/pi/pi-test.sh" --no-extensions -e "$ROOT/extensions/lane-router/index.ts" "$@"

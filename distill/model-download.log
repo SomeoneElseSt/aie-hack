@@ -1,0 +1,11 @@
+Fetching 9 files:   0%|          | 0/9 [00:00<?, ?it/s]Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 9 files:  11%|█         | 1/9 [00:00<00:06,  1.32it/s]Fetching 9 files:  67%|██████▋   | 6/9 [00:01<00:00,  4.82it/s]Fetching 9 files:  78%|███████▊  | 7/9 [00:01<00:00,  3.55it/s]Fetching 9 files: 100%|██████████| 9/9 [02:10<00:00, 23.62s/it]Fetching 9 files: 100%|██████████| 9/9 [02:10<00:00, 14.53s/it]
+==========
+To show the status of your Git repository, you can use the following command:
+
+```sh
+git
+==========
+Prompt: 24 tokens, 15.414 tokens-per-sec
+Generation: 20 tokens, 85.175 tokens-per-sec
+Peak memory: 0.984 GB

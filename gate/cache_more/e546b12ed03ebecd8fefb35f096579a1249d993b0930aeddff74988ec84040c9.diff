@@ -1,0 +1,469 @@
+diff --git a/internal/admin/api.go b/internal/admin/api.go
+index 0c857bc..8be3eee 100644
+--- a/internal/admin/api.go
++++ b/internal/admin/api.go
+@@ -14,11 +14,11 @@ import (
+ 	"time"
+ 
+ 	"github.com/brexhq/CrabTrap/internal/approval"
++	"github.com/brexhq/CrabTrap/internal/builder"
+ 	"github.com/brexhq/CrabTrap/internal/eval"
+ 	"github.com/brexhq/CrabTrap/internal/judge"
+ 	"github.com/brexhq/CrabTrap/internal/llmpolicy"
+ 	"github.com/brexhq/CrabTrap/internal/notifications"
+-	"github.com/brexhq/CrabTrap/internal/builder"
+ 	"github.com/brexhq/CrabTrap/pkg/types"
+ )
+ 
+@@ -46,7 +46,7 @@ type API struct {
+ 	policyStore    llmpolicy.Store      // may be nil
+ 	evalStore      eval.Store           // may be nil
+ 	evalJudge      *judge.LLMJudge      // may be nil — used only for eval background runs
+-	agent          *builder.PolicyAgent  // may be nil — used by agent endpoint
++	agent          *builder.PolicyAgent // may be nil — used by agent endpoint
+ 	serverCtx      context.Context      // cancelled on server shutdown; used for background work
+ 	secureCookie   bool                 // when true, auth cookies are set with the Secure flag
+ 
+@@ -306,12 +306,14 @@ func (a *API) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 
+ 	// Parse pagination
++	filter.Limit = defaultAuditLogLimit
+ 	if limitStr := query.Get("limit"); limitStr != "" {
+-		if limit, err := strconv.Atoi(limitStr); err == nil {
++		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
++			if limit > maxAuditLogLimit {
++				limit = maxAuditLogLimit
++			}
+ 			filter.Limit = limit
+ 		}
+-	} else {
+-		filter.Limit = 100 // Default limit
+ 	}
+ 
+ 	if offsetStr := query.Get("offset"); offsetStr != "" {
+@@ -320,11 +322,22 @@ func (a *API) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+ 		}
+ 	}
+ 
+-	entries := a.reader.Query(filter)
++	total, err := a.reader.Count(r.Context(), filter)
++	if err != nil {
++		respondError(w, http.StatusInternalServerError, "failed to count audit entries", err)
++		return
++	}
++
++	entries := a.reader.QuerySummaries(filter)
++	if entries == nil {
++		entries = []types.AuditEntry{}
++	}
+ 	respondJSON(w, http.StatusOK, map[string]interface{}{
+-		"entries": entries,
+-		"offset":  filter.Offset,
+-		"limit":   filter.Limit,
++		"entries":  entries,
++		"total":    total,
++		"offset":   filter.Offset,
++		"limit":    filter.Limit,
++		"has_more": filter.Offset+len(entries) < total,
+ 	})
+ }
+ 
+@@ -854,7 +867,7 @@ func (a *API) handleEvals(w http.ResponseWriter, r *http.Request) {
+ 			Decision:        body.Filter.Decision,
+ 			UserID:          body.Filter.UserID,
+ 			Limit:           body.Filter.Limit,
+-			ExcludeChannels:    []string{"auto"},
++			ExcludeChannels: []string{"auto"},
+ 		}
+ 		if body.Filter.StartTime != "" {
+ 			if t, err := time.Parse(time.RFC3339Nano, body.Filter.StartTime); err == nil {
+@@ -1142,7 +1155,6 @@ func (a *API) handleLLMResponse(w http.ResponseWriter, r *http.Request) {
+ 	respondJSON(w, http.StatusOK, resp)
+ }
+ 
+-
+ // respondError writes a generic publicMsg to the client and logs the detailed
+ // error server-side. This prevents raw database error strings (table names,
+ // constraints, SQL fragments) from leaking to callers.
+@@ -1164,6 +1176,11 @@ func limitBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
+ // maxBodySize is the default request body size limit (1 MB).
+ const maxBodySize = 1 << 20
+ 
++const (
++	defaultAuditLogLimit = 100
++	maxAuditLogLimit     = 500
++)
++
+ // decodeBody JSON-decodes the request body into dst, handling MaxBytesError
+ // (returns 413) and sanitising other decode errors so internal type names are
+ // not leaked to callers. Returns true on success; on failure it writes an
+diff --git a/internal/admin/api_auth_test.go b/internal/admin/api_auth_test.go
+index c72ea35..a307323 100644
+--- a/internal/admin/api_auth_test.go
++++ b/internal/admin/api_auth_test.go
+@@ -31,8 +31,9 @@ func (v *stubValidator) GetUserByWebToken(token string) (string, bool, bool) {
+ 
+ type stubAuditReader struct{}
+ 
+-func (r *stubAuditReader) Add(_ types.AuditEntry)                 {}
+-func (r *stubAuditReader) Query(_ AuditFilter) []types.AuditEntry { return nil }
++func (r *stubAuditReader) Add(_ types.AuditEntry)                          {}
++func (r *stubAuditReader) Query(_ AuditFilter) []types.AuditEntry          { return nil }
++func (r *stubAuditReader) QuerySummaries(_ AuditFilter) []types.AuditEntry { return nil }
+ func (r *stubAuditReader) QueryBatched(_ context.Context, _ AuditFilter, _ int, _ func([]types.AuditEntry) error) error {
+ 	return nil
+ }
+@@ -47,7 +48,7 @@ func (r *stubAuditReader) GetPolicyStats(_ string) (*PolicyStats, error) {
+ 	return &PolicyStats{ByDecision: map[string]*PolicyDecisionStats{}}, nil
+ }
+ 
+-// capturingAuditReader records the last filter passed to Query.
++// capturingAuditReader records the last filter passed to QuerySummaries.
+ type capturingAuditReader struct {
+ 	lastFilter AuditFilter
+ }
+@@ -57,6 +58,10 @@ func (r *capturingAuditReader) Query(f AuditFilter) []types.AuditEntry {
+ 	r.lastFilter = f
+ 	return nil
+ }
++func (r *capturingAuditReader) QuerySummaries(f AuditFilter) []types.AuditEntry {
++	r.lastFilter = f
++	return nil
++}
+ func (r *capturingAuditReader) QueryBatched(_ context.Context, _ AuditFilter, _ int, _ func([]types.AuditEntry) error) error {
+ 	return nil
+ }
+diff --git a/internal/admin/audit_integration_test.go b/internal/admin/audit_integration_test.go
+index c94ff9a..363e102 100644
+--- a/internal/admin/audit_integration_test.go
++++ b/internal/admin/audit_integration_test.go
+@@ -146,6 +146,80 @@ func TestAudit_LLMPolicyID_RoundTrip(t *testing.T) {
+ 	}
+ }
+ 
++func TestAuditList_OmitsPayloadsAndReturnsTotal(t *testing.T) {
++	if testPool == nil {
++		t.Skip("no test database")
++	}
++	truncateTables(t)
++	api, reader, _, _ := newAuditAPI(t)
++
++	reader.Add(types.AuditEntry{
++		Timestamp:       time.Now(),
++		RequestID:       "payload-list-1",
++		Method:          "POST",
++		URL:             "/payload",
++		Operation:       "WRITE",
++		Decision:        "approved",
++		Channel:         "llm",
++		ResponseStatus:  200,
++		DurationMs:      25,
++		RequestHeaders:  http.Header{"Content-Type": []string{"application/json"}},
++		RequestBody:     `{"secret":"request"}`,
++		ResponseHeaders: http.Header{"Content-Type": []string{"application/json"}},
++		ResponseBody:    `{"secret":"response"}`,
++	})
++
++	rr := doEvalRequest(t, api, http.MethodGet, "/admin/audit?limit=10", nil)
++	if rr.Code != http.StatusOK {
++		t.Fatalf("GET /admin/audit: got %d: %s", rr.Code, rr.Body.String())
++	}
++
++	var listResp struct {
++		Entries []map[string]interface{} `json:"entries"`
++		Total   int                      `json:"total"`
++		Offset  int                      `json:"offset"`
++		Limit   int                      `json:"limit"`
++		HasMore bool                     `json:"has_more"`
++	}
++	if err := json.NewDecoder(rr.Body).Decode(&listResp); err != nil {
++		t.Fatalf("decode list response: %v", err)
++	}
++	if listResp.Total != 1 {
++		t.Fatalf("total = %d, want 1", listResp.Total)
++	}
++	if listResp.HasMore {
++		t.Fatalf("has_more = true, want false")
++	}
++	if len(listResp.Entries) != 1 {
++		t.Fatalf("entries length = %d, want 1", len(listResp.Entries))
++	}
++	entry := listResp.Entries[0]
++	for _, field := range []string{"request_headers", "request_body", "response_headers", "response_body"} {
++		if _, ok := entry[field]; ok {
++			t.Fatalf("list response includes %s; want payload fields omitted", field)
++		}
++	}
++
++	id, _ := entry["id"].(string)
++	if id == "" {
++		t.Fatal("list response missing audit entry id")
++	}
++	rr = doEvalRequest(t, api, http.MethodGet, "/admin/audit/"+id, nil)
++	if rr.Code != http.StatusOK {
++		t.Fatalf("GET /admin/audit/{id}: got %d: %s", rr.Code, rr.Body.String())
++	}
++	var detail map[string]interface{}
++	if err := json.NewDecoder(rr.Body).Decode(&detail); err != nil {
++		t.Fatalf("decode detail response: %v", err)
++	}
++	if detail["request_body"] != `{"secret":"request"}` {
++		t.Fatalf("detail request_body = %v, want stored body", detail["request_body"])
++	}
++	if detail["response_body"] != `{"secret":"response"}` {
++		t.Fatalf("detail response_body = %v, want stored body", detail["response_body"])
++	}
++}
++
+ // TestAudit_LLMResponseID_RoundTrip verifies that llm_response_id is stored and
+ // returned by GET /admin/audit/{id}, with reason populated from the JOIN.
+ func TestAudit_LLMResponseID_RoundTrip(t *testing.T) {
+diff --git a/internal/admin/pg_audit_reader.go b/internal/admin/pg_audit_reader.go
+index b20f02e..ef54067 100644
+--- a/internal/admin/pg_audit_reader.go
++++ b/internal/admin/pg_audit_reader.go
+@@ -63,6 +63,7 @@ func sanitizeUTF8(s string) string {
+ type AuditReaderIface interface {
+ 	Add(entry types.AuditEntry)
+ 	Query(filter AuditFilter) []types.AuditEntry
++	QuerySummaries(filter AuditFilter) []types.AuditEntry
+ 	QueryBatched(ctx context.Context, filter AuditFilter, batchSize int, fn func([]types.AuditEntry) error) error
+ 	Count(ctx context.Context, filter AuditFilter) (int, error)
+ 	UpdateResponse(requestID string, responseStatus int, responseHeaders http.Header, responseBody, errText string, durationMs int64) error
+@@ -301,6 +302,17 @@ const auditSelectCols = `
+ 		al.api_info, COALESCE(lr.reason,''), COALESCE(al.llm_policy_id,''),
+ 		COALESCE(al.llm_response_id,'')`
+ 
++// auditSummarySelectCols keeps GET /admin/audit list responses lightweight by
++// omitting headers and bodies. Full payloads remain available through GetEntry.
++const auditSummarySelectCols = `
++		al.id, COALESCE(al.user_id,''), al.timestamp, al.request_id, al.method, al.url,
++		al.operation, al.decision,
++		al.cache_hit, al.approved_by, al.approved_at, al.channel,
++		al.response_status, al.duration_ms,
++		al.error, '{}'::jsonb, ''::text, '{}'::jsonb, ''::text,
++		al.api_info, COALESCE(lr.reason,''), COALESCE(al.llm_policy_id,''),
++		COALESCE(al.llm_response_id,'')`
++
+ // scanAuditEntry reads one audit_log row (from auditSelectCols) into an AuditEntry.
+ func scanAuditEntry(rows interface {
+ 	Scan(dest ...interface{}) error
+@@ -346,6 +358,16 @@ func scanAuditEntry(rows interface {
+ 
+ // Query returns audit entries matching the filter, ordered by timestamp DESC.
+ func (r *PGAuditReader) Query(filter AuditFilter) []types.AuditEntry {
++	return r.query(filter, auditSelectCols)
++}
++
++// QuerySummaries returns audit entries without request/response headers or
++// bodies for list views that should avoid pulling large payload columns.
++func (r *PGAuditReader) QuerySummaries(filter AuditFilter) []types.AuditEntry {
++	return r.query(filter, auditSummarySelectCols)
++}
++
++func (r *PGAuditReader) query(filter AuditFilter, selectCols string) []types.AuditEntry {
+ 	ctx := context.Background()
+ 
+ 	conds, args, _ := buildAuditQueryConditions(filter)
+@@ -366,9 +388,9 @@ func (r *PGAuditReader) Query(filter AuditFilter) []types.AuditEntry {
+ 		FROM audit_log al
+ 		LEFT JOIN llm_responses lr ON lr.id = al.llm_response_id
+ 		%s
+-		ORDER BY al.timestamp DESC
++		ORDER BY al.timestamp DESC, al.id DESC
+ 		LIMIT %d OFFSET %d
+-	`, auditSelectCols, where, limit, offset)
++	`, selectCols, where, limit, offset)
+ 
+ 	rows, err := r.pool.Query(ctx, q, args...)
+ 	if err != nil {
+diff --git a/web/src/api/client.ts b/web/src/api/client.ts
+index d99471a..bea995e 100644
+--- a/web/src/api/client.ts
++++ b/web/src/api/client.ts
+@@ -71,6 +71,7 @@ export interface AuditResponse {
+   total: number
+   offset: number
+   limit: number
++  has_more?: boolean
+ }
+ 
+ export async function getAuditLog(query: AuditQuery = {}): Promise<AuditResponse> {
+@@ -299,4 +300,3 @@ export async function upsertLabel(entryId: string, decision: string, note = ''):
+ export async function deleteLabel(entryId: string): Promise<void> {
+   await fetchAPI(`/audit/${encodeURIComponent(entryId)}/label`, { method: 'DELETE' })
+ }
+-
+diff --git a/web/src/components/AuditTrail.tsx b/web/src/components/AuditTrail.tsx
+index ec5d9ca..4453eb5 100644
+--- a/web/src/components/AuditTrail.tsx
++++ b/web/src/components/AuditTrail.tsx
+@@ -1,9 +1,9 @@
+ import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
+ import { useNavigate, useSearchParams } from 'react-router-dom'
+ import { useAuditLog } from '../hooks/useAuditLog'
+-import { getUsers, getPolicies, getLLMResponse } from '../api/client'
++import { getUsers, getPolicies, getLLMResponse, getAuditEntry } from '../api/client'
+ import { format } from 'date-fns'
+-import type { UserSummary, LLMPolicy, LLMResponse } from '../types'
++import type { AuditEntry, UserSummary, LLMPolicy, LLMResponse } from '../types'
+ 
+ function LLMResponseBlock({ llmResponseId, fallbackReason }: { llmResponseId: string; fallbackReason?: string }) {
+   const [llmResp, setLlmResp] = useState<LLMResponse | null>(null)
+@@ -55,6 +55,9 @@ export function AuditTrail() {
+   const [searchParams, setSearchParams] = useSearchParams()
+   const { entries, filters, total, loading, error, setFilters, loadMore, hasMore } = useAuditLog()
+   const [expandedId, setExpandedId] = useState<string | null>(null)
++  const [entryDetails, setEntryDetails] = useState<Record<string, AuditEntry>>({})
++  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({})
++  const [detailErrors, setDetailErrors] = useState<Record<string, string>>({})
+   const [users, setUsers] = useState<UserSummary[]>([])
+   const [policies, setPolicies] = useState<LLMPolicy[]>([])
+   const [columnWidths, setColumnWidths] = useState<number[]>([])
+@@ -91,6 +94,37 @@ export function AuditTrail() {
+ 
+   const clearAllParams = () => setSearchParams({}, { replace: true })
+ 
++  const toggleExpanded = (entry: AuditEntry, rowId: string) => {
++    if (expandedId === rowId) {
++      setExpandedId(null)
++      return
++    }
++
++    setExpandedId(rowId)
++    const detailKey = entry.id ?? rowId
++    if (!entry.id || entryDetails[detailKey] || detailLoading[detailKey]) return
++
++    setDetailLoading(prev => ({ ...prev, [detailKey]: true }))
++    setDetailErrors(prev => {
++      const next = { ...prev }
++      delete next[detailKey]
++      return next
++    })
++    getAuditEntry(entry.id)
++      .then(detail => {
++        setEntryDetails(prev => ({ ...prev, [detailKey]: detail }))
++      })
++      .catch(err => {
++        setDetailErrors(prev => ({
++          ...prev,
++          [detailKey]: err instanceof Error ? err.message : 'Failed to load audit entry',
++        }))
++      })
++      .finally(() => {
++        setDetailLoading(prev => ({ ...prev, [detailKey]: false }))
++      })
++  }
++
+   useEffect(() => {
+     if (tableContainerRef.current && columnWidths.length === 0) {
+       const containerWidth = tableContainerRef.current.offsetWidth
+@@ -377,9 +411,11 @@ export function AuditTrail() {
+             <tbody className="bg-white divide-y divide-gray-200">
+               {entries.map((entry, index) => {
+                 const rowId = `${entry.request_id}-${entry.timestamp}-${index}`
++                const detailKey = entry.id ?? rowId
+                 const isExpanded = expandedId === rowId
+-                const requestContentType = entry.request_headers?.['Content-Type']?.[0] || entry.request_headers?.['content-type']?.[0]
+-                const responseContentType = entry.response_headers?.['Content-Type']?.[0] || entry.response_headers?.['content-type']?.[0]
++                const detailEntry = entryDetails[detailKey] ?? entry
++                const requestContentType = detailEntry.request_headers?.['Content-Type']?.[0] || detailEntry.request_headers?.['content-type']?.[0]
++                const responseContentType = detailEntry.response_headers?.['Content-Type']?.[0] || detailEntry.response_headers?.['content-type']?.[0]
+ 
+                 return (
+                   <Fragment key={rowId}>
+@@ -387,7 +423,7 @@ export function AuditTrail() {
+                       className={`hover:bg-gray-50 cursor-pointer ${
+                         entry.cache_hit ? 'bg-green-50' : ''
+                       } ${isExpanded ? 'bg-blue-50' : ''}`}
+-                      onClick={() => setExpandedId(isExpanded ? null : rowId)}
++                      onClick={() => toggleExpanded(entry, rowId)}
+                     >
+                       <td className="px-4 py-4 text-sm text-gray-900 whitespace-nowrap">
+                         {formatTimestamp(entry.timestamp)}
+@@ -434,16 +470,25 @@ export function AuditTrail() {
+                       <tr key={`${rowId}-expanded`}>
+                         <td colSpan={7} className="px-6 py-4 bg-gray-50">
+                           {/* LLM Judge */}
+-                          {entry.channel === 'llm' && entry.llm_response_id && (
++                          {detailLoading[detailKey] && (
++                            <div className="mb-4 text-sm text-gray-600">Loading audit entry details…</div>
++                          )}
++                          {detailErrors[detailKey] && (
++                            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
++                              {detailErrors[detailKey]}
++                            </div>
++                          )}
++
++                          {detailEntry.channel === 'llm' && detailEntry.llm_response_id && (
+                             <LLMResponseBlock
+-                              llmResponseId={entry.llm_response_id}
+-                              fallbackReason={entry.llm_reason}
++                              llmResponseId={detailEntry.llm_response_id}
++                              fallbackReason={detailEntry.llm_reason}
+                             />
+                           )}
+-                          {entry.channel === 'llm' && !entry.llm_response_id && entry.llm_reason && (
++                          {detailEntry.channel === 'llm' && !detailEntry.llm_response_id && detailEntry.llm_reason && (
+                             <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded">
+                               <h4 className="text-sm font-semibold text-purple-900 mb-1">LLM Judge Reasoning</h4>
+-                              <p className="text-xs text-purple-800">{entry.llm_reason}</p>
++                              <p className="text-xs text-purple-800">{detailEntry.llm_reason}</p>
+                             </div>
+                           )}
+ 
+@@ -455,14 +500,14 @@ export function AuditTrail() {
+                               <div className="mb-4">
+                                 <p className="text-xs font-medium text-gray-700 mb-2">Headers:</p>
+                                 <div className="bg-white p-3 rounded border border-gray-200 max-h-48 overflow-y-auto text-xs">
+-                                  {formatHeaders(entry.request_headers)}
++                                  {formatHeaders(detailEntry.request_headers)}
+                                 </div>
+                               </div>
+ 
+                               <div>
+                                 <p className="text-xs font-medium text-gray-700 mb-2">Body:</p>
+                                 <div className="bg-white p-3 rounded border border-gray-200 max-h-48 overflow-y-auto">
+-                                  {formatBody(entry.request_body, requestContentType)}
++                                  {formatBody(detailEntry.request_body, requestContentType)}
+                                 </div>
+                               </div>
+                             </div>
+@@ -472,20 +517,20 @@ export function AuditTrail() {
+                               <h4 className="text-sm font-semibold text-gray-900 mb-3">Response Details</h4>
+ 
+                               <div className="mb-4">
+-                                <p className="text-xs font-medium text-gray-700 mb-2">Status: <span className="font-normal">{entry.response_status}</span></p>
++                                <p className="text-xs font-medium text-gray-700 mb-2">Status: <span className="font-normal">{detailEntry.response_status}</span></p>
+                               </div>
+ 
+                               <div className="mb-4">
+                                 <p className="text-xs font-medium text-gray-700 mb-2">Headers:</p>
+                                 <div className="bg-white p-3 rounded border border-gray-200 max-h-48 overflow-y-auto text-xs">
+-                                  {formatHeaders(entry.response_headers)}
++                                  {formatHeaders(detailEntry.response_headers)}
+                                 </div>
+                               </div>
+ 
+                               <div>
+                                 <p className="text-xs font-medium text-gray-700 mb-2">Body:</p>
+                                 <div className="bg-white p-3 rounded border border-gray-200 max-h-48 overflow-y-auto">
+-                                  {formatBody(entry.response_body, responseContentType)}
++                                  {formatBody(detailEntry.response_body, responseContentType)}
+                                 </div>
+                               </div>
+                             </div>
+@@ -494,9 +539,9 @@ export function AuditTrail() {
+                           {/* Additional Metadata */}
+                           <div className="mt-4 pt-4 border-t border-gray-200 text-xs text-gray-600">
+                             <div className="grid grid-cols-4 gap-4">
+-                              <div><span className="font-semibold">Request ID:</span> {entry.request_id}</div>
+-                              <div><span className="font-semibold">Operation:</span> {entry.operation}</div>
+-                              {entry.error && <div className="col-span-2"><span className="font-semibold text-red-600">Error:</span> {entry.error}</div>}
++                              <div><span className="font-semibold">Request ID:</span> {detailEntry.request_id}</div>
++                              <div><span className="font-semibold">Operation:</span> {detailEntry.operation}</div>
++                              {detailEntry.error && <div className="col-span-2"><span className="font-semibold text-red-600">Error:</span> {detailEntry.error}</div>}
+                             </div>
+                           </div>
+                         </td>

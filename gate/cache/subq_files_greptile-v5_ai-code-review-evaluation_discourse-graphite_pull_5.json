@@ -1,0 +1,1 @@
+{"Bullet badge offset is lost - when the header shows a bullet-style category next to a box-style category badge, the margin-top: 5px offset is no longer restored, causing the bullet square to render higher than the neighboring badge in the topic header": 0.5554592609405518}

@@ -1,0 +1,1 @@
+{"Token exchange omits redirect_uri in OAuthLoginView.dispatch, violating GitHub OAuth requirements which require redirect_uri to match between the authorize and token exchange steps when it was originally provided": 0.8411398530006409}

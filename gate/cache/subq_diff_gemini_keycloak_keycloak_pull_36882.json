@@ -1,0 +1,1 @@
+{"The documentation statement 'Otherwise, the {project_name} Operator will fail' is misleading - when the 'rolling-updates' feature is not enabled, the operator falls back to default update behavior instead of failing. The text should be rephrased to clarify that enabling the feature is required to use configurable update strategies, not to prevent failure.": 0.27122342586517334}

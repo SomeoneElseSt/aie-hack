@@ -1,0 +1,1 @@
+{"getSubGroupsCount() returns null when the model is concurrently deleted, which violates the interface contract that states 'Never returns {@code null}' \u2014 should return 0L instead": 0.913070023059845, "getSubGroupsStream(...) overloads at lines 256/262/268 use modelSupplier.get() without null checks and are susceptible to the same race condition NPE": 0.7652068734169006}

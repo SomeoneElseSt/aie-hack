@@ -1,0 +1,1 @@
+{"account-ui's 'error-invalid-multivalued-size' message was changed to Java MessageFormat/ChoiceFormat syntax ({0,choice,...}) but account-ui uses i18next with standard {{...}} interpolation, so the UI will not interpolate/pluralize it and will display raw placeholders instead of actual values": 0.8500889539718628}

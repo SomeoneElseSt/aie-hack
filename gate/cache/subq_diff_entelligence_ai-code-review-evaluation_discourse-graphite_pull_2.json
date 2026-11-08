@@ -1,0 +1,1 @@
+{"TopicUser.find_by will return nil if the user has no existing record for this topic, causing a NoMethodError on the next line. Need to use find_or_initialize_by(user_id: current_user.id, topic_id: params[:topic_id]) or add a nil check to handle users who haven't interacted with the topic yet.": 0.9465718865394592}

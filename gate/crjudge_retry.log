@@ -1,0 +1,103 @@
+CRJudge groups completed 1 / 94 failed 0
+CRJudge groups completed 2 / 94 failed 0
+CRJudge groups completed 3 / 94 failed 0
+CRJudge groups completed 4 / 94 failed 0
+CRJudge groups completed 5 / 94 failed 0
+CRJudge groups completed 6 / 94 failed 0
+CRJudge groups completed 7 / 94 failed 0
+CRJudge groups completed 8 / 94 failed 0
+CRJudge groups completed 9 / 94 failed 0
+CRJudge groups completed 10 / 94 failed 0
+CRJudge groups completed 11 / 94 failed 0
+CRJudge groups completed 12 / 94 failed 0
+CRJudge groups completed 13 / 94 failed 0
+CRJudge groups completed 14 / 94 failed 0
+CRJudge groups completed 15 / 94 failed 0
+CRJudge groups completed 16 / 94 failed 0
+CRJudge groups completed 17 / 94 failed 0
+CRJudge groups completed 18 / 94 failed 0
+CRJudge groups completed 19 / 94 failed 0
+CRJudge groups completed 20 / 94 failed 0
+CRJudge groups completed 21 / 94 failed 0
+CRJudge groups completed 22 / 94 failed 0
+CRJudge groups completed 23 / 94 failed 0
+CRJudge groups completed 24 / 94 failed 0
+CRJudge groups completed 25 / 94 failed 0
+CRJudge groups completed 26 / 94 failed 0
+CRJudge groups completed 27 / 94 failed 0
+CRJudge groups completed 28 / 94 failed 0
+CRJudge groups completed 29 / 94 failed 0
+CRJudge groups completed 30 / 94 failed 0
+CRJudge groups completed 31 / 94 failed 0
+CRJudge groups completed 32 / 94 failed 0
+CRJudge groups completed 33 / 94 failed 0
+CRJudge groups completed 34 / 94 failed 0
+CRJudge groups completed 35 / 94 failed 0
+CRJudge groups completed 36 / 94 failed 0
+CRJudge groups completed 37 / 94 failed 0
+CRJudge groups completed 38 / 94 failed 0
+CRJudge groups completed 39 / 94 failed 0
+CRJudge groups completed 40 / 94 failed 0
+CRJudge groups completed 41 / 94 failed 0
+CRJudge groups completed 42 / 94 failed 0
+CRJudge groups completed 43 / 94 failed 0
+CRJudge groups completed 44 / 94 failed 0
+CRJudge groups completed 45 / 94 failed 0
+CRJudge groups completed 46 / 94 failed 0
+CRJudge groups completed 47 / 94 failed 0
+CRJudge groups completed 48 / 94 failed 0
+CRJudge groups completed 49 / 94 failed 0
+CRJudge groups completed 50 / 94 failed 0
+CRJudge groups completed 51 / 94 failed 0
+CRJudge groups completed 52 / 94 failed 0
+CRJudge groups completed 53 / 94 failed 0
+CRJudge groups completed 54 / 94 failed 0
+CRJudge groups completed 55 / 94 failed 0
+CRJudge groups completed 56 / 94 failed 0
+CRJudge groups completed 57 / 94 failed 0
+CRJudge groups completed 58 / 94 failed 0
+CRJudge groups completed 59 / 94 failed 0
+CRJudge groups completed 60 / 94 failed 0
+CRJudge groups completed 61 / 94 failed 0
+CRJudge groups completed 62 / 94 failed 0
+CRJudge groups completed 63 / 94 failed 0
+CRJudge groups completed 64 / 94 failed 0
+CRJudge groups completed 65 / 94 failed 0
+CRJudge groups completed 66 / 94 failed 0
+CRJudge groups completed 67 / 94 failed 0
+CRJudge groups completed 68 / 94 failed 0
+CRJudge groups completed 69 / 94 failed 0
+CRJudge groups completed 70 / 94 failed 0
+CRJudge groups completed 71 / 94 failed 0
+CRJudge groups completed 72 / 94 failed 0
+CRJudge groups completed 73 / 94 failed 0
+CRJudge groups completed 74 / 94 failed 0
+CRJudge groups completed 75 / 94 failed 0
+CRJudge groups completed 76 / 94 failed 0
+CRJudge groups completed 77 / 94 failed 0
+CRJudge groups completed 78 / 94 failed 0
+CRJudge groups completed 79 / 94 failed 0
+CRJudge groups completed 80 / 94 failed 0
+CRJudge groups completed 81 / 94 failed 0
+CRJudge groups completed 82 / 94 failed 0
+CRJudge groups completed 83 / 94 failed 0
+CRJudge groups completed 84 / 94 failed 0
+CRJudge groups completed 85 / 94 failed 0
+CRJudge groups completed 86 / 94 failed 0
+CRJudge groups completed 87 / 94 failed 0
+CRJudge groups completed 88 / 94 failed 0
+CRJudge groups completed 89 / 94 failed 0
+CRJudge groups completed 90 / 94 failed 0
+CRJudge groups completed 91 / 94 failed 0
+CRJudge groups completed 92 / 94 failed 0
+CRJudge groups completed 93 / 94 failed 0
+CRJudge groups completed 94 / 94 failed 0
+{
+  "threshold": 0.4973278045654297,
+  "validation_accuracy": 0.8888888888888888,
+  "test_accuracy": 0.8579387186629527,
+  "accuracy_at_half": 0.8579387186629527,
+  "auroc": 0.9159892509237487,
+  "validation_rows": 126,
+  "test_rows": 359
+}

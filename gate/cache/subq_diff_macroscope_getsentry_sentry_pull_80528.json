@@ -1,0 +1,1 @@
+{"`get_monitor_environment_context` builds a modified copy of `config` with a human-readable `schedule_type`, then returns the original unmodified `monitor_environment.monitor.config` instead of the modified copy, causing the returned config to contain raw integer values rather than display names": 0.8029217720031738}

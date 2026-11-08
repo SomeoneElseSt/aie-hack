@@ -1,0 +1,1 @@
+{"LRU cache key in translate method doesn't include SiteSetting.default_locale, causing stale translations when admin changes the site's default locale because the fallback chain dynamically depends on SiteSetting.default_locale but the cache key only includes key, config.locale, and config.backend.object_id": 0.7831571698188782}

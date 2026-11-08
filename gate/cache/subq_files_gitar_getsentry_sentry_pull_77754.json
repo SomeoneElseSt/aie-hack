@@ -1,0 +1,1 @@
+{"The default value `queued: datetime = timezone.now()` on line 18 is evaluated once when the module is first imported, not each time an AssignmentSource instance is created. Every instance that relies on the default will share the same stale timestamp (the server's startup/import time). For dataclasses, the fix is `dataclasses.field(default_factory=...)`": 0.9667431116104126}

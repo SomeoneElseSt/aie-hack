@@ -1,0 +1,1202 @@
+===== FILE app/assets/stylesheets/common/base/header.scss (after PR) =====
+.d-header {
+    width: 100%;
+    position: absolute;
+    top: 0;
+    z-index: 1001;
+    background-color: $header_background;
+    box-shadow: 0 2px 4px -1px rgba(0,0,0, .25);
+
+    .docked & {
+      position: fixed;
+      backface-visibility: hidden;  /** do magic for scrolling performance **/
+    }
+
+    .contents {
+      margin: 8px 0;
+
+      @include flexbox();
+      @include align-items(center);
+    }
+
+    .valign-helper {
+      display: inline-block;
+      height: 100%;
+      vertical-align: middle;
+    }
+
+    #site-logo {
+      max-height: 40px;
+    }
+
+    .fa-home {
+      font-size: 1.643em;
+    }
+
+    .panel {
+      position: relative;
+      margin-left: auto;
+
+      @include order(3);
+    }
+
+    .login-button, button.sign-up-button {
+      float: left;
+      margin-top: 7px;
+      padding: 6px 10px;
+      .fa { margin-right: 3px; }
+    }
+
+    button.login-button {
+      margin-left: 7px;
+    }
+
+    .icons {
+      float: left;
+      text-align: center;
+      margin: 0 0 0 5px;
+      list-style: none;
+
+      > li {
+        float: left;
+      }
+      .icon {
+        display: block;
+        padding: 3px;
+        color: scale-color($header_primary, $lightness: 50%);
+        text-decoration: none;
+        cursor: pointer;
+        border-top: 1px solid transparent;
+        border-left: 1px solid transparent;
+        border-right: 1px solid transparent;
+        transition: all linear .15s;
+
+
+        &:hover {
+          color: $primary;
+          background-color:  dark-light-diff($primary, $secondary, 90%, -60%);
+          border-top: 1px solid transparent;
+          border-left: 1px solid transparent;
+          border-right: 1px solid transparent;
+        }
+        &:active {
+          color: $primary;
+          background-color: dark-light-diff($primary, $secondary, 90%, -60%);
+        }
+      }
+      .active .icon {
+        position: relative;
+        color: #7b7b7b;
+        background-color: $secondary;
+        cursor: default;
+        border-top: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
+        border-left: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
+        border-right: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
+        &:after {
+          display: block;
+          position: absolute;
+          top: 100%;
+          left: 0;
+          z-index: 1101;
+          width: 100%;
+          height: 0;
+          content: "";
+          border-top: 1px solid $secondary;
+        }
+        &:hover {
+        border-bottom: none;
+        }
+      }
+      [class^="fa fa-"] {
+        width: 32px;
+        height: 32px;
+        font-size: 1.714em;
+        line-height: 32px;
+        display: inline-block;
+      }
+      .notifications {
+        position: relative;
+      }
+      .badge-notification {
+        position: absolute;
+        top: -9px;
+        z-index: 1;
+        margin-left: 0;
+      }
+      .unread-notifications {
+        right: -4px;
+        background-color: scale-color($tertiary, $lightness: 50%);
+      }
+      .unread-private-messages {
+        left: -4px;
+      }
+    }
+    .flagged-posts {
+      background: $danger;
+    }
+}
+
+.d-dropdown {
+    display: none;
+    position: absolute;
+    background: $secondary;
+    max-height: 417px;
+    top: 100%;
+    right: 0;
+    z-index: 1100;
+    overflow: auto;
+    border: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
+    padding: 5px;
+
+    box-shadow: 0 2px 2px rgba(0,0,0, .4);
+
+  // note these topic counts only appear for anons in the category hamburger drop down
+  b.topics-count {
+    color: scale-color($primary, $lightness: 50%);
+    font-weight: normal;
+    font-size: 11px;
+  }
+
+  ul {
+    margin: 0;
+    list-style: none;
+  }
+
+  li:not(.category):not(.heading) {
+    font-size: 0.929em;
+    line-height: 16px;
+
+      .fa {
+        font-size: inherit;
+      }
+
+      a {
+        display: block;
+        padding: 5px;
+        transition: all linear .15s;
+      }
+
+      &:hover a:not(.badge-notification) {
+        background-color: dark-light-diff($highlight, $secondary, 50%, -70%);
+        }
+
+      button {margin-left: 5px;}
+  }
+
+  .heading a:hover  {
+    background-color: dark-light-diff($highlight, $secondary, 50%, -70%);
+  }
+
+  .selected {
+    background-color: dark-light-diff($tertiary, $secondary, 85%, -65%);
+  }
+
+
+  // Notifications
+  &#notifications-dropdown {
+    .fa { color: scale-color($primary, $lightness: 50%); }
+    .icon { color: scale-color($primary, $lightness: 30%); }
+    li {
+      background-color: dark-light-diff($tertiary, $secondary, 85%, -65%);
+      i {
+        float: left;
+        margin-right: 5px;
+        padding-top: 2px;
+      }
+      span { color: $primary; }
+      &:hover a { background-color: dark-light-diff($highlight, $secondary, 50%, -70%); }
+      a { padding: 4px 0 3px 2px; }
+      p {
+        margin: 0;
+        overflow: hidden;
+      }
+    }
+    .is-warning {
+      i.fa-envelope-o {
+        &:before {
+          content: "\f0e0";
+        }
+        color: $danger;
+      }
+    }
+    .read {
+      background-color: $secondary;
+    }
+    .none {
+      padding: 5px;
+    }
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border-width: 2px;
+      margin: 0 auto;
+    }
+    /* as a big ol' click target, don't let text inside be selected */
+    @include unselectable;
+  }
+
+  // Site map
+
+  &#site-map-dropdown {
+    .heading {
+      padding: 5px 5px 5px 0;
+      a {
+        display: block;
+        padding: 0 5px;
+      }
+    }
+  }
+
+  // Search
+
+  &#search-dropdown {
+    .heading {
+      padding: 5px 0 5px 5px;
+    .filter {
+      padding: 0 5px;
+    }
+     }
+  }
+
+  input[type='text'] {
+    width: 518px;
+    height: 22px;
+    margin: 5px;
+    padding: 5px;
+  }
+
+  .search-context {
+    padding: 0 5px;
+    label { margin-bottom: 0; }
+  }
+
+  .searching {
+    position: absolute;
+    top: 0;
+    right: 0;
+    .spinner {
+      width: 10px;
+      height: 10px;
+      border-width: 2px;
+      margin: 20px 0 0 0;
+      }
+  }
+  // I am ghetto using this to display "Show More".. be warned
+  .no-results {
+    padding: 5px;
+    text-align: center;
+  }
+  .filter {
+    padding: 0;
+    &:hover {background: transparent;}
+  }
+
+  // Categories
+
+  .category {
+    float: left;
+    background-color: transparent;
+    width: 45%;
+    margin: 5px 5px 0 5px;
+    .box {margin-top: 0;}
+    .badge-notification {
+      color: scale-color($primary, $lightness: 50%);
+      background-color: transparent;
+      vertical-align: top;
+      padding: 5px 5px 2px 5px;
+    }
+  }
+
+  &#user-dropdown {
+    width: 118px;
+  }
+
+  .btn {
+    padding: 2px 8px;
+    margin-bottom: 2px;
+    .fa {
+      margin-right: 5px;
+    }
+  }
+}
+
+.search-link {
+  .badge-category-parent {
+    line-height: 0.8em;
+  }
+  .topic-title {
+    margin-right: 6px;
+  }
+
+  .topic-statuses {
+    float: none;
+    display: inline-block;
+    color: scale-color($primary, $lightness: 50%);
+    margin: 0;
+    .fa {
+      margin: 0;
+    }
+  }
+}
+
+.highlight-strong {
+  background-color: dark-light-diff($highlight, $secondary, 40%, -50%);
+}
+
+.search-highlight {
+  font-weight: bold;
+}
+
+.search-context .show-help {
+  position: absolute;
+  right: 10px;
+  top: 0;
+}
+
+.search-context {
+  min-height: 30px;
+  position: relative;
+}
+
+.d-dropdown#search-dropdown {
+  max-height: none;
+  overflow: inherit;
+}
+
+#search-dropdown .results {
+  max-height: 300px;
+  overflow: auto;
+}
+
+#search-help table td {
+  padding-right: 10px;
+}
+
+// we don't need this X to clear field
+#search-term::-ms-clear {
+  display: none;
+}
+
+
+===== FILE app/assets/stylesheets/common/base/topic-post.scss (after PR) =====
+.names {
+ float: left;
+ .username {
+   font-weight: bold;
+ }
+ span {
+   font-size: 0.929em;
+   padding-right: 8px;
+   display: inline-block;
+   max-width: 280px;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   a {
+     color: scale-color($primary, $lightness: 30%);
+   }
+ }
+ .fa {
+   font-size: 11px;
+   margin-left: 3px;
+   color: scale-color($primary, $lightness: 40%);
+ }
+  .new_user a, .user-title, .user-title a {
+    color: scale-color($primary, $lightness: 50%);
+ }
+}
+
+// global styles for the cooked HTML content in posts (and preview)
+.cooked, .wmd-preview {
+  word-wrap: break-word;
+  h1, h2, h3, h4, h5, h6 { margin: 30px 0 10px; }
+  h1 { line-height: 1em; } /* normalize.css sets h1 font size but not line height */
+  a { word-wrap: break-word; }
+}
+
+
+.cooked, .wmd-preview {
+  video {
+    max-width: 100%;
+  }
+  sup sup {
+    top: 0;
+  }
+}
+// we use aside to hold expandable quotes (versus, say, static blockquotes)
+aside.quote {
+  margin-top: 1em;
+  margin-bottom: 1em;
+
+  .badge-wrapper { margin-left: 5px; }
+
+  .title {
+    border-left: 5px solid dark-light-diff($primary, $secondary, 90%, -65%);
+    background-color: dark-light-diff($primary, $secondary, 97%, -45%);
+    color: scale-color($primary, $lightness: 30%);
+    // IE will screw up the blockquote underneath if bottom padding is 0px
+    padding: 12px 12px 1px 12px;
+    // blockquote is underneath this and has top margin
+    .avatar { margin-right: 7px; }
+    img { margin-top: -4px; }
+    @include unselectable;
+  }
+
+  // blockquote is docked within aside for content
+  blockquote {
+    margin-top: 0;
+  }
+}
+
+.quote-controls, .quote-controls .back:before, .quote-controls .quote-other-topic:before {
+  color: scale-color($primary, $lightness: 70%);
+}
+
+.cooked .highlight {
+  background-color: dark-light-diff($tertiary, $secondary, 85%, -65%);
+  padding: 2px;
+  margin: -2px;
+}
+
+.post-action {
+  .undo-action, .act-action{
+    margin-left: 5px;
+  }
+}
+
+.post-hidden {
+  opacity: 0.5;
+}
+
+
+.quote-controls {
+  float: right;
+  a {
+    margin: 0;
+  }
+
+  .back:before, .quote-other-topic:before
+  {
+    display: inline-block;
+    margin-left: 8px;
+    font-family: "FontAwesome";
+    position: relative;
+    z-index: 20;
+    content: "\f062";
+  }
+
+  .quote-other-topic:before
+  {
+    content: "\f061";
+  }
+}
+
+.quote-button {
+  display: none;
+  position: absolute;
+  background-color: scale-color($primary, $lightness: 50%);
+  color: $secondary;
+  padding: 10px;
+  z-index: 401;
+
+  &:before {
+    font-family: "FontAwesome";
+    content: "\f10e\00a0\00a0";
+  }
+
+  &:hover {
+    background-color: scale-color($primary, $lightness: 40%);
+    cursor: pointer;
+  }
+}
+
+.wiki .topic-body {
+  background-color: dark-light-diff($wiki, $secondary, 95%, -50%);
+}
+
+// this ensures consistent top margin on topic posts even if the first line of a post
+// is a top-margin-less element like a list or image.
+.topic-body .regular {
+  margin-top: 15px;
+}
+
+.post-info {
+  &.wiki, &.via-email {
+    margin-right: 5px;
+    i.fa {
+      font-size: 1em;
+    }
+  }
+  &.wiki {
+    cursor: pointer;
+    color: $wiki;
+  }
+  &.via-email {
+    color: scale-color($primary, $lightness: 70%);
+  }
+  &.raw-email {
+    cursor: pointer;
+  }
+}
+
+pre {
+  code {
+    word-wrap: normal;
+    display: block;
+    padding: 5px 10px;
+    color: $primary;
+    background: dark-light-diff($primary, $secondary, 97%, -45%);
+    max-height: 500px;
+  }
+}
+
+kbd
+{
+  background-color: $secondary;
+  border: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
+  border-radius: 3px;
+  box-shadow: 0 1px 0 rgba(0,0,0, .8);
+  color: $primary;
+  display: inline-block;
+  font-size: 0.857em;
+  line-height: 1.4;
+  margin: 0 .1em;
+  padding: .1em .6em;
+
+  // don't allow more than 3 nested elements to prevent FF from crashing
+  // cf. http://what.thedailywtf.com/t/nested-elements/7927
+  // 3 levels are needed to prevent highlighted words being hidden
+  // cf. https://meta.discourse.org/t/word-disappears-when-searched-and-in-details-summary-kbd-b/25741
+  * * * { display: none; }
+}
+
+// we assume blockquotes have their own margins, so all blockquotes
+// will remove margins from first (top) and last (bottom) child elements
+blockquote > *:first-child {
+  margin-top: 0 !important;
+}
+blockquote > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+.gap {
+  background-color: dark-light-diff($primary, $secondary, 90%, -60%);
+  padding: 5px 0;
+  color: lighten($primary, 60%);
+  cursor: pointer;
+  text-align: center;
+
+  &.jagged-border {
+    background-image:
+    linear-gradient(
+                    135deg,
+                    $secondary 50%, rgba(255,255,255,0) 50%
+    ),
+    linear-gradient(
+                    -135deg,
+                    $secondary 50%, rgba(255,255,255,0) 50%
+    ),
+    linear-gradient(
+                    45deg,
+                    $secondary 50%, rgba(255,255,255,0) 50%
+    ),
+    linear-gradient(
+                    -45deg,
+                    $secondary 50%, rgba(255,255,255,0) 50%
+    );
+    background-position:
+    top center, top center,
+    bottom center, bottom center;
+    background-size: .9em .9em;
+    background-repeat: repeat-x;
+    padding: 20px 0;
+    margin-bottom: 20px;
+  }
+
+}
+
+.who-liked {
+  transition: height 0.5s;
+  a {
+    margin: 0 0.25em 0.5em 0;
+    display: inline-block;
+  }
+}
+
+
+table.md-table {
+  thead {
+    border-bottom: 2px solid lighten($primary, 80%);
+    th {
+      text-align: left;
+      padding-bottom: 2px;
+    }
+  }
+
+  td,th {
+    padding: 3px 3px 3px 10px;
+  }
+  tr {
+    border-bottom: 1px solid lighten($primary, 80%);
+  }
+}
+
+.small-action {
+  @include flexbox();
+  @include align-items(center);
+
+  .topic-avatar {
+    padding: 5px 0;
+    border-top: none;
+    float: left;
+    i {
+      font-size: 35px;
+      width: 45px;
+      text-align: center;
+      color: lighten($primary, 75%);
+    }
+  }
+
+  .small-action-desc {
+    padding: 0 1.5%;
+    text-transform: uppercase;
+    font-weight: bold;
+    font-size: 0.9em;
+    color: lighten($primary, 50%);
+
+    .custom-message {
+      text-transform: none;
+      margin: 15px 0px 5px;
+      font-weight: normal;
+      font-size: 14px;
+      p {
+        margin: 0;
+      }
+    }
+
+    .avatar {
+      margin-right: 0.8em;
+      float: left;
+    }
+
+    > p {
+      margin: 0;
+    }
+  }
+
+  button {
+    background: transparent;
+    border: 0;
+    float: right;
+  }
+
+  clear: both;
+}
+
+
+===== FILE app/assets/stylesheets/common/base/topic.scss (after PR) =====
+#topic-title {
+
+  .title-wrapper {
+    float: left;
+    width: 90%;
+    .btn-small {
+      margin: 0 6px 0 0;
+    }
+
+    .badge-wrapper {
+      float: left;
+      &.bullet {
+        margin-top: 5px;
+      }
+    }
+  }
+
+  a.badge-category {
+    margin-top: 5px;
+  }
+
+  a.edit-topic i { font-size: 0.8em; }
+}
+
+.topic-title-outlet {
+  clear: both;
+}
+
+.extra-info-wrapper {
+  @include order(2);
+
+  line-height: 1.5;
+  .badge-wrapper {
+    float: left;
+  }
+
+}
+
+.has-pending-posts {
+  padding: 0.5em;
+  background-color: dark-light-diff($highlight, $secondary, 50%, -70%);
+  a[href] {
+    float: right;
+  }
+}
+
+// Target the .badge-category text, the bullet icon needs to maintain `display: block`
+#suggested-topics h3 .badge-wrapper.bullet span.badge-category,
+#suggested-topics h3 .badge-wrapper.box span,
+#suggested-topics h3 .badge-wrapper.bar span {
+  display: inline;
+  overflow: inherit;
+}
+
+#suggested-topics h3 .badge-wrapper.bullet span.badge-category, {
+  // Override vertical-align: text-top from `badges.css.scss`
+  vertical-align: baseline;
+}
+
+#suggested-topics h3 .badge-wrapper.bullet,
+#suggested-topics h3 .badge-wrapper.bullet span.badge-category-parent-bg,
+#suggested-topics h3 .badge-wrapper.bullet span.badge-category-bg {
+  // Top of bullet aligns with top of line - adjust line height to vertically align bullet.
+  line-height: 0.8;
+}
+
+
+===== FILE app/assets/stylesheets/common/components/badges.css.scss (after PR) =====
+// --------------------------------------------------
+// Badges
+// --------------------------------------------------
+
+// Base
+// --------------------------------------------------
+
+%badge {
+  display: inline-block;
+  font-weight: normal;
+  white-space: nowrap;
+  @include border-radius-all(10px);
+}
+
+// Category badges
+// --------------------------------------------------
+
+.badge-wrapper {
+  font-size: 0.857em;
+  font-weight: bold;
+  white-space: nowrap;
+  display: inline-block;
+  position: relative;
+
+  &.bar { //bar category style
+    line-height: 1.25;
+    margin-right: 5px;
+
+    span.badge-category {
+      color: $primary !important;
+      padding: 3px;
+      vertical-align: text-top;
+      margin-top: -3px; //vertical alignment fix
+      display: inline-block;
+
+      .extra-info-wrapper & {
+        color: $header-primary !important;
+      }
+   }
+
+   .badge-category-parent-bg, .badge-category-bg {
+     display: inline-block;
+     padding: 1px;
+
+     &:before {
+       content: "\a0";
+     }
+
+   }
+
+  }
+
+
+  &.bullet { //bullet category style
+    @include inline-flex();
+
+    @include align-items(baseline);
+
+    margin-right: 10px;
+
+    span.badge-category {
+      color: $primary !important;
+      display: inline-block;
+
+      #search-dropdown & {
+        margin-top: -2px;
+      }
+
+      .extra-info-wrapper & {
+        color: $header-primary !important;
+      }
+   }
+
+   .badge-category-parent-bg, .badge-category-bg {
+     width: 10px;
+     height: 10px;
+     margin-right: 5px;
+     display: inline-block;
+     line-height: 1;
+
+     &:before {
+       content: "\a0";
+     }
+   }
+
+   span {
+     &.badge-category-parent-bg { //subcategory style
+       width: 5px;
+       margin-right: 0;
+       & + .badge-category-bg {
+         width: 5px;
+       }
+     }
+   }
+
+ }
+
+
+  &.box {  //box category style (apply custom widths to the wrapper, not the children)
+    line-height: 1.5;
+    margin-top: 5px;
+    margin-right: 5px;
+
+    span {
+      display: block;
+
+      &.badge-category-bg, &.badge-category-parent-bg {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+      }
+
+      &.badge-category-parent-bg { //subcategory style
+        width: calc(100% - 5px);
+        & + .badge-category-bg {
+          left: 5px;
+          width: calc(100% - 5px);
+          & + .badge-category {
+            margin-left: 5px;
+          }
+        }
+      }
+
+      &.badge-category {
+        position: relative;
+        padding: 0 5px;
+        margin-top: 2px;
+      }
+    }
+  }
+
+  span.badge-category {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    .d-dropdown & {
+      max-width: 90px;
+    }
+  }
+
+}
+
+// Category badge dropdown
+// --------------------------------------------------
+
+
+.list-controls {
+.category-breadcrumb {
+  a.badge-category {
+      display: inline-block;
+      padding: 5px 8px;
+      line-height: 20px;
+    &.category-dropdown-button {
+      margin-left: -4px;
+      padding: 5px;
+      width: 13px;
+
+      .fa-caret-right {
+        margin-left: 2px;
+        }
+      }
+    }
+
+    li.bar>.badge-category:not(.home):first-child {
+      border-left: 5px solid;
+    }
+
+    li.bar>.badge-category {
+      background: dark-light-diff($primary, $secondary, 90%, -65%) !important;
+      color: $primary !important;
+    }
+
+    li.bullet>.badge-category {
+      background: dark-light-diff($primary, $secondary, 90%, -65%) !important;
+      color: $primary !important;
+
+      .badge-category-bg {
+        width: 10px;
+        height: 10px;
+        display: inline-block;
+        margin: 0 2px;
+      }
+    }
+
+
+  }
+
+  .category-dropdown-menu {
+    .badge-category {
+      &.home {
+        margin-left: 4px;
+        padding-left: 0;
+      }
+    }
+    .cat {
+        line-height: 1;
+      }
+    .badge-wrapper {
+      &.bar {
+        margin: 5px 0;
+        .badge-category {
+          max-width: 100px;
+        }
+      }
+      &.bullet {
+        margin: 5px;
+        .badge-category {
+          max-width: 100px;
+        }
+      }
+      &.box {
+        margin-top: 0;
+        width: 100%;
+        line-height: 1;
+        span.badge-category {
+          padding: 5px;
+        }
+      }
+
+    }
+
+  }
+
+}
+
+
+
+
+// Notification badge
+// --------------------------------------------------
+
+.badge-notification {
+  @extend %badge;
+  padding: 4px 5px 2px 5px;
+  vertical-align: middle;
+  color: $secondary;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  background-color: scale-color($primary, $lightness: 70%);
+  &[href] {
+  color: $secondary;
+  }
+
+  // New posts
+
+  &.new-posts, &.unread-posts {
+    background-color: scale-color($tertiary, $lightness: 50%);
+    color: $secondary;
+    font-weight: normal;
+  }
+
+  &.new-topic {
+    background-color: transparent;
+    color: scale-color($tertiary, $lightness: 20%);
+    font-weight: normal;
+    font-size: 0.929em;
+  }
+
+  &.new-topic::before {
+    content: "●";
+    margin-right: 2px;
+  }
+
+  // Click count
+
+  &.clicks {
+    font-weight: normal;
+    background-color: dark-light-diff($primary, $secondary, 85%, -65%);
+    top: -1px;
+    color: dark-light-diff($primary, $secondary, 50%, -45%);
+    position: relative;
+    margin-left: 2px;
+    border: none;
+  }
+}
+
+// Posts badge
+// --------------------------------------------------
+
+.badge-posts {
+  font-weight: normal;
+  font-size: 1em;
+  line-height: 1;
+  &[href] {
+    color: scale-color($primary, $lightness: 40%);
+  }
+}
+
+// Group badge
+// --------------------------------------------------
+
+.badge-group {
+  @extend %badge;
+  padding: 4px 5px 2px 5px;
+  color: $primary;
+  text-shadow: 0 1px 0 rgba($primary, 0.1);
+  background-color: dark-light-diff($primary, $secondary, 90%, -65%);
+  border-color: dark-light-diff($primary, $secondary, 90%, -65%);
+  font-size: 0.857em;
+  box-shadow: inset 0 1px 0 rgba(0,0,0, 0.22);
+}
+
+
+===== FILE app/assets/stylesheets/common/foundation/mixins.scss (after PR) =====
+// --------------------------------------------------
+// Mixins used throughout the theme
+// --------------------------------------------------
+
+// Media queries
+// --------------------------------------------------
+
+
+@mixin small-width {
+  @media all and (max-width: 850px) {
+    @content;
+  }
+}
+
+@mixin medium-width {
+  @media all and (min-width: 1000px) and (max-width: 1139px) {
+    @content;
+  }
+}
+
+@mixin large-width {
+  @media all and (min-width: 1140px) {
+    @content;
+  }
+}
+
+@mixin mobile-portrait      { @media all and (max-width : 320px) { @content; } }
+@mixin not-mobile-portrait  { @media all and (min-width : 321px) { @content; } }
+@mixin mobile-landscape     { @media all and (min-width : 321px) and (max-width : 959px) { @content; } }
+@mixin not-tablet-landscape { @media all and (max-width : 959px) { @content; } }
+@mixin tablet-landscape     { @media all and (min-width : 960px) { @content; } }
+
+// CSS3 properties
+// --------------------------------------------------
+
+// Clearfix
+
+@mixin clearfix() {
+    &:before,
+    &:after {
+        content: "";
+        display: table;
+    }
+    &:after {
+        clear: both;
+    }
+}
+
+// Border radius
+
+@mixin border-radius-all($radius) {
+  border-radius: $radius;
+}
+
+// Box shadow
+
+@mixin box-shadow($shadow) {
+  box-shadow: $shadow;
+}
+
+// Linear gradient
+
+@mixin linear-gradient($start-color, $end-color) {
+  background-color: $start-color;
+  background-image: linear-gradient(to bottom, $start-color, $end-color);
+}
+
+// Visibility
+// --------------------------------------------------
+
+@mixin hover {
+  .discourse-no-touch & {
+    &:hover {
+      @content;
+    }
+  }
+}
+
+@mixin visible {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+//
+// --------------------------------------------------
+
+// Unselectable (avoids unwanted selections with iPad, touch laptops, etc)
+
+@mixin unselectable {
+  -webkit-user-select: none;
+     -moz-user-select: none;
+      -ms-user-select: none;
+}
+
+// ---------------------------------------------------
+
+//Flexbox
+
+@mixin flexbox() {
+  display: -webkit-box;
+  display: -moz-box;
+  display: -ms-flexbox;
+  display: -webkit-flex;
+  display: flex;
+}
+
+@mixin inline-flex() {
+  display: -webkit-inline-box;
+  display: -webkit-inline-flex;
+  display: -moz-inline-box;
+  display: -ms-inline-flexbox;
+  display: inline-flex;
+}
+
+
+@mixin align-items($alignment) {
+    -webkit-box-align: $alignment;
+    -webkit-align-items: $alignment;
+    -ms-flex-align: $alignment;  
+    -ms-align-items: $alignment;
+    align-items:$alignment;
+}
+
+@mixin order($val) {
+  -webkit-box-ordinal-group: $val;
+  -moz-box-ordinal-group: $val;
+  -ms-flex-order: $val;
+  -webkit-order: $val;
+  order: $val;
+}

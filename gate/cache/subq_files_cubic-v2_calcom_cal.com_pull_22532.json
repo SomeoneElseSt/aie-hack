@@ -1,0 +1,1 @@
+{"ENV_FILE is resolved relative to the caller's cwd, so running this from the repo root writes GOOGLE_WEBHOOK_URL to the wrong .env file": 0.9384616017341614, "Script relies on an undeclared tsx binary, so yarn dev:cron can prompt to install or fetch a package outside the repo's lockfile": 0.8808186650276184}

@@ -1,0 +1,1 @@
+{"Using `forEach(async ...)` means the deletions run fire-and-forget and any rejection bypasses the surrounding `try/catch`, which can silently skip calendar/video cleanup. Should convert to `await Promise.all(bookingRefsFiltered.map(async ...))` or a `for...of` with `await` to ensure failures are caught.": 0.9595300555229187}

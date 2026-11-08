@@ -1,0 +1,1 @@
+{"The matcher returns false when the grant shortcut matches the expected value, which inverts the intended logic and will reject valid access token IDs. The condition should be flipped so only mismatched shortcuts fail.": 0.9899997115135193}

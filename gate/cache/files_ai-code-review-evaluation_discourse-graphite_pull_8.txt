@@ -1,0 +1,4954 @@
+===== FILE app/assets/javascripts/admin/controllers/admin-group.js.es6 (after PR) =====
+export default Em.ObjectController.extend({
+  needs: ['adminGroups'],
+  disableSave: false,
+  usernames: null,
+
+  currentPage: function() {
+    if (this.get("user_count") == 0) { return 0; }
+    return Math.floor(this.get("offset") / this.get("limit")) + 1;
+  }.property("limit", "offset", "user_count"),
+
+  totalPages: function() {
+    if (this.get("user_count") == 0) { return 0; }
+    return Math.floor(this.get("user_count") / this.get("limit")) + 1;
+  }.property("limit", "user_count"),
+
+  showingFirst: Em.computed.lte("currentPage", 1),
+  showingLast: Discourse.computed.propertyEqual("currentPage", "totalPages"),
+
+  aliasLevelOptions: function() {
+    return [
+      { name: I18n.t("groups.alias_levels.nobody"), value: 0 },
+      { name: I18n.t("groups.alias_levels.mods_and_admins"), value: 2 },
+      { name: I18n.t("groups.alias_levels.members_mods_and_admins"), value: 3 },
+      { name: I18n.t("groups.alias_levels.everyone"), value: 99 }
+    ];
+  }.property(),
+
+  actions: {
+    next: function() {
+      if (this.get("showingLast")) { return; }
+
+      var group = this.get("model"),
+          offset = Math.min(group.get("offset") + group.get("limit"), group.get("user_count"));
+
+      group.set("offset", offset);
+
+      return group.findMembers();
+    },
+
+    previous: function() {
+      if (this.get("showingFirst")) { return; }
+
+      var group = this.get("model"),
+          offset = Math.max(group.get("offset") - group.get("limit"), 0);
+
+      group.set("offset", offset);
+
+      return group.findMembers();
+    },
+
+    removeMember: function(member) {
+      var self = this,
+          message = I18n.t("admin.groups.delete_member_confirm", { username: member.get("username"), group: this.get("name") });
+      return bootbox.confirm(message, I18n.t("no_value"), I18n.t("yes_value"), function(confirm) {
+        if (confirm) {
+          self.get("model").removeMember(member);
+        }
+      });
+    },
+
+    addMembers: function() {
+      // TODO: should clear the input
+      if (Em.isEmpty(this.get("usernames"))) { return; }
+      this.get("model").addMembers(this.get("usernames"));
+    },
+
+    save: function() {
+      var self = this,
+          group = this.get('model');
+
+      self.set('disableSave', true);
+
+      var promise;
+      if (group.get('id')) {
+        promise = group.save();
+      } else {
+        promise = group.create().then(function() {
+          var groupsController = self.get('controllers.adminGroups');
+          groupsController.addObject(group);
+        });
+      }
+      promise.then(function() {
+        self.send('showGroup', group);
+      }, function(e) {
+        var message = $.parseJSON(e.responseText).errors;
+        bootbox.alert(message);
+      }).finally(function() {
+        self.set('disableSave', false);
+      });
+    },
+
+    destroy: function() {
+      var group = this.get('model'),
+          groupsController = this.get('controllers.adminGroups'),
+          self = this;
+
+      bootbox.confirm(I18n.t("admin.groups.delete_confirm"), I18n.t("no_value"), I18n.t("yes_value"), function(result) {
+        if (result) {
+          self.set('disableSave', true);
+          group.destroy().then(function() {
+            groupsController.get('model').removeObject(group);
+            self.transitionToRoute('adminGroups.index');
+          }, function() {
+            bootbox.alert(I18n.t("admin.groups.delete_failed"));
+          }).finally(function() {
+            self.set('disableSave', false);
+          });
+        }
+      });
+    }
+  }
+});
+
+
+===== FILE app/assets/javascripts/admin/routes/admin_group_route.js (after PR) =====
+Discourse.AdminGroupRoute = Discourse.Route.extend({
+
+  model: function(params) {
+    var groups = this.modelFor('adminGroups'),
+        group = groups.findProperty('name', params.name);
+
+    if (!group) { return this.transitionTo('adminGroups.index'); }
+    return group;
+  },
+
+  setupController: function(controller, model) {
+    controller.set("model", model);
+    model.findMembers();
+  }
+
+});
+
+
+
+===== FILE app/assets/javascripts/admin/templates/group.hbs (after PR) =====
+<form class="form-horizontal">
+
+  <div>
+    {{#if automatic}}
+      <h3>{{name}}</h3>
+    {{else}}
+      <label for="name">{{i18n 'admin.groups.name'}}</label>
+      {{text-field name="name" value=name placeholderKey="admin.groups.name_placeholder"}}
+    {{/if}}
+  </div>
+
+  {{#if id}}
+    <div>
+      <label>{{i18n 'admin.groups.group_members'}} ({{user_count}})</label>
+      <div>
+        <a {{bind-attr class=":previous showingFirst:disabled"}} {{action "previous"}}>{{fa-icon "fast-backward"}}</a>
+        {{currentPage}}/{{totalPages}}
+        <a {{bind-attr class=":next showingLast:disabled"}} {{action "next"}}>{{fa-icon "fast-forward"}}</a>
+      </div>
+      <div class="ac-wrap clearfix">
+        {{each member in members itemView="group-member"}}
+      </div>
+    </div>
+
+    {{#unless automatic}}
+      <div>
+        <label for="user-selector">{{i18n 'admin.groups.add_members'}}</label>
+        {{user-selector usernames=usernames placeholderKey="admin.groups.selector_placeholder" id="user-selector"}}
+        <button {{action "addMembers"}} class='btn add'>{{fa-icon "plus"}} {{i18n 'admin.groups.add'}}</button>
+      </div>
+    {{/unless}}
+  {{/if}}
+
+  <div>
+    <label>
+      {{input type="checkbox" checked=visible}}
+      {{i18n 'groups.visible'}}
+    </label>
+  </div>
+
+  <div>
+    <label for="alias">{{i18n 'groups.alias_levels.title'}}</label>
+    {{combo-box name="alias" valueAttribute="value" value=alias_level content=aliasLevelOptions}}
+  </div>
+
+  <div class='buttons'>
+    <button {{action "save"}} {{bind-attr disabled="disableSave"}} class='btn btn-primary'>{{i18n 'admin.customize.save'}}</button>
+    {{#unless automatic}}
+      <button {{action "destroy"}} class='btn btn-danger'>{{fa-icon "trash-o"}}{{i18n 'admin.customize.delete'}}</button>
+    {{/unless}}
+  </div>
+
+</form>
+
+
+===== FILE app/assets/javascripts/admin/templates/group_member.hbs (after PR) =====
+{{avatar member imageSize="small"}} {{member.username}} {{#unless automatic}}<a class='remove' {{action "removeMember" member}}>{{fa-icon "times"}}</a>{{/unless}}
+
+
+===== FILE app/assets/javascripts/admin/views/group-member.js.es6 (after PR) =====
+export default Discourse.View.extend({
+  classNames: ["item"],
+  templateName: "admin/templates/group_member"
+});
+
+
+===== FILE app/assets/javascripts/discourse/models/group.js (after PR) =====
+/**
+  The data model for a Group
+
+  @class Group
+  @extends Discourse.Model
+  @namespace Discourse
+  @module Discourse
+**/
+Discourse.Group = Discourse.Model.extend({
+  limit: 50,
+  offset: 0,
+  user_count: 0,
+
+  userCountDisplay: function(){
+    var c = this.get('user_count');
+    // don't display zero its ugly
+    if (c > 0) { return c; }
+  }.property('user_count'),
+
+  findMembers: function() {
+    if (Em.isEmpty(this.get('name'))) { return ; }
+
+    var self = this, offset = Math.min(this.get("user_count"), Math.max(this.get("offset"), 0));
+
+    return Discourse.ajax('/groups/' + this.get('name') + '/members.json', {
+      data: {
+        limit: this.get("limit"),
+        offset: offset
+      }
+    }).then(function(result) {
+      self.setProperties({
+        user_count: result.meta.total,
+        limit: result.meta.limit,
+        offset: result.meta.offset,
+        members: result.members.map(function(member) { return Discourse.User.create(member); })
+      });
+    });
+  },
+
+  removeMember: function(member) {
+    var self = this;
+    return Discourse.ajax('/admin/groups/' + this.get('id') + '/members.json', {
+      type: "DELETE",
+      data: { user_id: member.get("id") }
+    }).then(function() {
+      // reload member list
+      self.findMembers();
+    });
+  },
+
+  addMembers: function(usernames) {
+    var self = this;
+    return Discourse.ajax('/admin/groups/' + this.get('id') + '/members.json', {
+      type: "PUT",
+      data: { usernames: usernames }
+    }).then(function() {
+      // reload member list
+      self.findMembers();
+    })
+  },
+
+  asJSON: function() {
+    return {
+      name: this.get('name'),
+      alias_level: this.get('alias_level'),
+      visible: !!this.get('visible')
+    };
+  },
+
+  create: function(){
+    var self = this;
+    return Discourse.ajax("/admin/groups", { type: "POST", data: this.asJSON() }).then(function(resp) {
+      self.set('id', resp.basic_group.id);
+    });
+  },
+
+  save: function(){
+    return Discourse.ajax("/admin/groups/" + this.get('id'), { type: "PUT", data: this.asJSON() });
+  },
+
+  destroy: function(){
+    if (!this.get('id')) { return };
+    return Discourse.ajax("/admin/groups/" + this.get('id'), {type: "DELETE"});
+  },
+
+  findPosts: function(opts) {
+    opts = opts || {};
+
+    var data = {};
+    if (opts.beforePostId) { data.before_post_id = opts.beforePostId; }
+
+    return Discourse.ajax("/groups/" + this.get('name') + "/posts.json", { data: data }).then(function (posts) {
+      return posts.map(function (p) {
+        p.user = Discourse.User.create(p.user);
+        return Em.Object.create(p);
+      });
+    });
+  }
+});
+
+Discourse.Group.reopenClass({
+  findAll: function(opts){
+    return Discourse.ajax("/admin/groups.json", { data: opts }).then(function(groups){
+      return groups.map(function(g) { return Discourse.Group.create(g); });
+    });
+  },
+
+  findGroupCounts: function(name) {
+    return Discourse.ajax("/groups/" + name + "/counts.json").then(function (result) {
+      return Em.Object.create(result.counts);
+    });
+  },
+
+  find: function(name) {
+    return Discourse.ajax("/groups/" + name + ".json").then(function(g) {
+      return Discourse.Group.create(g.basic_group);
+    });
+  }
+});
+
+
+===== FILE app/assets/javascripts/discourse/routes/group-members.js.es6 (after PR) =====
+import ShowFooter from "discourse/mixins/show-footer";
+
+export default Discourse.Route.extend(ShowFooter, {
+  model: function() {
+    return this.modelFor('group');
+  },
+
+  setupController: function(controller, model) {
+    this.controllerFor('group').set('showing', 'members');
+    controller.set("model", model);
+    model.findMembers();
+  }
+
+});
+
+
+===== FILE app/assets/javascripts/discourse/templates/components/admin-group-selector.hbs (after PR) =====
+<input type="text">
+
+
+===== FILE app/assets/javascripts/discourse/templates/group/members.hbs (after PR) =====
+{{#if model}}
+  <table class='group-members'>
+    <tr>
+      <th colspan="3" class="seen">{{i18n 'last_seen'}}</th>
+    </tr>
+  {{#each m in members}}
+  <tr>
+      <td class='avatar'>
+        {{avatar m imageSize="large"}}
+      </td>
+      <td>
+        <h3>{{#link-to 'user' m}}{{m.username}}{{/link-to}}</h3>
+        <p>{{m.name}}</p>
+      </td>
+      <td>
+        <span class='last-seen-at'>{{bound-date m.last_seen_at}}</span>
+      </td>
+    </tr>
+    </div>
+  {{/each}}
+</table>
+{{/if}}
+
+
+===== FILE app/assets/javascripts/discourse/templates/user-selector-autocomplete.raw.hbs (after PR) =====
+<div class='autocomplete'>
+  <ul>
+    {{#each options.users}}
+      <li>
+        <a href='#'>{{avatar this imageSize="tiny"}}
+          <span class='username'>{{this.username}}</span>
+          <span class='name'>{{this.name}}</span>
+        </a>
+      </li>
+    {{/each}}
+    {{#if options.groups}}
+      {{#if options.users}}<hr>{{/if}}
+      {{#each options.groups}}
+        <li>
+          <a href=''>
+            <i class='icon-group'></i>
+            <span class='username'>{{this.name}}</span>
+            <span class='name'>{{max-usernames usernames max="3"}}</span>
+          </a>
+        </li>
+      {{/each}}
+    {{/if}}
+  </ul>
+</div>
+
+
+===== FILE app/assets/stylesheets/common/admin/admin_base.scss (after PR) =====
+// these are the styles associated with the Discourse admin section
+@import "common/foundation/variables";
+@import "common/foundation/mixins";
+@import "common/foundation/helpers";
+
+.admin-contents table {
+  width: 100%;
+  tr {text-align: left;}
+  td, th {padding: 8px;}
+  th {border-top: 1px solid scale-color-diff();}
+  td {border-bottom: 1px solid scale-color-diff(); border-top: 1px solid scale-color-diff();}
+  tr:hover { background-color: darken($secondary, 2.5%); }
+  tr.selected { background-color: lighten($primary, 80%); }
+  .filters input { margin-bottom: 0; }
+}
+
+td.flaggers td {
+  border-bottom: none;
+  border-top: none;
+}
+
+.content-list li a span.count {
+  font-size: 0.857em;
+  float: right;
+  margin-right: 10px;
+  background-color: scale-color-diff();
+  padding: 2px 5px;
+  border-radius: 5px;
+  color: $primary;
+}
+
+.admin-content {
+  margin-bottom: 50px;
+  .admin-contents {
+    padding: 8px;
+  }
+
+  .view-options {
+    float: right;
+  }
+  table.report {
+    margin-top: 20px;
+    tr {
+      th:nth-of-type(1) {
+        width: 20%;
+      }
+    }
+
+    .bar-container {
+      float: left;
+      width: 300px;
+      margin-right: 15px;
+      margin-bottom: 5px;
+      display: inline-block;
+
+      .bar {
+        margin-top: 5px;
+        background-color: $tertiary;
+        display: inline-block;
+        text-align: right;
+        padding-right: 8px;
+        color: $secondary;
+      }
+    }
+  }
+}
+
+.ip-lookup {
+  position: relative;
+  display: inline-block;
+
+  .location-box {
+    position: absolute;
+    width: 460px;
+    right: 0px;
+    z-index: 990;
+    box-shadow: 0 2px 6px rgba(0,0,0, .8);
+    margin-top: -2px;
+    background-color: $secondary;
+    padding: 12px 12px 5px;
+
+    .other-accounts {
+      margin: 5px 0 0;
+      max-height: 200px;
+      overflow: auto;
+      width: 455px;
+      ul { margin: 0; }
+      li { list-style: none; }
+      tr td:first-of-type { width: 130px; }
+    }
+  }
+}
+
+.admin-container {
+  margin-top: 20px;
+}
+
+.admin-title {
+  height: 45px;
+}
+
+.admin-controls {
+  background-color: dark-light-diff($primary, $secondary, 90%, -75%);
+  padding: 10px 10px 3px 0;
+  height: 35px;
+  .nav.nav-pills {
+    li.active {
+      a {
+        border-color: scale-color-diff();
+        background-color: lighten($primary, 40%);
+        &:hover {
+          background-color: lighten($primary, 40%);
+        }
+      }
+    }
+  }
+  h1 {
+    font-size: 1.429em;
+    line-height: 25px;
+    color: $primary;
+  }
+  .controls {
+    margin-left: 10px;
+  }
+  button {
+    margin-right: 5px;
+
+  }
+  input[type=text] {
+    display: inline-block;
+    float: left;
+  }
+  .result-message {
+    display: inline-block;
+    padding-left: 10px;
+    padding-top: 5px;
+  }
+  .username {
+    input[type=text] {
+      width: 240px;
+    }
+  }
+  .search {
+    float: right;
+    margin-left: 10px;
+    label {
+      margin-top: 5px;
+    }
+  }
+  .toggle {
+    margin-top: 8px;
+    float: right;
+
+    span {
+      font-weight: bold;
+    }
+  }
+  label {
+    display: inline-block;
+    margin-right: 5px;
+  }
+}
+
+.groups, .badges {
+  .form-horizontal {
+    label {
+      font-weight: bold;
+    }
+
+    & > div {
+      margin-top: 10px;
+    }
+
+    input, textarea, select {
+      width: 350px;
+    }
+
+    input[type="checkbox"] {
+      width: 20px;
+    }
+  }
+}
+
+.site-settings-nav {
+  width: 18.018%;
+  margin-top: 30px;
+  .nav-stacked {
+    border-right: none;
+  }
+  li a.active {
+    color: $secondary;
+    background-color: $quaternary;
+  }
+}
+
+.site-settings-detail {
+  width: 76.5765%;
+  min-height: 800px;
+  margin-left: 0;
+  border-left: solid 1px scale-color-diff();
+  padding: 30px 0 30px 30px;
+}
+
+.settings {
+  .setting {
+    padding-bottom: 20px;
+
+    .setting-label {
+      float: left;
+      width: 17.6576%;
+      margin-right: 12px;
+    }
+    .setting-value {
+      float: left;
+      width: 53%;
+      .select2-container {
+        width: 100%;
+      }
+      .select2-container-multi .select2-choices {
+        border: none;
+      }
+    }
+    .setting-controls {
+      float: left;
+    }
+    .input-setting-string {
+      width: 404px;
+      @include medium-width { width: 314px; }
+      @include small-width  { width: 284px; }
+    }
+    .input-setting-list {
+      width: 408px;
+      padding: 1px;
+      background-color: $secondary;
+      border: 1px solid scale-color-diff();
+      border-radius: 3px;
+      box-shadow: inset 0 1px 1px rgba(51, 51, 51, 0.3);
+      transition: border linear 0.2s, box-shadow linear 0.2s;
+
+      li.select2-search-choice {
+        cursor: pointer;
+        .select2-search-choice-close {
+          content: "x"
+        }
+      }
+
+      li.sortable-placeholder {
+        padding: 3px 5px 3px 18px;
+        margin: 3px 0px 3px 5px;
+        position: relative;
+        line-height: 13px;
+        cursor: default;
+        border: 1px dashed #AAA;
+        border-radius: 3px;
+        background-clip: padding-box;
+        -moz-user-select: none;
+        background-color: none;
+        width: 3em;
+        height: 1em;
+      }
+
+    }
+
+    .desc, .validation-error {
+      padding-top: 3px;
+      font-size: 80%;
+      line-height: 1.4em;
+    }
+
+    .validation-error {
+      color: $danger;
+    }
+
+    .desc {
+      color: scale-color($primary, $lightness: 50%);
+    }
+
+    h3 {
+      font-size: 0.929em;
+      font-weight: normal;
+    }
+  }
+
+  .setting.overridden {
+    input[type=text] {
+      background-color: dark-light-diff($highlight, $secondary, 50%, -60%);
+
+    }
+
+    h3 {
+      color: scale-color($highlight, $lightness: -50%);
+    }
+  }
+}
+
+section.details {
+  h1 {
+    font-size: 1.286em;
+    color: $primary;
+    padding: 5px 10px;
+    margin: 30px 0 5px 0;
+    border-bottom: 5px solid scale-color-diff();
+  }
+}
+
+#selected-controls {
+  background-color: scale-color($tertiary, $lightness: 75%);
+  padding: 8px;
+  min-height: 27px;
+  position: fixed;
+  bottom: 0;
+  width: 1075px;
+}
+
+.user-controls {
+  padding: 5px;
+  clear: both;
+  text-align: right;
+}
+
+.display-row.associations .value {
+  width: 750px;
+}
+
+.display-row {
+  line-height: 30px;
+  padding: 5px;
+  &:nth-of-type(1) {
+    border-top: 0;
+  }
+  &.highlight-danger {
+    background-color: scale-color($danger, $lightness: 50%);
+  }
+  border-top: 1px solid scale-color-diff();
+  &:before, &:after {
+    display: table;
+    content: "";
+  }
+  &:after {
+    clear: both;
+  }
+  .field {
+    font-weight: bold;
+    width: 17.65765%;
+    float: left;
+    margin-left: 12px;
+  }
+  .value {
+    width: 250px;
+    float: left;
+    margin-left: 12px;
+  }
+  .long-value {
+    width: 800px;
+    float: left;
+    margin-left: 12px;
+    font-size: 0.929em;
+
+    button {
+      margin-left: 10px;
+    }
+  }
+
+  .controls {
+    width: 480px;
+    float: left;
+    margin-left: 12px;
+    .btn {
+      margin-right: 5px;
+    }
+  }
+}
+
+// Badges area
+.badges {
+  .content-list ul {
+    margin-bottom: 10px;
+
+    .list-badge {
+      float: right;
+      font-size: 11px;
+      font-weight: normal;
+      padding: 0 6px;
+      color: $secondary;
+      background-color: scale-color($tertiary, $lightness: 50%);
+      border-radius: 3px;
+    }
+  }
+
+  .current-badge {
+    margin: 20px;
+
+    p.help {
+      margin: 0;
+      color: scale-color($primary, $lightness: 40%);
+      font-size: 0.9em;
+    }
+  }
+
+  .form-horizontal {
+    .delete-link {
+      margin-left: 15px;
+      margin-top: 5px;
+    }
+    textarea {
+      height: 200px;
+    }
+  }
+
+  .current-badge-actions {
+    margin: 10px;
+    padding: 10px;
+    border-top: 1px solid scale-color($primary, $lightness: 80%);
+  }
+
+  .buttons {
+    float: left;
+    width: 200px;
+    .saving {
+      padding: 5px 0 0 0;
+      margin-left: 10px;
+      width: 80px;
+      color: $primary;
+    }
+  }
+}
+
+.badge-query-preview {
+  .grant-count, .sample, .error-header {
+    margin-left: 10px;
+  }
+
+  .badge-errors {
+    font-size: 1em;
+    line-height: 16px;
+    padding: 4px;
+    background-color: scale-color-diff();
+  }
+
+  .badge-query-plan {
+    font-size: 0.857em;
+    line-height: 13px;
+    padding: 4px;
+    background-color: scale-color-diff();
+  }
+
+  .count-warning {
+    background-color: dark-light-diff(rgba($danger,.7), $secondary, 50%, -60%);
+    margin: 0 0 7px 0;
+    padding: 10px 20px;
+
+    p {
+      margin: 0;
+    }
+    .heading {
+      color: $danger;
+      font-weight: bold;
+    }
+  }
+}
+
+// Groups area
+.groups {
+  .ac-wrap {
+    width: 100% !important;
+    .item {
+      width: 190px;
+      margin-right: 0 !important;
+    }
+  }
+  .next, .previous {
+    color: #333 !important;
+    &.disabled {
+      color: #aaa !important;
+    }
+  }
+  .btn.add {
+    margin-top: 7px;
+  }
+}
+
+// Customise area
+.customize {
+  .admin-footer {
+    margin-top: 20px;
+  }
+  .current-style.maximized {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100000;
+    background-color: white;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    .wrapper {
+      position: absolute;
+      top: 20px;
+      bottom: 10px;
+      left: 20px;
+      right: 20px;
+    }
+  }
+  .nav.nav-pills {
+    margin-left: 10px;
+  }
+  .content-list, .current-style {
+    float: left;
+  }
+  .content-list ul {
+    margin-bottom: 10px;
+  }
+  .current-style {
+    .nav.nav-pills{
+      position: relative;
+    }
+    .toggle-maximize {
+      position: absolute;
+      right: -5px;
+    }
+    .delete-link {
+      margin-left: 15px;
+      margin-top: 5px;
+    }
+    .preview-link {
+      margin-left: 15px;
+    }
+    padding-left: 10px;
+    width: 70%;
+    .style-name {
+      width: 350px;
+      height: 25px;
+    }
+    .ace-wrapper {
+      position: relative;
+      height: 400px;
+      width: 100%;
+    }
+    &.maximized {
+      .admin-container {
+        position: absolute;
+        bottom: 50px;
+        top: 80px;
+        width: 100%;
+      }
+      .admin-footer {
+        position: absolute;
+        bottom: 10px;
+      }
+      .ace-wrapper {
+        height: 100%;
+      }
+    }
+    .ace_editor {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
+    }
+    .status-actions {
+      float: right;
+      margin-top: 7px;
+      span {
+        margin-right: 10px;
+      }
+    }
+    .buttons {
+      float: left;
+      width: 200px;
+      .saving {
+        padding: 5px 0 0 0;
+        margin-left: 10px;
+        width: 80px;
+        color: $primary;
+      }
+    }
+  }
+  .color-scheme {
+    .controls {
+      span, button, a {
+        margin-right: 10px;
+      }
+    }
+  }
+  .colors {
+    thead th       { border: none; }
+    td.hex         { width: 100px; }
+    td.actions     { width: 200px; }
+    .hex-input     { width: 80px; margin-bottom: 0; }
+    .hex           { text-align: center; }
+    .description   { color: scale-color($primary, $lightness: 50%); }
+
+    .invalid .hex input {
+      background-color: white;
+      color: black;
+      border-color: $danger;
+    }
+  }
+}
+
+
+.admin-flags {
+  table-layout: fixed;
+
+  .hidden-post td.excerpt, .hidden-post td.user { opacity: 0.5; }
+  .deleted td.excerpt, .deleted td.user { background-color: scale-color($danger, $lightness: 70%); }
+  .message { background-color: dark-light-diff($highlight, $secondary, 50%, -70%); }
+  .message:hover { background-color: dark-light-diff($highlight, $secondary, 60%, -60%); }
+  td { vertical-align: top; }
+  th { text-align: left; }
+  .user {
+    width: 25px;
+    padding: 8px 0 0 0;
+    text-align: center;
+  }
+  .excerpt {
+    max-width: 700px;
+    width: 75%;
+    padding: 8px;
+    word-wrap: break-word;
+    .fa { display: inline-block; }
+    h3 {
+      max-height: 1.2em;
+      overflow: hidden;
+      margin-top: 0;
+      margin-bottom: 5px;
+    }
+  }
+  .flaggers {
+    font-size: 11px;
+    padding: 8px 0 0 5px;
+    .avatar {
+      width: 25px;
+    }
+    table {
+      max-width: 145px;
+    }
+    tr {
+      height: 44px;
+    }
+    td {
+      vertical-align: middle;
+      padding: 3px;
+      line-height: 1.4;
+    }
+  }
+  .action {
+     button { margin: 4px; }
+     text-align: right;
+     padding-bottom: 20px;
+  }
+  td p {
+    font-size: 0.929em;
+    margin: 0 0 5px 0;
+  }
+  .flagged-posts { background: $danger; }
+}
+
+/* Dashboard */
+
+.dashboard-left {
+  float: left;
+  margin-top: 10px;
+  width: 60%;
+}
+.dashboard-right {
+  float: right;
+  margin-top: 10px;
+  width: 40%;
+
+
+  .dashboard-stats {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+.version-check {
+  margin-top: 10px;
+
+  .version-number {
+    font-size: 1.286em;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  .face {
+    width: 20px;
+  }
+
+  .version-notes .fa {
+    vertical-align: bottom;
+  }
+
+  &.critical .version-notes .normal-note {
+    display: none;
+  }
+  &.normal .version-notes .critical-note {
+    display: none;
+  }
+
+  .fa {
+    font-size: 1.857em;
+  }
+
+  .up-to-date {
+    color: $success;
+  }
+  .updates-available {
+    color: $danger;
+  }
+  .critical-updates-available {
+    color: $danger;
+  }
+}
+
+.update-nag {
+  i.fa {
+    font-size: 1.429em;
+  }
+}
+
+table.api-keys {
+  margin-top: 10px;
+  width: 100%;
+
+  th {
+    text-align: left;
+    padding: 5px;
+  }
+
+  td {
+    padding: 5px;
+  }
+
+  td.key {
+    font-size: 0.857em;
+  }
+}
+
+.dashboard-stats {
+  margin-bottom: 30px;
+  margin-right: 40px;
+  h4 {
+    font-weight: normal;
+    margin-bottom: 8px;
+  }
+
+  table {
+    width: 100%;
+
+    .title {
+      i.fa {
+        color: $primary;
+      }
+    }
+
+    th {
+      font-weight: normal;
+      text-align: center;
+      background: dark-light-diff($primary, $secondary, 80%, -65%);
+    }
+    th.title {
+      text-align: left;
+    }
+    thead {
+      tr:hover > td {
+        background-color: $secondary;
+      }
+    }
+
+    td.value {
+      font-weight: bold;
+      text-align: center;
+
+      i {
+        display: none;
+      }
+
+      &.trending-up {
+        color: $success;
+        i.up {
+          display: inline;
+        }
+      }
+      &.trending-down {
+        color: $danger;
+        i.down {
+          display: inline;
+        }
+      }
+      &.no-change {
+        i.down {
+          display: inline;
+          visibility: hidden;
+        }
+      }
+    }
+  }
+
+  &.detected-problems {
+    background: dark-light-diff($primary, $secondary, 90%, -75%);
+    margin-bottom: 20px;
+    margin-top: 10px;
+
+    .look-here {
+      float: left;
+      margin: 20px 10px 0 10px;
+
+      .fa {
+        font-size: 2.286em
+;
+        vertical-align: middle;
+        color: $primary
+      }
+    }
+
+    .problem-messages {
+      float: left;
+      width: 80%;
+      margin-left: 1%;
+      a {
+        text-decoration: underline;
+      }
+      .actions {
+        text-align: right;
+      }
+      .btn {
+        background: dark-light-diff($primary, $secondary, 80%, -85%);
+      }
+      ul {
+        margin-left: 0;
+        padding-left: 20px;
+      li {
+        margin-bottom: 10px;
+        }
+      }
+  }
+}
+
+  &.totals {
+    table {
+      width: auto;
+    }
+    margin-top: 12px;
+    padding-left: 5px;
+    .value {
+      text-align: left;
+      font-weight: bold;
+      padding-left: 8px;
+      padding-right: 30px;
+    }
+  }
+
+  &.trust-levels {
+    margin-bottom: 0;
+    table {
+      margin-bottom: 0;
+    }
+    td.value {
+      width: 45px;
+    }
+  }
+
+  .referred-topic-title {
+    width: 355px;
+    @include medium-width { width: 305px; }
+    @include small-width  { width: 265px; }
+  }
+}
+
+
+.commits-widget {
+  border: solid 1px scale-color-diff();
+  height: 180px;
+  margin-bottom: 36px;
+
+  ul, li {
+    margin: 0;
+    padding: 0;
+  }
+  ul {
+    list-style: none;
+  }
+  a {
+    color: $primary;
+    text-decoration: none;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+
+  .header {
+    color: $primary;
+    font-weight: bold;
+    height: 30px;
+    background: dark-light-diff($primary, $secondary, 80%, -75%);
+    cursor: pointer;
+
+    h1 {
+      font-size: 1.286em;
+      margin: 5px 0 0 8px;
+      display: inline-block;
+      line-height: 1.0em;
+    }
+  }
+
+  .header:hover h1 {
+    color: $tertiary;
+  }
+
+  .commits-list {
+    height: 149px;
+    overflow-y:auto;
+
+    li {
+      @extend .clearfix;
+      line-height: 1.0em;
+      padding: 6px 8px;
+    background-color: scale-color-diff();
+      .left {
+        float: left;
+      }
+      .right {
+        margin-left: 52px;
+      }
+
+      img {
+        margin-top: 2px;
+        border: solid 1px scale-color-diff();
+        padding: 2px;
+        background-color: $secondary;
+      }
+
+      .commit-message {
+        color: $primary;
+        font-size: 0.857em;
+        font-weight: bold;
+      }
+
+      .commit-meta {
+        color: $primary;
+        font-size: 0.857em;
+      }
+
+      .committer-name {
+        font-weight: bold;
+        color: $primary;
+      }
+    }
+    li:last-child {
+      border: none;
+    }
+  }
+
+  // Always show the scrollbar:
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: dark-light-diff($primary, $secondary, 90%, -75%);
+    -webkit-border-radius: 3px;
+  }
+  ::-webkit-scrollbar-track {
+    border-left: solid 1px scale-color-diff();
+  }
+}
+
+.content-list {
+
+  h3 {
+    color: dark-light-diff($primary, $secondary, 50%, -60%);
+    font-size: 1.071em;
+    padding-left: 5px;
+    margin-bottom: 10px;
+  }
+
+  ul {
+    list-style: none;
+    margin: 0;
+
+    li:first-of-type {
+      border-top: 1px solid scale-color-diff();
+    }
+    li {
+      border-bottom: 1px solid scale-color-diff();
+    }
+
+    li a {
+      display: block;
+      padding: 10px;
+      color: $primary;
+
+      &:hover {
+        background-color: scale-color-diff();
+        color: $primary;
+      }
+
+      &.active {
+        font-weight: bold;
+        color: $primary;
+      }
+    }
+  }
+}
+
+.content-editor {
+  min-height: 500px;
+
+  float: left;
+  width: 54.0540%;
+  margin-left: 1.8018%;
+
+  p.description {
+    color: $primary;
+  }
+
+  .controls {
+    margin-top: 10px;
+  }
+
+  #pagedown-editor {
+    width: 98%;
+  }
+
+  textarea.plain {
+    width: 98%;
+    height: 200px;
+  }
+
+  #wmd-input {
+    width: 98%;
+    height: 200px;
+  }
+
+  .ace-wrapper {
+    position: relative;
+    height: 600px;
+    width: 100%;
+  }
+  .ace_editor {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+  }
+
+}
+
+.row.groups {
+  input[type='text'] {
+    width: 500px;
+  }
+  input#group-users {
+    width: 600px;
+  }
+}
+
+// Logs
+
+.admin-logs-table {
+  input.ember-text-field {
+    padding: 1px 4px;
+  }
+  .btn {
+    padding: 2px 8px;
+    .fa {
+      margin-right: 2px;
+    }
+  }
+}
+
+.screened-emails, .screened-urls, .screened-ip-addresses {
+  .email, .url, .domain {
+    width: 300px;
+  }
+  .action, .match_count, .last_match_at, .created_at {
+    text-align: center;
+    width: 9.9099%;
+  }
+}
+
+.screened-ip-address-form {
+  margin-left: 6px;
+  .combobox {
+    width: 130px;
+  }
+}
+
+.screened-emails, .screened-urls {
+  .ip_address {
+    width: 9.9099%;
+    text-align: center;
+  }
+}
+.screened-ip-addresses {
+  .ip_address {
+    width: 150px;
+    text-align: left;
+    input {
+      width: 130px;
+    }
+  }
+  .col.actions {
+    width: 275px;
+    padding-top: 4px;
+    a {
+      text-decoration: underline;
+    }
+  }
+}
+
+.staff-actions {
+  width: 100%;
+  .action {
+    width: 10.810%;
+  }
+  .staff_user {
+    width: 9.009%;
+  }
+  .subject {
+    width: 18.018%;
+  }
+  .created_at {
+    width: 4.5045%;
+  }
+  .context {
+    width: 18.018%;
+  }
+  .created_at {
+    text-align: center;
+  }
+  .details {
+    width: 300px;
+    a {
+      text-decoration: underline;
+    }
+    &.value {
+      height: 70px;
+    }
+  }
+}
+
+.staff-action-logs-controls {
+  margin: 0 0 20px 6px;
+  a.filter {
+    display: inline-block;
+    background-color: scale-color($primary, $lightness: 75%);
+    padding: 3px 10px;
+    border-radius: 3px;
+
+    color: $primary;
+    &:hover {
+      color: $primary;
+      background-color: scale-color-diff();
+
+
+    }
+    .label {
+      font-weight: bold;
+    }
+    i {
+      margin-left: 6px;
+    }
+  }
+}
+
+.staff-action-logs-instructions {
+  margin: 0 0 10px 10px;
+}
+
+// Ember.ListView
+
+.ember-list-view {
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+}
+.ember-list-item-view {
+  position: absolute;
+}
+
+.staff-actions, .screened-emails, .screened-urls, .screened-ip-addresses {
+
+  border-bottom: dotted 1px scale-color($primary, $lightness: 75%);
+
+  .heading-container {
+    width: 100%;
+    background-color: scale-color-diff();
+  }
+  .col.heading {
+    font-weight: bold;
+    padding: 4px 0;
+  }
+  .col {
+    display: inline-block;
+    padding-top: 6px;
+    vertical-align: top;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .ember-list-item-view {
+    width: 100%;
+    border-top: solid 1px scale-color-diff();
+  }
+}
+
+.log-details-modal {
+  .modal-tab {
+    width: 95%;
+  }
+}
+
+.tl3-requirements {
+  .fa-check {
+    color: $success;
+  }
+  .fa-times {
+    color: $danger;
+  }
+}
+
+// Backups
+// --------------------------------------------------
+
+$rollback: #3D9970;
+$rollback-dark: darken($rollback, 10%) !default;
+$rollback-darker: darken($rollback, 20%) !default;
+
+.btn-rollback {
+  color: $secondary;
+  background: $rollback;
+  &:hover {
+    background: $rollback-dark;
+  }
+  &:active {
+    @include linear-gradient($rollback-darker, $rollback-dark);
+  }
+  &[disabled] {
+    background: $rollback;
+  }
+}
+
+.admin-backups-logs {
+  max-height: 500px;
+  overflow: auto;
+}
+
+
+button.ru {
+  position: relative;
+  min-width: 110px;
+}
+
+.ru-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(0, 175, 0, 0.3);
+}
+
+.is-uploading:hover .ru-progress {
+  background: rgba(200, 0, 0, 0.3);
+}
+
+.invisible {
+  visibility: hidden;
+}
+
+.delete-flag-modal, .agree-flag-modal {
+  button {
+    display: block;
+    margin: 10px 0 10px 10px;
+    padding: 10px 15px;
+  }
+}
+
+.start-backup-modal {
+  .btn {
+    margin: 10px 0 10px 5px;
+  }
+  .btn:first-of-type {
+    margin-left: 10px;
+  }
+}
+
+@media all
+and (max-width : 850px) {
+  .nav-stacked {
+    .glyph {width: auto; position: relative;}
+    > li > a {padding: 13px}
+  }
+}
+
+@media all
+and (min-width : 320px)
+and (max-width : 500px) {
+
+.full-width { margin: 0; }
+.site-settings-nav { width: 100%; }
+.site-settings-detail {
+  width: 100%;
+  padding: 0;
+  border: none;
+
+  .settings .setting {
+      .setting-label {
+      float: left;
+      width: 100%;
+      h3 {
+        margin-bottom: 5px;
+        font-weight: bold;
+        margin-top: 25px;
+        }
+      }
+      .setting-value {
+        width: 100%;
+        }
+      label {
+        font-size: 0.929em;
+        }
+    }
+  }
+
+  .content-editor {
+    width: 100%;
+      #pagedown-editor {
+        box-sizing: border-box;
+      }
+  }
+
+  div.ac-wrap {
+    width: 100% !important;
+    box-sizing: border-box;
+    }
+
+  .admin-container {
+    h2 {
+      float: left;
+      }
+  }
+
+  .dashboard-left, .dashboard-right { width: 100%; }
+  .dashboard-stats { margin: 0; }
+
+  .badges {
+    .current-badge {margin: 70px 0 0 0;}
+    .current-badge-actions {padding: 0;}
+  }
+
+  .customize .content-list, .customize .current-style {
+    width: 100%;
+  }
+}
+
+.badge-groupings {
+  list-style: none;
+  margin: 0;
+  padding: 10px 3px;
+  li {
+    padding: 6px 0;
+    width: 600px;
+    border-bottom: 1px solid #dfdfdf;
+  }
+  .actions {
+    font-size: 1.214em;
+    float: right;
+    a {
+      margin-left: 5px;
+    }
+  }
+}
+
+tr.not-activated {
+  td, td a, td a:visited {
+    color: #bbb;
+  }
+}
+.details.not-activated {
+  .username .value, .email .value a, .email .value a:visited {
+    color: #bbb;
+  }
+}
+
+.user-fields {
+  h2 {
+    margin-bottom: 10px;
+  }
+
+  .user-field {
+    padding: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid scale-color-diff();
+
+    .form-display {
+      width: 25%;
+      display: inline-block;
+      float: left;
+    }
+
+    .form-element {
+      float: left;
+      width: 25%;
+    }
+
+    .controls {
+      float: right;
+      text-align: right;
+      width: 20%;
+    }
+
+    .clearfix {
+      clear: both;
+    }
+  }
+}
+
+
+===== FILE app/controllers/admin/groups_controller.rb (after PR) =====
+class Admin::GroupsController < Admin::AdminController
+
+  def index
+    groups = Group.order(:name)
+
+    if search = params[:search]
+      search = search.to_s
+      groups = groups.where("name ILIKE ?", "%#{search}%")
+    end
+
+    if params[:ignore_automatic].to_s == "true"
+      groups = groups.where(automatic: false)
+    end
+
+    render_serialized(groups, BasicGroupSerializer)
+  end
+
+  def show
+    render nothing: true
+  end
+
+  def create
+    group = Group.new
+    group.name = (params[:name] || '').strip
+    group.visible = params[:visible] == "true"
+
+    if group.save
+      render_serialized(group, BasicGroupSerializer)
+    else
+      render_json_error group
+    end
+  end
+
+  def update
+    group = Group.find(params[:id].to_i)
+
+    group.alias_level = params[:alias_level].to_i if params[:alias_level].present?
+    group.visible = params[:visible] == "true"
+    # group rename is ignored for automatic groups
+    group.name = params[:name] if params[:name] && !group.automatic
+
+    if group.save
+      render json: success_json
+    else
+      render_json_error group
+    end
+  end
+
+  def destroy
+    group = Group.find(params[:id].to_i)
+
+    if group.automatic
+      can_not_modify_automatic
+    else
+      group.destroy
+      render json: success_json
+    end
+  end
+
+  def refresh_automatic_groups
+    Group.refresh_automatic_groups!
+    render json: success_json
+  end
+
+  def add_members
+    group = Group.find(params.require(:group_id).to_i)
+    usernames = params.require(:usernames)
+
+    return can_not_modify_automatic if group.automatic
+
+    usernames.split(",").each do |username|
+      if user = User.find_by_username(username)
+        group.add(user)
+      end
+    end
+
+    if group.save
+      render json: success_json
+    else
+      render_json_error(group)
+    end
+  end
+
+  def remove_member
+    group = Group.find(params.require(:group_id).to_i)
+    user_id = params.require(:user_id).to_i
+
+    return can_not_modify_automatic if group.automatic
+
+    group.users.delete(user_id)
+
+    if group.save
+      render json: success_json
+    else
+      render_json_error(group)
+    end
+  end
+
+  protected
+
+    def can_not_modify_automatic
+      render json: {errors: I18n.t('groups.errors.can_not_modify_automatic')}, status: 422
+    end
+end
+
+
+===== FILE app/controllers/groups_controller.rb (after PR) =====
+class GroupsController < ApplicationController
+
+  def show
+    render_serialized(find_group(:id), BasicGroupSerializer)
+  end
+
+  def counts
+    group = find_group(:group_id)
+    render json: {counts: { posts: group.posts_for(guardian).count,
+                            members: group.users.count } }
+  end
+
+  def posts
+    group = find_group(:group_id)
+    posts = group.posts_for(guardian, params[:before_post_id]).limit(20)
+    render_serialized posts.to_a, GroupPostSerializer
+  end
+
+  def members
+    group = find_group(:group_id)
+
+    limit = (params[:limit] || 50).to_i
+    offset = params[:offset].to_i
+
+    total = group.users.count
+    members = group.users.order(:username_lower).limit(limit).offset(offset)
+
+    render json: {
+      members: serialize_data(members, GroupUserSerializer),
+      meta: {
+        total: total,
+        limit: limit,
+        offset: offset
+      }
+    }
+  end
+
+  private
+
+    def find_group(param_name)
+      name = params.require(param_name)
+      group = Group.find_by("lower(name) = ?", name.downcase)
+      guardian.ensure_can_see!(group)
+      group
+    end
+
+end
+
+
+===== FILE config/locales/client.en.yml (after PR) =====
+# encoding: utf-8
+# This file contains content for the client portion of Discourse, sent out
+# to the Javascript app.
+#
+# To work with us on translations, see:
+# https://www.transifex.com/projects/p/discourse-org/
+#
+# This is a "source" file, which is used by Transifex to get translations for other languages.
+# After this file is changed, it needs to be pushed by a maintainer to Transifex:
+#
+#   tx push -s
+#
+# Read more here: https://meta.discourse.org/t/contribute-a-translation-to-discourse/14882
+#
+# To validate this YAML file after you change it, please paste it into
+# http://yamllint.com/
+
+en:
+  js:
+    number:
+      human:
+        storage_units:
+          format: '%n %u'
+          units:
+            byte:
+              one: Byte
+              other: Bytes
+            gb: GB
+            kb: KB
+            mb: MB
+            tb: TB
+    dates:
+      time: "h:mm a"
+      long_no_year: "MMM D h:mm a"
+      long_no_year_no_time: "MMM D"
+      long_with_year: "MMM D, YYYY h:mm a"
+      long_with_year_no_time: "MMM D, YYYY"
+      long_date_with_year: "MMM D, 'YY LT"
+      long_date_without_year: "MMM D, LT"
+      long_date_with_year_without_time: "MMM D, 'YY"
+      long_date_without_year_with_linebreak: "MMM D <br/>LT"
+      long_date_with_year_with_linebreak: "MMM D, 'YY <br/>LT"
+      tiny:
+        half_a_minute: "< 1m"
+        less_than_x_seconds:
+          one:   "< 1s"
+          other: "< %{count}s"
+        x_seconds:
+          one:   "1s"
+          other: "%{count}s"
+        less_than_x_minutes:
+          one:   "< 1m"
+          other: "< %{count}m"
+        x_minutes:
+          one:   "1m"
+          other: "%{count}m"
+        about_x_hours:
+          one:   "1h"
+          other: "%{count}h"
+        x_days:
+          one:   "1d"
+          other: "%{count}d"
+        about_x_years:
+          one:   "1y"
+          other: "%{count}y"
+        over_x_years:
+          one:   "> 1y"
+          other: "> %{count}y"
+        almost_x_years:
+          one:   "1y"
+          other: "%{count}y"
+        date_month: "MMM D"
+        date_year: "MMM 'YY"
+      medium:
+        x_minutes:
+          one: "1 min"
+          other: "%{count} mins"
+        x_hours:
+          one: "1 hour"
+          other: "%{count} hours"
+        x_days:
+          one: "1 day"
+          other: "%{count} days"
+        date_year: "MMM D, 'YY"
+      medium_with_ago:
+        x_minutes:
+          one: "1 min ago"
+          other: "%{count} mins ago"
+        x_hours:
+          one: "1 hour ago"
+          other: "%{count} hours ago"
+        x_days:
+          one: "1 day ago"
+          other: "%{count} days ago"
+    share:
+      topic: 'share a link to this topic'
+      post: 'post #%{postNumber}'
+      close: 'close'
+      twitter: 'share this link on Twitter'
+      facebook: 'share this link on Facebook'
+      google+: 'share this link on Google+'
+      email: 'send this link in an email'
+
+    topic_admin_menu: "topic admin actions"
+
+    edit: 'edit the title and category of this topic'
+    not_implemented: "That feature hasn't been implemented yet, sorry!"
+    no_value: "No"
+    yes_value: "Yes"
+    generic_error: "Sorry, an error has occurred."
+    generic_error_with_reason: "An error occurred: %{error}"
+    sign_up: "Sign Up"
+    log_in: "Log In"
+    age: "Age"
+    last_post: "Last Post"
+    joined: "Joined"
+    admin_title: "Admin"
+    flags_title: "Flags"
+    show_more: "show more"
+    show_help: "help"
+    links: "Links"
+    links_lowercase: "links"
+    faq: "FAQ"
+    guidelines: "Guidelines"
+    privacy_policy: "Privacy Policy"
+    privacy: "Privacy"
+    terms_of_service: "Terms of Service"
+    mobile_view: "Mobile View"
+    desktop_view: "Desktop View"
+    you: "You"
+    or: "or"
+    now: "just now"
+    read_more: 'read more'
+    more: "More"
+    less: "Less"
+    never: "never"
+    daily: "daily"
+    weekly: "weekly"
+    every_two_weeks: "every two weeks"
+    max_of_count: "max of {{count}}"
+    character_count:
+      one: "{{count}} character"
+      other: "{{count}} characters"
+
+    suggested_topics:
+      title: "Suggested Topics"
+
+    about:
+      simple_title: "About"
+      title: "About %{title}"
+      stats: "Site Statistics"
+      our_admins: "Our Admins"
+      our_moderators: "Our Moderators"
+      stat:
+        all_time: "All Time"
+        last_7_days: "Last 7 Days"
+      like_count: "Likes"
+      topic_count: "Topics"
+      post_count: "Posts"
+      user_count: "Users"
+
+    bookmarks:
+      not_logged_in: "sorry, you must be logged in to bookmark posts"
+      created: "you've bookmarked this post"
+      not_bookmarked: "you've read this post; click to bookmark it"
+      last_read: "this is the last post you've read; click to bookmark it"
+      remove: "Remove Bookmark"
+
+    topic_count_latest:
+      one: "{{count}} new or updated topic."
+      other: "{{count}} new or updated topics."
+
+    topic_count_unread:
+      one: "{{count}} unread topic."
+      other: "{{count}} unread topics."
+
+    topic_count_new:
+      one: "{{count}} new topic."
+      other: "{{count}} new topics."
+
+    click_to_show: "Click to show."
+    preview: "preview"
+    cancel: "cancel"
+
+    save: "Save Changes"
+    saving: "Saving..."
+    saved: "Saved!"
+
+    upload: "Upload"
+    uploading: "Uploading..."
+    uploaded: "Uploaded!"
+
+    enable: "Enable"
+    disable: "Disable"
+    undo: "Undo"
+    revert: "Revert"
+    failed: "Failed"
+
+    banner:
+      close: "Dismiss this banner."
+
+    choose_topic:
+      none_found: "No topics found."
+      title:
+        search: "Search for a Topic by name, url or id:"
+        placeholder: "type the topic title here"
+
+    user_action:
+      user_posted_topic: "<a href='{{userUrl}}'>{{user}}</a> posted <a href='{{topicUrl}}'>the topic</a>"
+      you_posted_topic: "<a href='{{userUrl}}'>You</a> posted <a href='{{topicUrl}}'>the topic</a>"
+      user_replied_to_post: "<a href='{{userUrl}}'>{{user}}</a> replied to <a href='{{postUrl}}'>{{post_number}}</a>"
+      you_replied_to_post: "<a href='{{userUrl}}'>You</a> replied to <a href='{{postUrl}}'>{{post_number}}</a>"
+      user_replied_to_topic: "<a href='{{userUrl}}'>{{user}}</a> replied to <a href='{{topicUrl}}'>the topic</a>"
+      you_replied_to_topic: "<a href='{{userUrl}}'>You</a> replied to <a href='{{topicUrl}}'>the topic</a>"
+
+      user_mentioned_user: "<a href='{{user1Url}}'>{{user}}</a> mentioned <a href='{{user2Url}}'>{{another_user}}</a>"
+      user_mentioned_you: "<a href='{{user1Url}}'>{{user}}</a> mentioned <a href='{{user2Url}}'>you</a>"
+      you_mentioned_user: "<a href='{{user1Url}}'>You</a> mentioned <a href='{{user2Url}}'>{{another_user}}</a>"
+
+      posted_by_user: "Posted by <a href='{{userUrl}}'>{{user}}</a>"
+      posted_by_you: "Posted by <a href='{{userUrl}}'>you</a>"
+      sent_by_user: "Sent by <a href='{{userUrl}}'>{{user}}</a>"
+      sent_by_you: "Sent by <a href='{{userUrl}}'>you</a>"
+
+    groups:
+      visible: "Group is visible to all users"
+      title:
+        one: "group"
+        other: "groups"
+      members: "Members"
+      posts: "Posts"
+      alias_levels:
+        title: "Who can use this group as an alias?"
+        nobody: "Nobody"
+        only_admins: "Only admins"
+        mods_and_admins: "Only moderators and Admins"
+        members_mods_and_admins: "Only group members, moderators and admins"
+        everyone: "Everyone"
+
+    user_action_groups:
+      "1": "Likes Given"
+      "2": "Likes Received"
+      "3": "Bookmarks"
+      "4": "Topics"
+      "5": "Posts"
+      "6": "Replies"
+      "7": "Mentions"
+      "9": "Quotes"
+      "10": "Starred"
+      "11": "Edits"
+      "12": "Sent Items"
+      "13": "Inbox"
+
+    categories:
+      all: "all categories"
+      all_subcategories: "all"
+      no_subcategory: "none"
+      category: "Category"
+      posts: "Posts"
+      topics: "Topics"
+      latest: "Latest"
+      latest_by: "latest by"
+      toggle_ordering: "toggle ordering control"
+      subcategories: "Subcategories"
+      topic_stats: "The number of new topics."
+      topic_stat_sentence:
+        one: "%{count} new topic in the past %{unit}."
+        other: "%{count} new topics in the past %{unit}."
+      post_stats: "The number of new posts."
+      post_stat_sentence:
+        one: "%{count} new post in the past %{unit}."
+        other: "%{count} new posts in the past %{unit}."
+
+    ip_lookup:
+      title: IP Address Lookup
+      hostname: Hostname
+      location: Location
+      location_not_found: (unknown)
+      organisation: Organization
+      phone: Phone
+      other_accounts: "Other accounts with this IP address:"
+      delete_other_accounts: "Delete %{count}"
+      username: "username"
+      trust_level: "TL"
+      read_time: "read time"
+      topics_entered: "topics entered"
+      post_count: "# posts"
+      confirm_delete_other_accounts: "Are you sure you want to delete these accounts?"
+
+    user:
+      said: "{{username}}:"
+      profile: "Profile"
+      mute: "Mute"
+      edit: "Edit Preferences"
+      download_archive: "Download My Posts"
+      new_private_message: "New Private Message"
+      private_message: "Private Message"
+      private_messages: "Messages"
+      activity_stream: "Activity"
+      preferences: "Preferences"
+      bookmarks: "Bookmarks"
+      bio: "About me"
+      invited_by: "Invited By"
+      trust_level: "Trust Level"
+      notifications: "Notifications"
+      dismiss_notifications: "Mark all as Read"
+      dismiss_notifications_tooltip: "Mark all unread notifications as read"
+      disable_jump_reply: "Don't jump to your new post after replying"
+      dynamic_favicon: "Show incoming message notifications on favicon (experimental)"
+      edit_history_public: "Let other users view my post revisions"
+      external_links_in_new_tab: "Open all external links in a new tab"
+      enable_quoting: "Enable quote reply for highlighted text"
+      change: "change"
+      moderator: "{{user}} is a moderator"
+      admin: "{{user}} is an admin"
+      moderator_tooltip: "This user is a moderator"
+      admin_tooltip: "This user is an admin"
+      suspended_notice: "This user is suspended until {{date}}."
+      suspended_reason: "Reason: "
+      github_profile: "Github"
+      mailing_list_mode: "Receive an email for every new post (unless you mute the topic or category)"
+      watched_categories: "Watched"
+      watched_categories_instructions: "You will automatically watch all new topics in these categories. You will be notified of all new posts and topics, plus the count of unread and new posts will also appear next to the topic's listing."
+      tracked_categories: "Tracked"
+      tracked_categories_instructions: "You will automatically track all new topics in these categories. A count of unread and new posts will appear next to the topic."
+      muted_categories: "Muted"
+      muted_categories_instructions: "You will not be notified of anything about new topics in these categories, and they will not appear on your unread tab."
+      delete_account: "Delete My Account"
+      delete_account_confirm: "Are you sure you want to permanently delete your account? This action cannot be undone!"
+      deleted_yourself: "Your account has been deleted successfully."
+      delete_yourself_not_allowed: "You cannot delete your account right now. Contact an admin to do delete your account for you."
+      unread_message_count: "Messages"
+      admin_delete: "Delete"
+
+      staff_counters:
+        flags_given: "helpful flags"
+        flagged_posts: "flagged posts"
+        deleted_posts: "deleted posts"
+        suspensions: "suspensions"
+        warnings_received: "warnings"
+
+      messages:
+        all: "All"
+        mine: "Mine"
+        unread: "Unread"
+
+      change_password:
+        success: "(email sent)"
+        in_progress: "(sending email)"
+        error: "(error)"
+        action: "Send Password Reset Email"
+        set_password: "Set Password"
+
+      change_about:
+        title: "Change About Me"
+
+      change_username:
+        title: "Change Username"
+        confirm: "If you change your username, all prior quotes of your posts and @name mentions will be broken. Are you absolutely sure you want to?"
+        taken: "Sorry, that username is taken."
+        error: "There was an error changing your username."
+        invalid: "That username is invalid. It must only include numbers and letters"
+
+      change_email:
+        title: "Change Email"
+        taken: "Sorry, that email is not available."
+        error: "There was an error changing your email. Perhaps that address is already in use?"
+        success: "We've sent an email to that address. Please follow the confirmation instructions."
+
+      change_avatar:
+        title: "Change your avatar"
+        gravatar: "<a href='//gravatar.com/emails' target='_blank'>Gravatar</a>, based on"
+        refresh_gravatar_title: "Refresh your Gravatar"
+        letter_based: "System assigned avatar"
+        uploaded_avatar: "Custom picture"
+        uploaded_avatar_empty: "Add a custom picture"
+        upload_title: "Upload your picture"
+        upload_picture: "Upload Picture"
+        image_is_not_a_square: "Warning: we've cropped your image; it is not square."
+
+      change_profile_background:
+        title: "Profile Background"
+        instructions: "Profile backgrounds will be centered and have a default width of 850px."
+
+      change_card_background:
+        title: "User Card Background"
+        instructions: "Background images will be centered and have a default width of 590px."
+
+      email:
+        title: "Email"
+        instructions: "Never shown to the public"
+        ok: "We will email you to confirm"
+        invalid: "Please enter a valid email address"
+        authenticated: "Your email has been authenticated by {{provider}}"
+        frequency:
+          zero: "We'll email you immediately if you haven't read the thing we're emailing you about."
+          one: "We'll only email you if we haven't seen you in the last minute and you haven't read the thing we're emailing you about."
+          other: "We'll only email you if we haven't seen you in the last {{count}} minutes and you haven't read the thing we're emailing you about."
+
+      name:
+        title: "Name"
+        instructions: "Your full name (optional)"
+        too_short: "Your name is too short"
+        ok: "Your name looks good"
+      username:
+        title: "Username"
+        instructions: "Unique, no spaces, short"
+        short_instructions: "People can mention you as @{{username}}"
+        available: "Your username is available"
+        global_match: "Email matches the registered username"
+        global_mismatch: "Already registered. Try {{suggestion}}?"
+        not_available: "Not available. Try {{suggestion}}?"
+        too_short: "Your username is too short"
+        too_long: "Your username is too long"
+        checking: "Checking username availability..."
+        enter_email: 'Username found; enter matching email'
+        prefilled: "Email matches this registered username"
+
+      locale:
+        title: "Interface language"
+        instructions: "User interface language. It will change when you refresh the page."
+        default: "(default)"
+
+      password_confirmation:
+        title: "Password Again"
+
+      last_posted: "Last Post"
+      last_emailed: "Last Emailed"
+      last_seen: "Seen"
+      created: "Joined"
+      log_out: "Log Out"
+      location: "Location"
+      card_badge:
+        title: "User Card Badge"
+
+      website: "Web Site"
+      email_settings: "Email"
+      email_digests:
+        title: "When you don't visit the site, send an email digest of what's new:"
+        daily: "daily"
+        weekly: "weekly"
+        bi_weekly: "every two weeks"
+
+      email_direct: "Receive an email when someone quotes you, replies to your post, or mentions your @username"
+      email_private_messages: "Receive an email when someone sends you a private message"
+      email_always: "Do not suppress email notifications when I am active on the site"
+
+      other_settings: "Other"
+      categories_settings: "Categories"
+
+      new_topic_duration:
+        label: "Consider topics new when"
+        not_viewed: "you haven't viewed them yet"
+        last_here: "created since you were here last"
+        after_n_days:
+          one: "created in the last day"
+          other: "created in the last {{count}} days"
+        after_n_weeks:
+          one: "created in the last week"
+          other: "created in the last {{count}} weeks"
+
+      auto_track_topics: "Automatically track topics you enter"
+      auto_track_options:
+        never: "never"
+        always: "always"
+        after_n_seconds:
+          one: "after 1 second"
+          other: "after {{count}} seconds"
+        after_n_minutes:
+          one: "after 1 minute"
+          other: "after {{count}} minutes"
+
+      invited:
+        search: "type to search invites..."
+        title: "Invites"
+        user: "Invited User"
+        none: "You haven't invited anyone here yet."
+        truncated: "Showing the first {{count}} invites."
+        redeemed: "Redeemed Invites"
+        redeemed_at: "Redeemed"
+        pending: "Pending Invites"
+        topics_entered: "Topics Viewed"
+        posts_read_count: "Posts Read"
+        expired: "This invite has expired."
+        rescind: "Remove"
+        rescinded: "Invite removed"
+        reinvite: "Resend Invite"
+        reinvited: "Invite re-sent"
+        time_read: "Read Time"
+        days_visited: "Days Visited"
+        account_age_days: "Account age in days"
+        create: "Send an Invite"
+        bulk_invite:
+          none: "You haven't invited anyone here yet. You can send individual invites, or invite a bunch of people at once by <a href='https://meta.discourse.org/t/send-bulk-invites/16468'>uploading a bulk invite file</a>."
+          text: "Bulk Invite from File"
+          uploading: "Uploading..."
+          success: "File uploaded successfully, you will be notified via private message when the process is complete."
+          error: "There was an error uploading '{{filename}}': {{message}}"
+
+      password:
+        title: "Password"
+        too_short: "Your password is too short."
+        common: "That password is too common."
+        ok: "Your password looks good."
+        instructions: "At least %{count} characters."
+
+      associated_accounts: "Logins"
+      ip_address:
+        title: "Last IP Address"
+      registration_ip_address:
+        title: "Registration IP Address"
+      avatar:
+        title: "Avatar"
+      title:
+        title: "Title"
+
+      filters:
+        all: "All"
+
+      stream:
+        posted_by: "Posted by"
+        sent_by: "Sent by"
+        private_message: "private message"
+        the_topic: "the topic"
+
+    loading: "Loading..."
+    errors:
+      prev_page: "while trying to load"
+      reasons:
+        network: "Network Error"
+        server: "Server Error"
+        forbidden: "Access Denied"
+        unknown: "Error"
+      desc:
+        network: "Please check your connection."
+        network_fixed: "Looks like it's back."
+        server: "Error code: {{status}}"
+        forbidden: "You're not allowed to view that."
+        unknown: "Something went wrong."
+      buttons:
+        back: "Go Back"
+        again: "Try Again"
+        fixed: "Load Page"
+    close: "Close"
+    assets_changed_confirm: "This site was just updated. Refresh now for the latest version?"
+    logout: "You were logged out."
+    refresh: "Refresh"
+    read_only_mode:
+      enabled: "An administrator enabled read-only mode. You can continue to browse the site but interactions may not work."
+      login_disabled: "Login is disabled while the site is in read only mode."
+    too_few_topics_notice: "Create at least 5 public topics and %{posts} public posts to get discussion started. New users cannot earn trust levels unless there's content for them to read. This message appears only to staff."
+
+    learn_more: "learn more..."
+
+    year: 'year'
+    year_desc: 'topics created in the last 365 days'
+    month: 'month'
+    month_desc: 'topics created in the last 30 days'
+    week: 'week'
+    week_desc: 'topics created in the last 7 days'
+    day: 'day'
+
+    first_post: First post
+    mute: Mute
+    unmute: Unmute
+    last_post: Last post
+    last_post_lowercase: last post
+
+    summary:
+      enabled_description: "You're viewing a summary of this topic: the most interesting posts as determined by the community."
+      description: "There are <b>{{count}}</b> replies."
+      description_time: "There are <b>{{count}}</b> replies with an estimated read time of <b>{{readingTime}} minutes</b>."
+      enable: 'Summarize This Topic'
+      disable: 'Show All Posts'
+
+    deleted_filter:
+      enabled_description: "This topic contains deleted posts, which have been hidden. "
+      disabled_description: "Deleted posts in the topic are shown."
+      enable: "Hide Deleted Posts"
+      disable: "Show Deleted Posts"
+
+    private_message_info:
+      title: "Private Message"
+      invite: "Invite Others..."
+      remove_allowed_user: "Do you really want to remove {{name}} from this private message?"
+
+    email: 'Email'
+    username: 'Username'
+    last_seen: 'Seen'
+    created: 'Created'
+    created_lowercase: 'created'
+    trust_level: 'Trust Level'
+    search_hint: 'username, email or IP address'
+
+    create_account:
+      title: "Create New Account"
+      failed: "Something went wrong, perhaps this email is already registered, try the forgot password link"
+
+    forgot_password:
+      title: "Forgot Password"
+      action: "I forgot my password"
+      invite: "Enter your username or email address, and we'll send you a password reset email."
+      reset: "Reset Password"
+      complete_username: "If an account matches the username <b>%{username}</b>, you should receive an email with instructions on how to reset your password shortly."
+      complete_email: "If an account matches <b>%{email}</b>, you should receive an email with instructions on how to reset your password shortly."
+      complete_username_found: "We found an account that matches the username <b>%{username}</b>, you should receive an email with instructions on how to reset your password shortly."
+      complete_email_found: "We found an account that matches <b>%{email}</b>, you should receive an email with instructions on how to reset your password shortly."
+
+      complete_username_not_found: "No account matches the username <b>%{username}</b>"
+      complete_email_not_found: "No account matches <b>%{email}</b>"
+    login:
+      title: "Log In"
+      username: "User"
+      password: "Password"
+      email_placeholder: "email or username"
+      caps_lock_warning: "Caps Lock is on"
+      error: "Unknown error"
+      blank_username_or_password: "Please enter your email or username, and password."
+      reset_password: 'Reset Password'
+      logging_in: "Signing In..."
+      or: "Or"
+      authenticating: "Authenticating..."
+      awaiting_confirmation: "Your account is awaiting activation, use the forgot password link to issue another activation email."
+      awaiting_approval: "Your account has not been approved by a staff member yet. You will be sent an email when it is approved."
+      requires_invite: "Sorry, access to this forum is by invite only."
+      not_activated: "You can't log in yet. We previously sent an activation email to you at <b>{{sentTo}}</b>. Please follow the instructions in that email to activate your account."
+      not_allowed_from_ip_address: "You can't login from that IP address."
+      resend_activation_email: "Click here to send the activation email again."
+      sent_activation_email_again: "We sent another activation email to you at <b>{{currentEmail}}</b>. It might take a few minutes for it to arrive; be sure to check your spam folder."
+      google:
+        title: "with Google"
+        message: "Authenticating with Google (make sure pop up blockers are not enabled)"
+      google_oauth2:
+        title: "with Google"
+        message: "Authenticating with Google (make sure pop up blockers are not enabled)"
+      twitter:
+        title: "with Twitter"
+        message: "Authenticating with Twitter (make sure pop up blockers are not enabled)"
+      facebook:
+        title: "with Facebook"
+        message: "Authenticating with Facebook (make sure pop up blockers are not enabled)"
+      yahoo:
+        title: "with Yahoo"
+        message: "Authenticating with Yahoo (make sure pop up blockers are not enabled)"
+      github:
+        title: "with GitHub"
+        message: "Authenticating with GitHub (make sure pop up blockers are not enabled)"
+
+    apple_international: "Apple/International"
+    google: "Google"
+    twitter: "Twitter"
+    emoji_one: "Emoji One"
+
+    composer:
+      emoji: "Emoji :smile:"
+
+      add_warning: "This is an official warning."
+      posting_not_on_topic: "Which topic do you want to reply to?"
+      saving_draft_tip: "saving"
+      saved_draft_tip: "saved"
+      saved_local_draft_tip: "saved locally"
+      similar_topics: "Your topic is similar to..."
+      drafts_offline: "drafts offline"
+
+      min_length:
+        need_more_for_title: "{{n}} to go for the title"
+        need_more_for_reply: "{{n}} to go"
+
+      error:
+        title_missing: "Title is required"
+        title_too_short: "Title must be at least {{min}} characters"
+        title_too_long: "Title can't be more than {{max}} characters"
+        post_missing: "Post can't be empty"
+        post_length: "Post must be at least {{min}} characters"
+        category_missing: "You must choose a category"
+
+      save_edit: "Save Edit"
+      reply_original: "Reply on Original Topic"
+      reply_here: "Reply Here"
+      reply: "Reply"
+      cancel: "Cancel"
+      create_topic: "New Topic"
+      create_pm: "Private Message"
+      title: "Or press Ctrl+Enter"
+
+      users_placeholder: "Add a user"
+      title_placeholder: "What is this discussion about in one brief sentence?"
+      edit_reason_placeholder: "why are you editing?"
+      show_edit_reason: "(add edit reason)"
+      reply_placeholder: "Type here. Use Markdown or BBCode to format. Drag or paste an image to upload it."
+      view_new_post: "View your new post."
+      saving: "Saving..."
+      saved: "Saved!"
+      saved_draft: "Post draft in progress. Select to resume."
+      uploading: "Uploading..."
+      show_preview: 'show preview &raquo;'
+      hide_preview: '&laquo; hide preview'
+
+      quote_post_title: "Quote whole post"
+      bold_title: "Strong"
+      bold_text: "strong text"
+      italic_title: "Emphasis"
+      italic_text: "emphasized text"
+      link_title: "Hyperlink"
+      link_description: "enter link description here"
+      link_dialog_title: "Insert Hyperlink"
+      link_optional_text: "optional title"
+      quote_title: "Blockquote"
+      quote_text: "Blockquote"
+      code_title: "Preformatted text"
+      code_text: "indent preformatted text by 4 spaces"
+      upload_title: "Upload"
+      upload_description: "enter upload description here"
+      olist_title: "Numbered List"
+      ulist_title: "Bulleted List"
+      list_item: "List item"
+      heading_title: "Heading"
+      heading_text: "Heading"
+      hr_title: "Horizontal Rule"
+      undo_title: "Undo"
+      redo_title: "Redo"
+      help: "Markdown Editing Help"
+      toggler: "hide or show the composer panel"
+
+      admin_options_title: "Optional staff settings for this topic"
+      auto_close:
+        label: "Auto-close topic time:"
+        error: "Please enter a valid value."
+        based_on_last_post: "Don't close until the last post in the topic is at least this old."
+        all:
+          units: ""
+          examples: 'Enter number of hours (24), absolute time (17:30) or timestamp (2013-11-22 14:00).'
+        limited:
+          units: "(# of hours)"
+          examples: 'Enter number of hours (24).'
+
+    notifications:
+      title: "notifications of @name mentions, replies to your posts and topics, private messages, etc"
+      none: "You have no notifications right now."
+      more: "view older notifications"
+      total_flagged: "total flagged posts"
+      mentioned: "<i title='mentioned' class='icon'>@</i><p><span>{{username}}</span> {{description}}</p>"
+      quoted: "<i title='quoted' class='fa fa-quote-right'></i><p><span>{{username}}</span> {{description}}</p>"
+      replied: "<i title='replied' class='fa fa-reply'></i><p><span>{{username}}</span> {{description}}</p>"
+      posted: "<i title='replied' class='fa fa-reply'></i><p><span>{{username}}</span> {{description}}</p>"
+      edited: "<i title='edited' class='fa fa-pencil'></i><p><span>{{username}}</span> {{description}}</p>"
+      liked: "<i title='liked' class='fa fa-heart'></i><p><span>{{username}}</span> {{description}}</p>"
+      private_message: "<i title='private message' class='fa fa-envelope-o'></i><p><span>{{username}}</span> {{description}}</p>"
+      invited_to_private_message: "<i title='private message' class='fa fa-envelope-o'></i><p><span>{{username}}</span> {{description}}</p>"
+      invitee_accepted: "<i title='accepted your invitation' class='fa fa-user'></i><p><span>{{username}}</span> accepted your invitation</p>"
+      moved_post: "<i title='moved post' class='fa fa-sign-out'></i><p><span>{{username}}</span> moved {{description}}</p>"
+      linked: "<i title='linked post' class='fa fa-arrow-left'></i><p><span>{{username}}</span> {{description}}</p>"
+      granted_badge: "<i title='badge granted' class='fa fa-certificate'></i><p>Earned '{{description}}'</p>"
+
+    upload_selector:
+      title: "Add an image"
+      title_with_attachments: "Add an image or a file"
+      from_my_computer: "From my device"
+      from_the_web: "From the web"
+      remote_tip: "link to image"
+      remote_tip_with_attachments: "link to image or file ({{authorized_extensions}})"
+      local_tip: "click to select an image from your device"
+      local_tip_with_attachments: "click to select an image or file from your device ({{authorized_extensions}})"
+      hint: "(you can also drag & drop into the editor to upload them)"
+      hint_for_supported_browsers: "(you can also drag and drop or paste images into the editor to upload them)"
+      uploading: "Uploading"
+      image_link: "link your image will point to"
+
+    search:
+      title: "search topics, posts, users, or categories"
+      no_results: "No results found."
+      searching: "Searching ..."
+      post_format: "#{{post_number}} by {{username}}"
+
+      context:
+        user: "Search posts by @{{username}}"
+        category: "Search the \"{{category}}\" category"
+        topic: "Search this topic"
+        private_messages: "Search private messages"
+
+    site_map: "go to another topic list or category"
+    go_back: 'go back'
+    not_logged_in_user: 'user page with summary of current activity and preferences'
+    current_user: 'go to your user page'
+
+    starred:
+      title: 'Star'
+      help:
+        star: 'add this topic to your starred list'
+        unstar: 'remove this topic from your starred list'
+
+    topics:
+      bulk:
+        reset_read: "Reset Read"
+        delete: "Delete Topics"
+        dismiss_posts: "Dismiss Posts"
+        dismiss_posts_tooltip: "Clear unread counts on these topics but continue to show them on my unread list when new posts are made"
+        dismiss_topics: "Dismiss Topics"
+        dismiss_topics_tooltip: "Stop showing these topics in my unread list when new posts are made"
+        dismiss_new: "Dismiss New"
+        toggle: "toggle bulk selection of topics"
+        actions: "Bulk Actions"
+        change_category: "Change Category"
+        close_topics: "Close Topics"
+        archive_topics: "Archive Topics"
+        notification_level: "Change Notification Level"
+        selected:
+          one: "You have selected <b>1</b> topic."
+          other: "You have selected <b>{{count}}</b> topics."
+
+      none:
+        starred: "You have no starred topics."
+        unread: "You have no unread topics."
+        new: "You have no new topics."
+        read: "You haven't read any topics yet."
+        posted: "You haven't posted in any topics yet."
+        latest: "There are no latest topics. That's sad."
+        hot: "There are no hot topics."
+        category: "There are no {{category}} topics."
+        top: "There are no top topics."
+        educate:
+          new: '<p>Your new topics appear here.</p><p>By default, topics are considered new and will show a <span class="badge new-topic badge-notification" style="vertical-align:middle;line-height:inherit;">new</span> indicator if they were created in the last 2 days.</p><p>You can change this in your <a href="%{userPrefsUrl}">preferences</a>.</p>'
+          unread: '<p>Your unread topics appear here.</p><p>By default, topics are considered unread and will show unread counts <span class="badge new-posts badge-notification">1</span> if you:</p><ul><li>Created the topic</li><li>Replied to the topic</li><li>Read the topic for more than 4 minutes</li></ul><p>Or if you have explicitly set the topic to Tracked or Watched via the notification control at the bottom of each topic.</p><p>You can change this in your <a href="%{userPrefsUrl}">preferences</a>.</p>'
+          starred: '<p>Your starred topics appear here.</p><p>To star or unstar a topic, use:</p><ul><li>the <i class="fa fa-star"></i> next to any topic title</li><li>the Star button at the bottom of each topic</li></ul>'
+      bottom:
+        latest: "There are no more latest topics."
+        hot: "There are no more hot topics."
+        posted: "There are no more posted topics."
+        read: "There are no more read topics."
+        new: "There are no more new topics."
+        unread: "There are no more unread topics."
+        starred: "There are no more starred topics."
+        category: "There are no more {{category}} topics."
+        top: "There are no more top topics."
+
+    topic:
+      filter_to: "{{post_count}} posts in topic"
+      create: 'New Topic'
+      create_long: 'Create a new Topic'
+      private_message: 'Start a private message'
+      list: 'Topics'
+      new: 'new topic'
+      unread: 'unread'
+      new_topics:
+        one: '1 new topic'
+        other: '{{count}} new topics'
+      unread_topics:
+        one: '1 unread topic'
+        other: '{{count}} unread topics'
+      title: 'Topic'
+      loading: 'Loading topic...'
+      invalid_access:
+        title: "Topic is private"
+        description: "Sorry, you don't have access to that topic!"
+        login_required: "You need to log in to see that topic."
+      server_error:
+        title: "Topic failed to load"
+        description: "Sorry, we couldn't load that topic, possibly due to a connection problem. Please try again. If the problem persists, let us know."
+      not_found:
+        title: "Topic not found"
+        description: "Sorry, we couldn't find that topic. Perhaps it was removed by a moderator?"
+      total_unread_posts:
+        one: "you have 1 unread post in this topic"
+        other: "you have {{count}} unread posts in this topic"
+      unread_posts:
+        one: "you have 1 unread old post in this topic"
+        other: "you have {{count}} unread old posts in this topic"
+      new_posts:
+        one: "there is 1 new post in this topic since you last read it"
+        other: "there are {{count}} new posts in this topic since you last read it"
+
+      likes:
+        one: "there is 1 like in this topic"
+        other: "there are {{count}} likes in this topic"
+      back_to_list: "Back to Topic List"
+      options: "Topic Options"
+      show_links: "show links within this topic"
+      toggle_information: "toggle topic details"
+      read_more_in_category: "Want to read more? Browse other topics in {{catLink}} or {{latestLink}}."
+      read_more: "Want to read more? {{catLink}} or {{latestLink}}."
+
+      # keys ending with _MF use message format, see /spec/components/js_local_helper_spec.rb for samples
+      read_more_MF: "There {
+        UNREAD, plural,
+        =0 {}
+        one {
+          is <a href='/unread'>1 unread</a>
+        } other {
+          are <a href='/unread'># unread</a>
+        }
+        } {
+          NEW, plural,
+            =0 {}
+            one { {BOTH, select, true{and } false {is } other{}} <a href='/new'>1 new</a> topic}
+            other { {BOTH, select, true{and } false {are } other{}} <a href='/new'># new</a> topics}
+        } remaining, or {CATEGORY, select, true {browse other topics in {catLink}} false {{latestLink}} other {}}."
+
+      browse_all_categories: Browse all categories
+
+      view_latest_topics: view latest topics
+      suggest_create_topic: Why not create a topic?
+      jump_reply_up: jump to earlier reply
+      jump_reply_down: jump to later reply
+      deleted: "The topic has been deleted"
+
+      auto_close_notice: "This topic will automatically close %{timeLeft}."
+      auto_close_notice_based_on_last_post: "This topic will close %{duration} after the last reply."
+      auto_close_title: 'Auto-Close Settings'
+      auto_close_save: "Save"
+      auto_close_remove: "Don't Auto-Close This Topic"
+
+      progress:
+        title: topic progress
+        go_top: "top"
+        go_bottom: "bottom"
+        go: "go"
+        jump_bottom_with_number: "jump to post %{post_number}"
+        total: total posts
+        current: current post
+        position: "post %{current} of %{total}"
+
+      notifications:
+        reasons:
+          "3_6": 'You will receive notifications because you are watching this category.'
+          "3_5": 'You will receive notifications because you started watching this topic automatically.'
+          "3_2": 'You will receive notifications because you are watching this topic.'
+          "3_1": 'You will receive notifications because you created this topic.'
+          "3": 'You will receive notifications because you are watching this topic.'
+          "2_8": 'You will receive notifications because you are tracking this category.'
+          "2_4": 'You will receive notifications because you posted a reply to this topic.'
+          "2_2": 'You will receive notifications because you are tracking this topic.'
+          "2": 'You will receive notifications because you <a href="/users/{{username}}/preferences">read this topic</a>.'
+          "1_2": 'You will be notified if someone mentions your @name or replies to your post.'
+          "1": 'You will be notified if someone mentions your @name or replies to your post.'
+          "0_7": 'You are ignoring all notifications in this category.'
+          "0_2": 'You are ignoring all notifications on this topic.'
+          "0": 'You are ignoring all notifications on this topic.'
+        watching_pm:
+          title: "Watching"
+          description: "You will be notified of every new post in this private message. A count of unread and new posts will also appear next to the topic."
+        watching:
+          title: "Watching"
+          description: "You will be notified of every new post in this topic. A count of unread and new posts will also appear next to the topic."
+        tracking_pm:
+          title: "Tracking"
+          description: "A count of unread and new posts will appear next to the private message. You will be notified if someone mentions your @name or replies to your post."
+        tracking:
+          title: "Tracking"
+          description: "A count of unread and new posts will appear next to the topic. You will be notified if someone mentions your @name or replies to your post. "
+        regular:
+          title: "Regular"
+          description: "You will be notified if someone mentions your @name or replies to your post."
+        regular_pm:
+          title: "Regular"
+          description: "You will be notified if someone mentions your @name or replies to your post in the private message."
+        muted_pm:
+          title: "Muted"
+          description: "You will never be notified of anything about this private message."
+        muted:
+          title: "Muted"
+          description: "You will never be notified of anything about this topic, and it will not appear on your unread tab."
+
+      actions:
+        recover: "Un-Delete Topic"
+        delete: "Delete Topic"
+        open: "Open Topic"
+        close: "Close Topic"
+        auto_close: "Auto Close"
+        make_banner: "Banner Topic"
+        remove_banner: "Remove Banner Topic"
+        unpin: "Un-Pin Topic"
+        pin: "Pin Topic"
+        pin_globally: "Pin Topic Globally"
+        unarchive: "Unarchive Topic"
+        archive: "Archive Topic"
+        invisible: "Make Unlisted"
+        visible: "Make Listed"
+        reset_read: "Reset Read Data"
+        multi_select: "Select Posts"
+
+      reply:
+        title: 'Reply'
+        help: 'begin composing a reply to this topic'
+
+      clear_pin:
+        title: "Clear pin"
+        help: "Clear the pinned status of this topic so it no longer appears at the top of your topic list"
+
+      share:
+        title: 'Share'
+        help: 'share a link to this topic'
+
+      flag_topic:
+        title: 'Flag'
+        help: 'privately flag this topic for attention or send a private notification about it'
+        success_message: 'You successfully flagged this topic.'
+
+      inviting: "Inviting..."
+      automatically_add_to_groups_optional: "This invite also includes access to these groups: (optional, admin only)"
+      automatically_add_to_groups_required: "This invite also includes access to these groups: (<b>Required</b>, admin only)"
+
+      invite_private:
+        title: 'Invite to Private Message'
+        email_or_username: "Invitee's Email or Username"
+        email_or_username_placeholder: "email address or username"
+        action: "Invite"
+        success: "We've invited that user to participate in this private message."
+        error: "Sorry, there was an error inviting that user."
+        group_name: "group name"
+
+      invite_reply:
+        title: 'Invite'
+        action: 'Email Invite'
+        help: 'send invitations to friends so they can reply to this topic with a single click'
+        to_topic: "We'll send a brief email allowing your friend to immediately join and reply to this topic by clicking a link, no login required."
+        to_forum: "We'll send a brief email allowing your friend to immediately join by clicking a link, no login required."
+
+        email_placeholder: 'name@example.com'
+        success: "We mailed out an invitation to <b>{{email}}</b>. We'll notify you when the invitation is redeemed. Check the invitations tab on your user page to keep track of your invites."
+        error: "Sorry, we couldn't invite that person. Perhaps they are already a user?"
+
+      login_reply: 'Log In to Reply'
+
+      filters:
+        n_posts:
+          one: "1 post"
+          other: "{{count}} posts"
+        cancel: "Remove filter"
+
+      split_topic:
+        title: "Move to New Topic"
+        action: "move to new topic"
+        topic_name: "New Topic Name"
+        error: "There was an error moving posts to the new topic."
+        instructions:
+          one: "You are about to create a new topic and populate it with the post you've selected."
+          other: "You are about to create a new topic and populate it with the <b>{{count}}</b> posts you've selected."
+
+      merge_topic:
+        title: "Move to Existing Topic"
+        action: "move to existing topic"
+        error: "There was an error moving posts into that topic."
+        instructions:
+          one: "Please choose the topic you'd like to move that post to."
+          other: "Please choose the topic you'd like to move those <b>{{count}}</b> posts to."
+
+      change_owner:
+        title: "Change Owner of Posts"
+        action: "change ownership"
+        error: "There was an error changing the ownership of the posts."
+        label: "New Owner of Posts"
+        placeholder: "username of new owner"
+        instructions:
+          one: "Please choose the new owner of the post by <b>{{old_user}}</b>."
+          other: "Please choose the new owner of the {{count}} posts by <b>{{old_user}}</b>."
+        instructions_warn: "Note that any notifications about this post will not be transferred to the new user retroactively.<br>Warning: Currently, no post-dependent data is transferred over to the new user. Use with caution."
+
+      multi_select:
+        select: 'select'
+        selected: 'selected ({{count}})'
+        select_replies: 'select +replies'
+        delete: delete selected
+        cancel: cancel selecting
+        select_all: select all
+        deselect_all: deselect all
+        description:
+          one: You have selected <b>1</b> post.
+          other: "You have selected <b>{{count}}</b> posts."
+
+    post:
+      reply: "Replying to {{link}} by {{replyAvatar}} {{username}}"
+      reply_topic: "Reply to {{link}}"
+      quote_reply: "quote reply"
+      edit: "Editing {{link}} by {{replyAvatar}} {{username}}"
+      edit_reason: "Reason: "
+      post_number: "post {{number}}"
+      in_reply_to: "reply to"
+      last_edited_on: "post last edited on"
+      reply_as_new_topic: "Reply as linked Topic"
+      continue_discussion: "Continuing the discussion from {{postLink}}:"
+      follow_quote: "go to the quoted post"
+      show_full: "Show Full Post"
+      show_hidden: 'View hidden content.'
+      deleted_by_author:
+        one: "(post withdrawn by author, will be automatically deleted in %{count} hour unless flagged)"
+        other: "(post withdrawn by author, will be automatically deleted in %{count} hours unless flagged)"
+      expand_collapse: "expand/collapse"
+      gap:
+        one: "1 post hidden"
+        other: "{{count}} posts hidden"
+      more_links: "{{count}} more..."
+
+      unread: "Post is unread"
+      has_replies:
+        one: "Reply"
+        other: "Replies"
+
+      errors:
+        create: "Sorry, there was an error creating your post. Please try again."
+        edit: "Sorry, there was an error editing your post. Please try again."
+        upload: "Sorry, there was an error uploading that file. Please try again."
+        attachment_too_large: "Sorry, the file you are trying to upload is too big (maximum size is {{max_size_kb}}kb)."
+        file_too_large: "Sorry, the file you are trying to upload is too big (maximum size is {{max_size_kb}}kb)"
+        too_many_uploads: "Sorry, you can only upload one file at a time."
+        upload_not_authorized: "Sorry, the file you are trying to upload is not authorized (authorized extension: {{authorized_extensions}})."
+        image_upload_not_allowed_for_new_user: "Sorry, new users can not upload images."
+        attachment_upload_not_allowed_for_new_user: "Sorry, new users can not upload attachments."
+        attachment_download_requires_login: "Sorry, you need to be logged in to download attachments."
+
+      abandon:
+        confirm: "Are you sure you want to abandon your post?"
+        no_value: "No, keep"
+        yes_value: "Yes, abandon"
+
+      via_email: "this post arrived via email"
+
+      wiki:
+        about: "this post is a wiki; basic users can edit it"
+
+      archetypes:
+        save: 'Save Options'
+
+      controls:
+        reply: "begin composing a reply to this post"
+        like: "like this post"
+        has_liked: "you've liked this post"
+        undo_like: "undo like"
+        edit: "edit this post"
+        edit_anonymous: "Sorry, but you need to be logged in to edit this post."
+        flag: "privately flag this post for attention or send a private notification about it"
+        delete: "delete this post"
+        undelete: "undelete this post"
+        share: "share a link to this post"
+        more: "More"
+        delete_replies:
+          confirm:
+            one: "Do you also want to delete the direct reply to this post?"
+            other: "Do you also want to delete the {{count}} direct replies to this post?"
+          yes_value: "Yes, delete the replies too"
+          no_value: "No, just this post"
+        admin: "post admin actions"
+        wiki: "Make Wiki"
+        unwiki: "Remove Wiki"
+        convert_to_moderator: "Add Staff Color"
+        revert_to_regular: "Remove Staff Color"
+        rebake: "Rebuild HTML"
+        unhide: "Unhide"
+
+      actions:
+        flag: 'Flag'
+        defer_flags:
+          one: "Defer flag"
+          other: "Defer flags"
+        it_too:
+          off_topic: "Flag it too"
+          spam: "Flag it too"
+          inappropriate: "Flag it too"
+          custom_flag: "Flag it too"
+          bookmark: "Bookmark it too"
+          like: "Like it too"
+          vote: "Vote for it too"
+        undo:
+          off_topic: "Undo flag"
+          spam: "Undo flag"
+          inappropriate: "Undo flag"
+          bookmark: "Undo bookmark"
+          like: "Undo like"
+          vote: "Undo vote"
+        people:
+          off_topic: "{{icons}} flagged this as off-topic"
+          spam: "{{icons}} flagged this as spam"
+          inappropriate: "{{icons}} flagged this as inappropriate"
+          notify_moderators: "{{icons}} notified moderators"
+          notify_moderators_with_url: "{{icons}} <a href='{{postUrl}}'>notified moderators</a>"
+          notify_user: "{{icons}} sent a private message"
+          notify_user_with_url: "{{icons}} sent a <a href='{{postUrl}}'>private message</a>"
+          bookmark: "{{icons}} bookmarked this"
+          like: "{{icons}} liked this"
+          vote: "{{icons}} voted for this"
+        by_you:
+          off_topic: "You flagged this as off-topic"
+          spam: "You flagged this as spam"
+          inappropriate: "You flagged this as inappropriate"
+          notify_moderators: "You flagged this for moderation"
+          notify_user: "You sent a private message to this user"
+          bookmark: "You bookmarked this post"
+          like: "You liked this"
+          vote: "You voted for this post"
+        by_you_and_others:
+          off_topic:
+            one: "You and 1 other flagged this as off-topic"
+            other: "You and {{count}} other people flagged this as off-topic"
+          spam:
+            one: "You and 1 other flagged this as spam"
+            other: "You and {{count}} other people flagged this as spam"
+          inappropriate:
+            one: "You and 1 other flagged this as inappropriate"
+            other: "You and {{count}} other people flagged this as inappropriate"
+          notify_moderators:
+            one: "You and 1 other flagged this for moderation"
+            other: "You and {{count}} other people flagged this for moderation"
+          notify_user:
+            one: "You and 1 other sent a private message to this user"
+            other: "You and {{count}} other people sent a private message to this user"
+          bookmark:
+            one: "You and 1 other bookmarked this post"
+            other: "You and {{count}} other people bookmarked this post"
+          like:
+            one: "You and 1 other liked this"
+            other: "You and {{count}} other people liked this"
+          vote:
+            one: "You and 1 other voted for this post"
+            other: "You and {{count}} other people voted for this post"
+        by_others:
+          off_topic:
+            one: "1 person flagged this as off-topic"
+            other: "{{count}} people flagged this as off-topic"
+          spam:
+            one: "1 person flagged this as spam"
+            other: "{{count}} people flagged this as spam"
+          inappropriate:
+            one: "1 person flagged this as inappropriate"
+            other: "{{count}} people flagged this as inappropriate"
+          notify_moderators:
+            one: "1 person flagged this for moderation"
+            other: "{{count}} people flagged this for moderation"
+          notify_user:
+            one: "1 person sent a private message to this user"
+            other: "{{count}} sent a private message to this user"
+          bookmark:
+            one: "1 person bookmarked this post"
+            other: "{{count}} people bookmarked this post"
+          like:
+            one: "1 person liked this"
+            other: "{{count}} people liked this"
+          vote:
+            one: "1 person voted for this post"
+            other: "{{count}} people voted for this post"
+
+      edits:
+        one: 1 edit
+        other: "{{count}} edits"
+        zero: no edits
+
+      delete:
+        confirm:
+          one: "Are you sure you want to delete that post?"
+          other: "Are you sure you want to delete all those posts?"
+
+      revisions:
+        controls:
+          first: "First revision"
+          previous: "Previous revision"
+          next: "Next revision"
+          last: "Last revision"
+          hide: "Hide revision"
+          show: "Show revision"
+          comparing_previous_to_current_out_of_total: "<strong>{{previous}}</strong> vs <strong>{{current}}</strong> / {{total}}"
+        displays:
+          inline:
+            title: "Show the rendered output with additions and removals inline"
+            button: '<i class="fa fa-square-o"></i> HTML'
+          side_by_side:
+            title: "Show the rendered output diffs side-by-side"
+            button: '<i class="fa fa-columns"></i> HTML'
+          side_by_side_markdown:
+            title: "Show the raw source diffs side-by-side"
+            button: '<i class="fa fa-columns"></i> Raw'
+        details:
+          edited_by: "Edited by"
+
+    category:
+      can: 'can&hellip; '
+      none: '(no category)'
+      choose: 'Select a category&hellip;'
+      edit: 'edit'
+      edit_long: "Edit"
+      view: 'View Topics in Category'
+      general: 'General'
+      settings: 'Settings'
+      delete: 'Delete Category'
+      create: 'New Category'
+      save: 'Save Category'
+      slug: 'Category Slug'
+      slug_placeholder: '(Optional) dashed-words for url'
+      creation_error: There has been an error during the creation of the category.
+      save_error: There was an error saving the category.
+      name: "Category Name"
+      description: "Description"
+      topic: "category topic"
+      logo: "Category Logo Image"
+      background_image: "Category Background Image"
+      badge_colors: "Badge colors"
+      background_color: "Background color"
+      foreground_color: "Foreground color"
+      name_placeholder: "One or two words maximum"
+      color_placeholder: "Any web color"
+      delete_confirm: "Are you sure you want to delete this category?"
+      delete_error: "There was an error deleting the category."
+      list: "List Categories"
+      no_description: "Please add a description for this category."
+      change_in_category_topic: "Edit Description"
+      already_used: 'This color has been used by another category'
+      security: "Security"
+      images: "Images"
+      auto_close_label: "Auto-close topics after:"
+      auto_close_units: "hours"
+      email_in: "Custom incoming email address:"
+      email_in_allow_strangers: "Accept emails from anonymous users with no accounts"
+      email_in_disabled: "Posting new topics via email is disabled in the Site Settings. To enable posting new topics via email, "
+      email_in_disabled_click: 'enable the "email in" setting.'
+      allow_badges_label: "Allow badges to be awarded in this category"
+      edit_permissions: "Edit Permissions"
+      add_permission: "Add Permission"
+      this_year: "this year"
+      position: "position"
+      default_position: "Default Position"
+      position_disabled: "Categories will be displayed in order of activity. To control the order of categories in lists, "
+      position_disabled_click: 'enable the "fixed category positions" setting.'
+      parent: "Parent Category"
+      notifications:
+        title: ''
+        reasons:
+        watching:
+          title: "Watching"
+          description: "You will automatically watch all new topics in these categories. You will be notified of all new posts and topics, plus the count of unread and new posts will also appear next to the topic."
+        tracking:
+          title: "Tracking"
+          description: "You will automatically track all new topics in these categories. A count of unread and new posts will appear next to the topic."
+        regular:
+          title: "Regular"
+          description: "You will be notified if someone mentions your @name or replies to your post."
+        muted:
+          title: "Muted"
+          description: "You will not be notified of anything about new topics in these categories, and they will not appear on your unread tab."
+
+    flagging:
+      title: 'Thanks for helping to keep our community civil!'
+      private_reminder: 'flags are private, <b>only</b> visible to staff'
+      action: 'Flag Post'
+      take_action: "Take Action"
+      notify_action: 'Private message'
+      delete_spammer: "Delete Spammer"
+      delete_confirm: "You are about to delete <b>%{posts}</b> posts and <b>%{topics}</b> topics from this user, remove their account, block signups from their IP address <b>%{ip_address}</b>, and add their email address <b>%{email}</b> to a permanent block list. Are you sure this user is really a spammer?"
+      yes_delete_spammer: "Yes, Delete Spammer"
+      ip_address_missing: "(N/A)"
+      hidden_email_address: "(hidden)"
+      submit_tooltip: "Submit the private flag"
+      take_action_tooltip: "Reach the flag threshold immediately, rather than waiting for more community flags"
+      cant: "Sorry, you can't flag this post at this time."
+      formatted_name:
+        off_topic: "It's Off-Topic"
+        inappropriate: "It's Inappropriate"
+        spam: "It's Spam"
+      custom_placeholder_notify_user: "Be specific, be constructive, and always be kind."
+      custom_placeholder_notify_moderators: "Let us know specifically what you are concerned about, and provide relevant links and examples where possible."
+      custom_message:
+        at_least: "enter at least {{n}} characters"
+        more: "{{n}} to go..."
+        left: "{{n}} remaining"
+
+    flagging_topic:
+      title: "Thanks for helping to keep our community civil!"
+      action: "Flag Topic"
+      notify_action: "Private message"
+
+    topic_map:
+      title: "Topic Summary"
+      links_shown: "show all {{totalLinks}} links..."
+      clicks:
+        one: "1 click"
+        other: "%{count} clicks"
+
+    topic_statuses:
+      warning:
+        help: "This is an official warning."
+      locked:
+        help: "This topic is closed; it no longer accepts new replies"
+      archived:
+        help: "This topic is archived; it no longer accepts new replies"
+      unpinned:
+        title: "Unpinned"
+        help: "This topic is unpinned; it will display in default order"
+      pinned_globally:
+        title: "Pinned Globally"
+        help: "This topic is pinned globally; it will display at the top of all lists"
+      pinned:
+        title: "Pinned"
+        help: "This topic is pinned; it will display at the top of its category"
+      archived:
+        help: "This topic is archived; it is frozen and cannot be changed"
+      invisible:
+        help: "This topic is unlisted; it will not be displayed in topic lists, and can only be accessed via a direct link"
+
+    posts: "Posts"
+    posts_lowercase: "posts"
+    posts_long: "there are {{number}} posts in this topic"
+    posts_likes_MF: |
+      This topic has {count, plural, one {1 post} other {# posts}} {ratio, select,
+        low {with a high like to post ratio}
+        med {with a very high like to post ratio}
+        high {with an extremely high like to post ratio}
+        other {}}
+    original_post: "Original Post"
+    views: "Views"
+    views_lowercase: "views"
+    replies: "Replies"
+    views_long: "this topic has been viewed {{number}} times"
+    activity: "Activity"
+    likes: "Likes"
+    likes_lowercase: "likes"
+    likes_long: "there are {{number}} likes in this topic"
+    users: "Users"
+    users_lowercase: "users"
+    category_title: "Category"
+    history: "History"
+    changed_by: "by {{author}}"
+
+    raw_email:
+      title: "Raw Email"
+      not_available: "Not available!"
+
+    categories_list: "Categories List"
+
+    filters:
+      with_topics: "%{filter} topics"
+      with_category: "%{filter} %{category} topics"
+      latest:
+        title: "Latest"
+        help: "topics with recent posts"
+      hot:
+        title: "Hot"
+        help: "a selection of the hottest topics"
+      starred:
+        title: "Starred"
+        help: "topics you starred"
+      read:
+        title: "Read"
+        help: "topics you've read, in the order that you last read them"
+      categories:
+        title: "Categories"
+        title_in: "Category - {{categoryName}}"
+        help: "all topics grouped by category"
+      unread:
+        title:
+          zero: "Unread"
+          one: "Unread (1)"
+          other: "Unread ({{count}})"
+        help: "topics you are currently watching or tracking with unread posts"
+        lower_title_with_count:
+          zero: ""
+          one: "1 unread"
+          other: "{{count}} unread"
+      new:
+        lower_title_with_count:
+          zero: ""
+          one: "1 new"
+          other: "{{count}} new"
+        lower_title: "new"
+        title:
+          zero: "New"
+          one: "New (1)"
+          other: "New ({{count}})"
+        help: "topics created in the last few days"
+      posted:
+        title: "My Posts"
+        help: "topics you have posted in"
+      category:
+        title:
+          zero: "{{categoryName}}"
+          one: "{{categoryName}} (1)"
+          other: "{{categoryName}} ({{count}})"
+        help: "latest topics in the {{categoryName}} category"
+      top:
+        title: "Top"
+        help: "the most active topics in the last year, month, week or day"
+        yearly:
+          title: "Top Yearly"
+        monthly:
+          title: "Top Monthly"
+        weekly:
+          title: "Top Weekly"
+        daily:
+          title: "Top Daily"
+        this_year: "This year"
+        this_month: "This month"
+        this_week: "This week"
+        today: "Today"
+        other_periods: "see more top topics"
+
+    browser_update: 'Unfortunately, <a href="http://www.discourse.org/faq/#browser">your browser is too old to work on this site</a>. Please <a href="http://browsehappy.com">upgrade your browser</a>.'
+
+    permission_types:
+      full: "Create / Reply / See"
+      create_post: "Reply / See"
+      readonly: "See"
+
+  # This section is exported to the javascript for i18n in the admin section
+  admin_js:
+    type_to_filter: "type to filter..."
+
+    admin:
+      title: 'Discourse Admin'
+      moderator: 'Moderator'
+
+      dashboard:
+        title: "Dashboard"
+        last_updated: "Dashboard last updated:"
+        version: "Version"
+        up_to_date: "You're up to date!"
+        critical_available: "A critical update is available."
+        updates_available: "Updates are available."
+        please_upgrade: "Please upgrade!"
+        no_check_performed: "A check for updates has not been performed. Ensure sidekiq is running."
+        stale_data: "A check for updates has not been performed lately. Ensure sidekiq is running."
+        version_check_pending: "Looks like you upgraded recently. Fantastic!"
+        installed_version: "Installed"
+        latest_version: "Latest"
+        problems_found: "Some problems have been found with your installation of Discourse:"
+        last_checked: "Last checked"
+        refresh_problems: "Refresh"
+        no_problems: "No problems were found."
+        moderators: 'Moderators:'
+        admins: 'Admins:'
+        blocked: 'Blocked:'
+        suspended: 'Suspended:'
+        private_messages_short: "PMs"
+        private_messages_title: "Private Messages"
+
+        reports:
+          today: "Today"
+          yesterday: "Yesterday"
+          last_7_days: "Last 7 Days"
+          last_30_days: "Last 30 Days"
+          all_time: "All Time"
+          7_days_ago: "7 Days Ago"
+          30_days_ago: "30 Days Ago"
+          all: "All"
+          view_table: "table"
+          view_chart: "bar chart"
+          refresh_report: "Refresh Report"
+          start_date: "Start Date"
+          end_date: "End Date"
+
+      commits:
+        latest_changes: "Latest changes: please update often!"
+        by: "by"
+
+      flags:
+        title: "Flags"
+        old: "Old"
+        active: "Active"
+
+        agree: "Agree"
+        agree_title: "Confirm this flag as valid and correct"
+        agree_flag_modal_title: "Agree and..."
+        agree_flag_hide_post: "Agree (hide post + send PM)"
+        agree_flag_hide_post_title: "Hide this post and automatically send the user a private message urging them to edit it"
+        agree_flag_restore_post: "Agree (restore post)"
+        agree_flag_restore_post_title: "Restore this post"
+        agree_flag: "Agree with flag"
+        agree_flag_title: "Agree with flag and keep the post unchanged"
+        defer_flag: "Defer"
+        defer_flag_title: "Remove this flag; it requires no action at this time."
+        delete: "Delete"
+        delete_title: "Delete the post this flag refers to."
+        delete_post_defer_flag: "Delete post and Defer flag"
+        delete_post_defer_flag_title: "Delete post; if the first post, delete the topic"
+        delete_post_agree_flag: "Delete post and Agree with flag"
+        delete_post_agree_flag_title: "Delete post; if the first post, delete the topic"
+        delete_flag_modal_title: "Delete and..."
+        delete_spammer: "Delete Spammer"
+        delete_spammer_title: "Remove the user and all posts and topics by this user."
+        disagree_flag_unhide_post: "Disagree (unhide post)"
+        disagree_flag_unhide_post_title: "Remove any flags from this post and make the post visible again"
+        disagree_flag: "Disagree"
+        disagree_flag_title: "Deny this flag as invalid or incorrect"
+        clear_topic_flags: "Done"
+        clear_topic_flags_title: "The topic has been investigated and issues have been resolved. Click Done to remove the flags."
+        more: "(more replies...)"
+
+        dispositions:
+          agreed: "agreed"
+          disagreed: "disagreed"
+          deferred: "deferred"
+
+        flagged_by: "Flagged by"
+        resolved_by: "Resolved by"
+        took_action: "Took action"
+        system: "System"
+        error: "Something went wrong"
+        reply_message: "Reply"
+        no_results: "There are no flags."
+        topic_flagged: "This <strong>topic</strong> has been flagged."
+        visit_topic: "Visit the topic to take action"
+        was_edited: "Post was edited after the first flag"
+        previous_flags_count: "This post has already been flagged {{count}} times."
+
+        summary:
+          action_type_3:
+            one: "off-topic"
+            other: "off-topic x{{count}}"
+          action_type_4:
+            one: "inappropriate"
+            other: "inappropriate x{{count}}"
+          action_type_6:
+            one: "custom"
+            other: "custom x{{count}}"
+          action_type_7:
+            one: "custom"
+            other: "custom x{{count}}"
+          action_type_8:
+            one: "spam"
+            other: "spam x{{count}}"
+
+      groups:
+        primary: "Primary Group"
+        no_primary: "(no primary group)"
+        title: "Groups"
+        edit: "Edit Groups"
+        refresh: "Refresh"
+        new: "New"
+        selector_placeholder: "enter username"
+        name_placeholder: "Group name, no spaces, same as username rule"
+        about: "Edit your group membership and names here"
+        group_members: "Group members"
+        delete: "Delete"
+        delete_confirm: "Delete this group?"
+        delete_failed: "Unable to delete group. If this is an automatic group, it cannot be destroyed."
+        delete_member_confirm: "Remove '%{username}' from the '%{group}' group?"
+        name: "Name"
+        add: "Add"
+        add_members: "Add members"
+
+      api:
+        generate_master: "Generate Master API Key"
+        none: "There are no active API keys right now."
+        user: "User"
+        title: "API"
+        key: "API Key"
+        generate: "Generate"
+        regenerate: "Regenerate"
+        revoke: "Revoke"
+        confirm_regen: "Are you sure you want to replace that API Key with a new one?"
+        confirm_revoke: "Are you sure you want to revoke that key?"
+        info_html: "Your API key will allow you to create and update topics using JSON calls."
+        all_users: "All Users"
+        note_html: "Keep this key <strong>secret</strong>, all users that have it may create arbitrary posts as any user."
+
+      backups:
+        title: "Backups"
+        menu:
+          backups: "Backups"
+          logs: "Logs"
+        none: "No backup available."
+        read_only:
+          enable:
+            title: "Enable the read-only mode"
+            text: "Enable read-only mode"
+            confirm: "Are you sure you want to enable the read-only mode?"
+          disable:
+            title: "Disable the read-only mode"
+            text: "Disable read-only mode"
+        logs:
+          none: "No logs yet..."
+        columns:
+          filename: "Filename"
+          size: "Size"
+        upload:
+          text: "Upload"
+          uploading: "Uploading..."
+          success: "'{{filename}}' has successfully been uploaded."
+          error: "There has been an error while uploading '{{filename}}': {{message}}"
+        operations:
+          is_running: "An operation is currently running..."
+          failed: "The {{operation}} failed. Please check the logs."
+          cancel:
+            text: "Cancel"
+            title: "Cancel the current operation"
+            confirm: "Are you sure you want to cancel the current operation?"
+          backup:
+            text: "Backup"
+            title: "Create a backup"
+            confirm: "Do you want to start a new backup?"
+            without_uploads: "Yes (do not include files)"
+          download:
+            text: "Download"
+            title: "Download the backup"
+          destroy:
+            text: "Delete"
+            title: "Remove the backup"
+            confirm: "Are you sure you want to destroy this backup?"
+          restore:
+            is_disabled: "Restore is disabled in the site settings."
+            text: "Restore"
+            title: "Restore the backup"
+            confirm: "Are your sure you want to restore this backup?"
+          rollback:
+            text: "Rollback"
+            title: "Rollback the database to previous working state"
+            confirm: "Are your sure you want to rollback the database to the previous working state?"
+
+      export_csv:
+        success: "Export initiated, you will be notified via private message when the process is complete."
+        failed: "Export failed. Please check the logs."
+        rate_limit_error: "Posts can be downloaded once per day, please try again tomorrow."
+        button_text: "Export"
+        button_title:
+          user: "Export full user list in CSV format."
+          staff_action: "Export full staff action log in CSV format."
+          screened_email: "Export full screened email list in CSV format."
+          screened_ip: "Export full screened IP list in CSV format."
+          screened_url: "Export full screened URL list in CSV format."
+
+      customize:
+        title: "Customize"
+        long_title: "Site Customizations"
+        css: "CSS"
+        header: "Header"
+        footer: "Footer"
+        override_default: "Do not include standard style sheet"
+        enabled: "Enabled?"
+        preview: "preview"
+        undo_preview: "remove preview"
+        rescue_preview: "default style"
+        explain_preview: "See the site with this custom stylesheet"
+        explain_undo_preview: "Go back to the currently enabled custom stylesheet"
+        explain_rescue_preview: "See the site with the default stylesheet"
+        save: "Save"
+        new: "New"
+        new_style: "New Style"
+        delete: "Delete"
+        delete_confirm: "Delete this customization?"
+        about: "Modify CSS stylesheets and HTML headers on the site. Add a customization to start."
+        color: "Color"
+        opacity: "Opacity"
+        copy: "Copy"
+        css_html:
+          title: "CSS/HTML"
+          long_title: "CSS and HTML Customizations"
+        colors:
+          title: "Colors"
+          long_title: "Color Schemes"
+          about: "Modify the colors used on the site without writing CSS. Add a scheme to start."
+          new_name: "New Color Scheme"
+          copy_name_prefix: "Copy of"
+          delete_confirm: "Delete this color scheme?"
+          undo: "undo"
+          undo_title: "Undo your changes to this color since the last time it was saved."
+          revert: "revert"
+          revert_title: "Reset this color to Discourse's default color scheme."
+          primary:
+            name: 'primary'
+            description: 'Most text, icons, and borders.'
+          secondary:
+            name: 'secondary'
+            description: 'The main background color, and text color of some buttons.'
+          tertiary:
+            name: 'tertiary'
+            description: 'Links, some buttons, notifications, and accent color.'
+          quaternary:
+            name: "quaternary"
+            description: "Navigation links."
+          header_background:
+            name: "header background"
+            description: "Background color of the site's header."
+          header_primary:
+            name: "header primary"
+            description: "Text and icons in the site's header."
+          highlight:
+            name: 'highlight'
+            description: 'The background color of highlighted elements on the page, such as posts and topics.'
+          danger:
+            name: 'danger'
+            description: 'Highlight color for actions like deleting posts and topics.'
+          success:
+            name: 'success'
+            description: 'Used to indicate an action was successful.'
+          love:
+            name: 'love'
+            description: "The like button's color."
+          wiki:
+            name: 'wiki'
+            description: "Base color used for the background of wiki posts."
+
+
+      email:
+        title: "Email"
+        settings: "Settings"
+        all: "All"
+        sending_test: "Sending test Email..."
+        error: "<b>ERROR</b> - %{server_error}"
+        test_error: "There was a problem sending the test email. Please double-check your mail settings, verify that your host is not blocking mail connections, and try again."
+        sent: "Sent"
+        skipped: "Skipped"
+        sent_at: "Sent At"
+        time: "Time"
+        user: "User"
+        email_type: "Email Type"
+        to_address: "To Address"
+        test_email_address: "email address to test"
+        send_test: "Send Test Email"
+        sent_test: "sent!"
+        delivery_method: "Delivery Method"
+        preview_digest: "Preview Digest"
+        preview_digest_desc: "Preview the content of the weekly digest emails sent to inactive users."
+        refresh: "Refresh"
+        format: "Format"
+        html: "html"
+        text: "text"
+        last_seen_user: "Last Seen User:"
+        reply_key: "Reply Key"
+        skipped_reason: "Skip Reason"
+        logs:
+          none: "No logs found."
+          filters:
+            title: "Filter"
+            user_placeholder: "username"
+            address_placeholder: "name@example.com"
+            type_placeholder: "digest, signup..."
+            reply_key_placeholder: "reply key"
+            skipped_reason_placeholder: "reason"
+
+      logs:
+        title: "Logs"
+        action: "Action"
+        created_at: "Created"
+        last_match_at: "Last Matched"
+        match_count: "Matches"
+        ip_address: "IP"
+        topic_id: "Topic ID"
+        post_id: "Post ID"
+        delete: 'Delete'
+        edit: 'Edit'
+        save: 'Save'
+        screened_actions:
+          block: "block"
+          do_nothing: "do nothing"
+        staff_actions:
+          title: "Staff Actions"
+          instructions: "Click usernames and actions to filter the list. Click avatars to go to user pages."
+          clear_filters: "Show Everything"
+          staff_user: "Staff User"
+          target_user: "Target User"
+          subject: "Subject"
+          when: "When"
+          context: "Context"
+          details: "Details"
+          previous_value: "Previous"
+          new_value: "New"
+          diff: "Diff"
+          show: "Show"
+          modal_title: "Details"
+          no_previous: "There is no previous value."
+          deleted: "No new value. The record was deleted."
+          actions:
+            delete_user: "delete user"
+            change_trust_level: "change trust level"
+            change_site_setting: "change site setting"
+            change_site_customization: "change site customization"
+            delete_site_customization: "delete site customization"
+            suspend_user: "suspend user"
+            unsuspend_user: "unsuspend user"
+            grant_badge: "grant badge"
+            revoke_badge: "revoke badge"
+            check_email: "check email"
+            delete_topic: "delete topic"
+            delete_post: "delete post"
+            impersonate: "impersonate"
+        screened_emails:
+          title: "Screened Emails"
+          description: "When someone tries to create a new account, the following email addresses will be checked and the registration will be blocked, or some other action performed."
+          email: "Email Address"
+          actions:
+            allow: "Allow"
+        screened_urls:
+          title: "Screened URLs"
+          description: "The URLs listed here were used in posts by users who have been identified as spammers."
+          url: "URL"
+          domain: "Domain"
+        screened_ips:
+          title: "Screened IPs"
+          description: 'IP addresses that are being watched. Use "Allow" to whitelist IP addresses.'
+          delete_confirm: "Are you sure you want to remove the rule for %{ip_address}?"
+          roll_up_confirm: "Are you sure you want to roll up commonly screened IP addresses into subnets?"
+          rolled_up_some_subnets: "Successfully rolled up IP ban entries to these subnets: %{subnets}."
+          rolled_up_no_subnet: "There was nothing to roll up."
+          actions:
+            block: "Block"
+            do_nothing: "Allow"
+            allow_admin: "Allow Admin"
+          form:
+            label: "New:"
+            ip_address: "IP address"
+            add: "Add"
+          roll_up:
+            text: "Roll up"
+            title: "Creates new subnet ban entries if there are at least 'min_ban_entries_for_roll_up' entries."
+        logster:
+          title: "Error Logs"
+
+      impersonate:
+        title: "Impersonate"
+        help: "Use this tool to impersonate a user account for debugging purposes. You will have to log out once finished."
+
+      users:
+        title: 'Users'
+        create: 'Add Admin User'
+        last_emailed: "Last Emailed"
+        not_found: "Sorry, that username doesn't exist in our system."
+        id_not_found: "Sorry, that user id doesn't exist in our system."
+        active: "Active"
+        show_emails: "Show Emails"
+        nav:
+          new: "New"
+          active: "Active"
+          pending: "Pending"
+          staff: 'Staff'
+          suspended: 'Suspended'
+          blocked: 'Blocked'
+          suspect: 'Suspect'
+        approved: "Approved?"
+        approved_selected:
+          one: "approve user"
+          other: "approve users ({{count}})"
+        reject_selected:
+          one: "reject user"
+          other: "reject users ({{count}})"
+        titles:
+          active: 'Active Users'
+          new: 'New Users'
+          pending: 'Users Pending Review'
+          newuser: 'Users at Trust Level 0 (New User)'
+          basic: 'Users at Trust Level 1 (Basic User)'
+          regular: 'Users at Trust Level 2 (Member)'
+          leader: 'Users at Trust Level 3 (Regular)'
+          elder: 'Users at Trust Level 4 (Leader)'
+          staff: "Staff"
+          admins: 'Admin Users'
+          moderators: 'Moderators'
+          blocked: 'Blocked Users'
+          suspended: 'Suspended Users'
+          suspect: 'Suspect Users'
+        reject_successful:
+          one: "Successfully rejected 1 user."
+          other: "Successfully rejected %{count} users."
+        reject_failures:
+          one: "Failed to reject 1 user."
+          other: "Failed to reject %{count} users."
+        not_verified: "Not verified"
+        check_email:
+          title: "Reveal this user's email address"
+          text: "Show"
+
+      user:
+        suspend_failed: "Something went wrong suspending this user {{error}}"
+        unsuspend_failed: "Something went wrong unsuspending this user {{error}}"
+        suspend_duration: "How long will the user be suspended for?"
+        suspend_duration_units: "(days)"
+        suspend_reason_label: "Why are you suspending? This text <b>will be visible to everyone</b> on this user's profile page, and will be shown to the user when they try to log in. Keep it short."
+        suspend_reason: "Reason"
+        suspended_by: "Suspended by"
+        delete_all_posts: "Delete all posts"
+        delete_all_posts_confirm: "You are about to delete %{posts} posts and %{topics} topics. Are you sure?"
+        suspend: "Suspend"
+        unsuspend: "Unsuspend"
+        suspended: "Suspended?"
+        moderator: "Moderator?"
+        admin: "Admin?"
+        blocked: "Blocked?"
+        show_admin_profile: "Admin"
+        edit_title: "Edit Title"
+        save_title: "Save Title"
+        refresh_browsers: "Force browser refresh"
+        refresh_browsers_message: "Message sent to all clients!"
+        show_public_profile: "Show Public Profile"
+        impersonate: 'Impersonate'
+        ip_lookup: "IP Lookup"
+        log_out: "Log Out"
+        logged_out: "User was logged out on all devices"
+        revoke_admin: 'Revoke Admin'
+        grant_admin: 'Grant Admin'
+        revoke_moderation: 'Revoke Moderation'
+        grant_moderation: 'Grant Moderation'
+        unblock: 'Unblock'
+        block: 'Block'
+        reputation: Reputation
+        permissions: Permissions
+        activity: Activity
+        like_count: Likes Given / Received
+        last_100_days: 'in the last 100 days'
+        private_topics_count: Private Topics
+        posts_read_count: Posts Read
+        post_count: Posts Created
+        topics_entered: Topics Viewed
+        flags_given_count: Flags Given
+        flags_received_count: Flags Received
+        warnings_received_count: Warnings Received
+        flags_given_received_count: 'Flags Given / Received'
+        approve: 'Approve'
+        approved_by: "approved by"
+        approve_success: "User approved and email sent with activation instructions."
+        approve_bulk_success: "Success! All selected users have been approved and notified."
+        time_read: "Read Time"
+        delete: "Delete User"
+        delete_forbidden_because_staff: "Admins and moderators can't be deleted."
+        delete_forbidden:
+          one: "Users can't be deleted if they have posts. Delete all posts before trying to delete a user. (Posts older than %{count} day old can't be deleted.)"
+          other: "Users can't be deleted if they have posts. Delete all posts before trying to delete a user. (Posts older than %{count} days old can't be deleted.)"
+        cant_delete_all_posts:
+          one: "Can't delete all posts. Some posts are older than %{count} day old. (The delete_user_max_post_age setting.)"
+          other: "Can't delete all posts. Some posts are older than %{count} days old. (The delete_user_max_post_age setting.)"
+        cant_delete_all_too_many_posts:
+          one: "Can't delete all posts because the user has more than 1 post. (delete_all_posts_max)"
+          other: "Can't delete all posts because the user has more than %{count} posts.  (delete_all_posts_max)"
+        delete_confirm: "Are you SURE you want to delete this user? This is permanent!"
+        delete_and_block: "Delete and <b>block</b> this email and IP address"
+        delete_dont_block: "Delete only"
+        deleted: "The user was deleted."
+        delete_failed: "There was an error deleting that user. Make sure all posts are deleted before trying to delete the user."
+        send_activation_email: "Send Activation Email"
+        activation_email_sent: "An activation email has been sent."
+        send_activation_email_failed: "There was a problem sending another activation email. %{error}"
+        activate: "Activate Account"
+        activate_failed: "There was a problem activating the user."
+        deactivate_account: "Deactivate Account"
+        deactivate_failed: "There was a problem deactivating the user."
+        unblock_failed: 'There was a problem unblocking the user.'
+        block_failed: 'There was a problem blocking the user.'
+        deactivate_explanation: "A deactivated user must re-validate their email."
+        suspended_explanation: "A suspended user can't log in."
+        block_explanation: "A blocked user can't post or start topics."
+        trust_level_change_failed: "There was a problem changing the user's trust level."
+        suspend_modal_title: "Suspend User"
+        trust_level_2_users: "Trust Level 2 Users"
+        trust_level_3_requirements: "Trust Level 3 Requirements"
+        trust_level_locked_tip: "trust level is locked, system will not promote or demote user"
+        trust_level_unlocked_tip: "trust level is unlocked, system will may promote or demote user"
+        lock_trust_level: "Lock Trust Level"
+        unlock_trust_level: "Unlock Trust Level"
+        tl3_requirements:
+          title: "Requirements for Trust Level 3"
+          table_title: "In the last 100 days:"
+          value_heading: "Value"
+          requirement_heading: "Requirement"
+          visits: "Visits"
+          days: "days"
+          topics_replied_to: "Topics Replied To"
+          topics_viewed: "Topics Viewed"
+          topics_viewed_all_time: "Topics Viewed (all time)"
+          posts_read: "Posts Read"
+          posts_read_all_time: "Posts Read (all time)"
+          flagged_posts: "Flagged Posts"
+          flagged_by_users: "Users Who Flagged"
+          likes_given: "Likes Given"
+          likes_received: "Likes Received"
+          likes_received_days: "Likes Received: unique days"
+          likes_received_users: "Likes Received: unique users"
+          qualifies: "Qualifies for trust level 3."
+          does_not_qualify: "Doesn't qualify for trust level 3."
+          will_be_promoted: "Will be promoted soon."
+          will_be_demoted: "Will be demoted soon."
+          on_grace_period: "Currently in promotion grace period, will not be demoted."
+          locked_will_not_be_promoted: "Trust level locked. Will never be promoted."
+          locked_will_not_be_demoted: "Trust level locked. Will never be demoted."
+        sso:
+          title: "Single Sign On"
+          external_id: "External ID"
+          external_username: "Username"
+          external_name: "Name"
+          external_email: "Email"
+          external_avatar_url: "Avatar URL"
+
+      user_fields:
+        title: "User Fields"
+        help: "Add fields that your users can fill out."
+        create: "Create User Field"
+        untitled: "Untitled"
+        name: "Field Name"
+        type: "Field Type"
+        description: "Field Description"
+        save: "Save"
+        edit: "Edit"
+        delete: "Delete"
+        cancel: "Cancel"
+        delete_confirm: "Are you sure you want to delete that user field?"
+        required:
+          title: "Required at signup?"
+          enabled: "required"
+          disabled: "not required"
+        editable:
+          title: "Editable after signup?"
+          enabled: "editable"
+          disabled: "not editable"
+
+        field_types:
+          text: 'Text Field'
+          confirm: 'Confirmation'
+
+      site_text:
+        none: "Choose a type of content to begin editing."
+        title: 'Text Content'
+
+      site_settings:
+        show_overriden: 'Only show overridden'
+        title: 'Settings'
+        reset: 'reset'
+        none: 'none'
+        no_results: "No results found."
+        clear_filter: "Clear"
+        categories:
+          all_results: 'All'
+          required: 'Required'
+          basic: 'Basic Setup'
+          users: 'Users'
+          posting: 'Posting'
+          email: 'Email'
+          files: 'Files'
+          trust: 'Trust Levels'
+          security: 'Security'
+          onebox: "Onebox"
+          seo: 'SEO'
+          spam: 'Spam'
+          rate_limits: 'Rate Limits'
+          developer: 'Developer'
+          embedding: "Embedding"
+          legal: "Legal"
+          uncategorized: 'Other'
+          backups: "Backups"
+          login: "Login"
+
+      badges:
+        title: Badges
+        new_badge: New Badge
+        new: New
+        name: Name
+        badge: Badge
+        display_name: Display Name
+        description: Description
+        badge_type: Badge Type
+        badge_grouping: Group
+        badge_groupings:
+          modal_title: Badge Groupings
+        granted_by: Granted By
+        granted_at: Granted At
+        save: Save
+        delete: Delete
+        delete_confirm: Are you sure you want to delete this badge?
+        revoke: Revoke
+        revoke_confirm: Are you sure you want to revoke this badge?
+        edit_badges: Edit Badges
+        grant_badge: Grant Badge
+        granted_badges: Granted Badges
+        grant: Grant
+        no_user_badges: "%{name} has not been granted any badges."
+        no_badges: There are no badges that can be granted.
+        none_selected: "Select a badge to get started"
+        allow_title: Allow badge to be used as a title
+        multiple_grant: Can be granted multiple times
+        listable: Show badge on the public badges page
+        enabled: Enable badge
+        icon: Icon
+        image: Image
+        icon_help: "Use either a Font Awesome class or URL to an image"
+        query: Badge Query (SQL)
+        target_posts: Query targets posts
+        auto_revoke: Run revocation query daily
+        show_posts: Show post granting badge on badge page
+        trigger: Trigger
+        trigger_type:
+          none: "Update daily"
+          post_action: "When a user acts on post"
+          post_revision: "When a user edits or creates a post"
+          trust_level_change: "When a user changes trust level"
+          user_change: "When a user is edited or created"
+        preview:
+          link_text: "Preview granted badges"
+          plan_text: "Preview with query plan"
+          modal_title: "Badge Query Preview"
+          sql_error_header: "There was an error with the query."
+          error_help: "See the following links for help with badge queries."
+          bad_count_warning:
+            header: "WARNING!"
+            text: "There are missing grant samples. This happens when the badge query returns user IDs or post IDs that do not exist. This may cause unexpected results later on - please double-check your query."
+          grant_count:
+            zero: "No badges to be assigned."
+            one: "<b>1</b> badge to be assigned."
+            other: "<b>%{count}</b> badges to be assigned."
+          sample: "Sample:"
+          grant:
+            with: <span class="username">%{username}</span>
+            with_post: <span class="username">%{username}</span> for post in %{link}
+            with_post_time: <span class="username">%{username}</span> for post in %{link} at <span class="time">%{time}</span>
+            with_time: <span class="username">%{username}</span> at <span class="time">%{time}</span>
+
+      emoji:
+        title: "Emoji"
+        help: "Add new emoji that will be available to everyone. (PROTIP: drag & drop multiple files at once)"
+        add: "Add New Emoji"
+        name: "Name"
+        image: "Image"
+        delete_confirm: "Are you sure you want to delete the :%{name}: emoji?"
+
+    lightbox:
+      download: "download"
+
+    search_help:
+      title: 'Search Help'
+
+    keyboard_shortcuts_help:
+      title: 'Keyboard Shortcuts'
+      jump_to:
+        title: 'Jump To'
+        home: '<b>g</b>, <b>h</b> Home (Latest)'
+        latest: '<b>g</b>, <b>l</b> Latest'
+        new: '<b>g</b>, <b>n</b> New'
+        unread: '<b>g</b>, <b>u</b> Unread'
+        starred: '<b>g</b>, <b>f</b> Starred'
+        categories: '<b>g</b>, <b>c</b> Categories'
+        top: '<b>g</b>, <b>t</b> Top'
+      navigation:
+        title: 'Navigation'
+        jump: '<b>#</b> Go to post #'
+        back: '<b>u</b> Back'
+        up_down: '<b>k</b>/<b>j</b> Move selection &uarr; &darr;'
+        open: '<b>o</b> or <b>Enter</b> Open selected topic'
+        next_prev: '<b>shift</b>+<b>j</b>/<b>shift</b>+<b>k</b> Next/previous section'
+      application:
+        title: 'Application'
+        create: '<b>c</b> Create a new topic'
+        notifications: '<b>n</b> Open notifications'
+        site_map_menu: '<b>=</b> Open site menu'
+        user_profile_menu: '<b>p</b> Open user menu'
+        show_incoming_updated_topics: '<b>.</b> Show updated topics'
+        search: '<b>/</b> Search'
+        help: '<b>?</b> Open keyboard help'
+        dismiss_new_posts: '<b>x</b>, <b>r</b> Dismiss New/Posts'
+        dismiss_topics: '<b>x</b>, <b>t</b> Dismiss Topics'
+      actions:
+        title: 'Actions'
+        star: '<b>f</b> Star topic'
+        pin_unpin_topic: '<b>shift</b>+<b>p</b> Pin/Unpin topic'
+        share_topic: '<b>shift</b>+<b>s</b> Share topic'
+        share_post: '<b>s</b> Share post'
+        reply_as_new_topic: '<b>t</b> Reply as linked topic'
+        reply_topic: '<b>shift</b>+<b>r</b> Reply to topic'
+        reply_post: '<b>r</b> Reply to post'
+        quote_post: '<b>q</b> Quote post'
+        like: '<b>l</b> Like post'
+        flag: '<b>!</b> Flag post'
+        bookmark: '<b>b</b> Bookmark post'
+        edit: '<b>e</b> Edit post'
+        delete: '<b>d</b> Delete post'
+        mark_muted: '<b>m</b>, <b>m</b> Mute topic'
+        mark_regular: '<b>m</b>, <b>r</b> Regular (default) topic'
+        mark_tracking: '<b>m</b>, <b>t</b> Track topic'
+        mark_watching: '<b>m</b>, <b>w</b> Watch topic'
+
+    badges:
+      title: Badges
+      allow_title: "allow badge as title?"
+      multiple_grant: "awarded multiple times?"
+      badge_count:
+        one:   "1 Badge"
+        other: "%{count} Badges"
+      more_badges:
+        one:   "+1 More"
+        other: "+%{count} More"
+      granted:
+        one:   "1 granted"
+        other: "%{count} granted"
+      select_badge_for_title: Select a badge to use as your title
+      none: "<none>"
+      badge_grouping:
+        getting_started:
+          name: Getting Started
+        community:
+          name: Community
+        trust_level:
+          name: Trust Level
+        other:
+          name: Other
+        posting:
+          name: Posting
+      badge:
+        editor:
+          name: Editor
+          description: First post edit
+        basic_user:
+          name: Basic
+          description: <a href="https://meta.discourse.org/t/what-do-user-trust-levels-do/4924/4">Granted</a> all essential community functions
+        member:
+          name: Member
+          description: <a href="https://meta.discourse.org/t/what-do-user-trust-levels-do/4924/5">Granted</a> invitations
+        regular:
+          name: Regular
+          description: <a href="https://meta.discourse.org/t/what-do-user-trust-levels-do/4924/6">Granted</a> recategorize, rename, followed links and lounge
+        leader:
+          name: Leader
+          description: <a href="https://meta.discourse.org/t/what-do-user-trust-levels-do/4924/7">Granted</a> global edit, pin, close, archive, split and merge
+        welcome:
+          name: Welcome
+          description: Received a like
+        autobiographer:
+          name: Autobiographer
+          description: Filled user <a href="/my/preferences">profile</a> information
+        nice_post:
+          name: Nice Post
+          description: Received 10 likes on a post. This badge can be granted multiple times
+        good_post:
+          name: Good Post
+          description: Received 25 likes on a post. This badge can be granted multiple times
+        great_post:
+          name: Great Post
+          description: Received 50 likes on a post. This badge can be granted multiple times
+        nice_topic:
+          name: Nice Topic
+          description: Received 10 likes on a topic. This badge can be granted multiple times
+        good_topic:
+          name: Good Topic
+          description: Received 25 likes on a topic. This badge can be granted multiple times
+        great_topic:
+          name: Great Topic
+          description: Received 50 likes on a topic. This badge can be granted multiple times
+        nice_share:
+          name: Nice Share
+          description: Shared a post with 25 unique visitors
+        good_share:
+          name: Good Share
+          description: Shared a post with 300 unique visitors
+        great_share:
+          name: Great Share
+          description: Shared a post with 1000 unique visitors
+        first_like:
+          name: First Like
+          description: Liked a post
+        first_flag:
+          name: First Flag
+          description: Flagged a post
+        first_share:
+          name: First Share
+          description: Shared a post
+        first_link:
+          name: First Link
+          description: Added an internal link to another topic
+        first_quote:
+          name: First Quote
+          description: Quoted a user
+        read_guidelines:
+          name: Read Guidelines
+          description: Read the <a href="/guidelines">community guidelines</a>
+        reader:
+          name: Reader
+          description: Read every post in a topic with more than 100 posts
+
+    google_search: |
+      <h2>Search with Google</h2>
+      <p>
+        <form action='//google.com/search' id='google-search' onsubmit="document.getElementById('google-query').value = 'site:' + window.location.host + ' ' + document.getElementById('user-query').value; return true;">
+          <input type="text" id='user-query' value="">
+          <input type='hidden' id='google-query' name="q">
+          <button class="btn btn-primary">Google</button>
+        </form>
+      </p>
+
+
+===== FILE config/routes.rb (after PR) =====
+require "sidekiq/web"
+require_dependency "scheduler/web"
+require_dependency "admin_constraint"
+require_dependency "staff_constraint"
+require_dependency "homepage_constraint"
+require_dependency "permalink_constraint"
+
+# This used to be User#username_format, but that causes a preload of the User object
+# and makes Guard not work properly.
+USERNAME_ROUTE_FORMAT = /[A-Za-z0-9\_]+/ unless defined? USERNAME_ROUTE_FORMAT
+BACKUP_ROUTE_FORMAT = /[a-zA-Z0-9\-_]*\d{4}(-\d{2}){2}-\d{6}\.tar\.gz/i unless defined? BACKUP_ROUTE_FORMAT
+
+Discourse::Application.routes.draw do
+
+  match "/404", to: "exceptions#not_found", via: [:get, :post]
+  get "/404-body" => "exceptions#not_found_body"
+
+  if Rails.env.development?
+    mount Sidekiq::Web => "/sidekiq"
+    mount Logster::Web => "/logs"
+  else
+    mount Sidekiq::Web => "/sidekiq", constraints: AdminConstraint.new
+    mount Logster::Web => "/logs", constraints: AdminConstraint.new
+  end
+
+  resources :about
+
+  get "site" => "site#index"
+  get "site_customizations/:key" => "site_customizations#show"
+
+  resources :forums
+  get "srv/status" => "forums#status"
+
+  namespace :admin, constraints: StaffConstraint.new do
+    get "" => "admin#index"
+
+    resources :site_settings, constraints: AdminConstraint.new do
+      collection do
+        get "category/:id" => "site_settings#index"
+      end
+    end
+
+    get "reports/:type" => "reports#show"
+
+    resources :groups, constraints: AdminConstraint.new do
+      collection do
+        post "refresh_automatic_groups" => "groups#refresh_automatic_groups"
+      end
+      delete "members" => "groups#remove_member"
+      put "members" => "groups#add_members"
+    end
+
+    resources :users, id: USERNAME_ROUTE_FORMAT do
+      collection do
+        get "list/:query" => "users#index"
+        get "ip-info" => "users#ip_info"
+        delete "delete-others-with-same-ip" => "users#delete_other_accounts_with_same_ip"
+        get "total-others-with-same-ip" => "users#total_other_accounts_with_same_ip"
+        put "approve-bulk" => "users#approve_bulk"
+        delete "reject-bulk" => "users#reject_bulk"
+      end
+      put "suspend"
+      put "delete_all_posts"
+      put "unsuspend"
+      put "revoke_admin", constraints: AdminConstraint.new
+      put "grant_admin", constraints: AdminConstraint.new
+      post "generate_api_key", constraints: AdminConstraint.new
+      delete "revoke_api_key", constraints: AdminConstraint.new
+      put "revoke_moderation", constraints: AdminConstraint.new
+      put "grant_moderation", constraints: AdminConstraint.new
+      put "approve"
+      post "refresh_browsers", constraints: AdminConstraint.new
+      post "log_out", constraints: AdminConstraint.new
+      put "activate"
+      put "deactivate"
+      put "block"
+      put "unblock"
+      put "trust_level"
+      put "trust_level_lock"
+      put "primary_group"
+      post "groups" => "users#add_group", constraints: AdminConstraint.new
+      delete "groups/:group_id" => "users#remove_group", constraints: AdminConstraint.new
+      get "badges"
+      get "leader_requirements" => "users#tl3_requirements"
+      get "tl3_requirements"
+    end
+
+
+    post "users/sync_sso" => "users#sync_sso", constraints: AdminConstraint.new
+    post "users/invite_admin" => "users#invite_admin", constraints: AdminConstraint.new
+
+    resources :impersonate, constraints: AdminConstraint.new
+
+    resources :email do
+      collection do
+        post "test"
+        get "all"
+        get "sent"
+        get "skipped"
+        get "preview-digest" => "email#preview_digest"
+      end
+    end
+
+    scope "/logs" do
+      resources :staff_action_logs,     only: [:index]
+      resources :screened_emails,       only: [:index, :destroy]
+      resources :screened_ip_addresses, only: [:index, :create, :update, :destroy] do
+        collection do
+          post "roll_up"
+        end
+      end
+      resources :screened_urls,         only: [:index]
+    end
+
+    get "/logs" => "staff_action_logs#index"
+
+    get "customize" => "color_schemes#index", constraints: AdminConstraint.new
+    get "customize/css_html" => "site_customizations#index", constraints: AdminConstraint.new
+    get "customize/colors" => "color_schemes#index", constraints: AdminConstraint.new
+    get "flags" => "flags#index"
+    get "flags/:filter" => "flags#index"
+    post "flags/agree/:id" => "flags#agree"
+    post "flags/disagree/:id" => "flags#disagree"
+    post "flags/defer/:id" => "flags#defer"
+    resources :site_customizations, constraints: AdminConstraint.new
+    scope "/customize" do
+      resources :site_text, constraints: AdminConstraint.new
+      resources :site_text_types, constraints: AdminConstraint.new
+      resources :user_fields, constraints: AdminConstraint.new
+      resources :emojis, constraints: AdminConstraint.new
+    end
+
+    resources :color_schemes, constraints: AdminConstraint.new
+
+    get "version_check" => "versions#show"
+
+    resources :dashboard, only: [:index] do
+      collection do
+        get "problems"
+      end
+    end
+
+    resources :api, only: [:index], constraints: AdminConstraint.new do
+      collection do
+        post "key" => "api#create_master_key"
+        put "key" => "api#regenerate_key"
+        delete "key" => "api#revoke_key"
+      end
+    end
+
+    resources :backups, only: [:index, :create], constraints: AdminConstraint.new do
+      member do
+        get "" => "backups#show", constraints: { id: BACKUP_ROUTE_FORMAT }
+        delete "" => "backups#destroy", constraints: { id: BACKUP_ROUTE_FORMAT }
+        post "restore" => "backups#restore", constraints: { id: BACKUP_ROUTE_FORMAT }
+      end
+      collection do
+        get "logs" => "backups#logs"
+        get "status" => "backups#status"
+        get "cancel" => "backups#cancel"
+        get "rollback" => "backups#rollback"
+        put "readonly" => "backups#readonly"
+        get "upload" => "backups#check_backup_chunk"
+        post "upload" => "backups#upload_backup_chunk"
+      end
+    end
+
+    resources :badges, constraints: AdminConstraint.new do
+      collection do
+        get "types" => "badges#badge_types"
+        post "badge_groupings" => "badges#save_badge_groupings"
+        post "preview" => "badges#preview"
+      end
+    end
+
+    get "memory_stats"=> "diagnostics#memory_stats", constraints: AdminConstraint.new
+    get "dump_heap"=> "diagnostics#dump_heap", constraints: AdminConstraint.new
+
+  end # admin namespace
+
+  get "email_preferences" => "email#preferences_redirect", :as => "email_preferences_redirect"
+  get "email/unsubscribe/:key" => "email#unsubscribe", as: "email_unsubscribe"
+  post "email/resubscribe/:key" => "email#resubscribe", as: "email_resubscribe"
+
+  resources :session, id: USERNAME_ROUTE_FORMAT, only: [:create, :destroy, :become] do
+    get 'become'
+    collection do
+      post "forgot_password"
+    end
+  end
+
+  get "session/sso" => "session#sso"
+  get "session/sso_login" => "session#sso_login"
+  get "session/sso_provider" => "session#sso_provider"
+  get "session/current" => "session#current"
+  get "session/csrf" => "session#csrf"
+  get "composer-messages" => "composer_messages#index"
+
+  resources :users, except: [:show, :update, :destroy] do
+    collection do
+      get "check_username"
+      get "is_local_username"
+    end
+  end
+
+  resources :static
+  post "login" => "static#enter"
+  get "login" => "static#show", id: "login"
+  get "faq" => "static#show", id: "faq"
+  get "guidelines" => "static#show", id: "guidelines"
+  get "tos" => "static#show", id: "tos"
+  get "privacy" => "static#show", id: "privacy"
+  get "signup" => "list#latest"
+
+  post "users/read-faq" => "users#read_faq"
+  get "users/search/users" => "users#search_users"
+  get "users/account-created/" => "users#account_created"
+  get "users/password-reset/:token" => "users#password_reset"
+  put "users/password-reset/:token" => "users#password_reset"
+  get "users/activate-account/:token" => "users#activate_account"
+  put "users/activate-account/:token" => "users#perform_account_activation", as: 'perform_activate_account'
+  get "users/authorize-email/:token" => "users#authorize_email"
+  get "users/hp" => "users#get_honeypot_value"
+  get "my/*path", to: 'users#my_redirect'
+
+  get "user_preferences" => "users#user_preferences_redirect"
+  get "users/:username/private-messages" => "user_actions#private_messages", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/private-messages/:filter" => "user_actions#private_messages", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username" => "users#show", as: 'user', constraints: {username: USERNAME_ROUTE_FORMAT}
+  put "users/:username" => "users#update", constraints: {username: USERNAME_ROUTE_FORMAT}
+  put "users/:username/emails" => "users#check_emails", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/preferences" => "users#preferences", constraints: {username: USERNAME_ROUTE_FORMAT}, as: :email_preferences
+  get "users/:username/preferences/email" => "users#preferences", constraints: {username: USERNAME_ROUTE_FORMAT}
+  put "users/:username/preferences/email" => "users#change_email", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/preferences/about-me" => "users#preferences", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/preferences/badge_title" => "users#preferences", constraints: {username: USERNAME_ROUTE_FORMAT}
+  put "users/:username/preferences/badge_title" => "users#badge_title", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/preferences/username" => "users#preferences", constraints: {username: USERNAME_ROUTE_FORMAT}
+  put "users/:username/preferences/username" => "users#username", constraints: {username: USERNAME_ROUTE_FORMAT}
+  post "users/:username/preferences/user_image" => "users#upload_user_image", constraints: {username: USERNAME_ROUTE_FORMAT}
+  delete "users/:username/preferences/user_image" => "users#destroy_user_image", constraints: {username: USERNAME_ROUTE_FORMAT}
+  put "users/:username/preferences/avatar/pick" => "users#pick_avatar", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/preferences/card-badge" => "users#card_badge", constraints: {username: USERNAME_ROUTE_FORMAT}
+  put "users/:username/preferences/card-badge" => "users#update_card_badge", constraints: {username: USERNAME_ROUTE_FORMAT}
+
+  get "users/:username/invited" => "users#invited", constraints: {username: USERNAME_ROUTE_FORMAT}
+  post "users/action/send_activation_email" => "users#send_activation_email"
+  get "users/:username/activity" => "users#show", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/activity/:filter" => "users#show", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/badges" => "users#show", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/notifications" => "users#show", constraints: {username: USERNAME_ROUTE_FORMAT}
+  delete "users/:username" => "users#destroy", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/by-external/:external_id" => "users#show"
+  get "users/:username/flagged-posts" => "users#show", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/deleted-posts" => "users#show", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "users/:username/badges_json" => "user_badges#username"
+
+  post "user_avatar/:username/refresh_gravatar" => "user_avatars#refresh_gravatar"
+  get "letter_avatar/:username/:size/:version.png" => "user_avatars#show_letter", format: false, constraints: { hostname: /[\w\.-]+/ }
+  get "user_avatar/:hostname/:username/:size/:version.png" => "user_avatars#show", format: false, constraints: { hostname: /[\w\.-]+/ }
+
+  get "uploads/:site/:id/:sha.:extension" => "uploads#show", constraints: {site: /\w+/, id: /\d+/, sha: /[a-z0-9]{15,16}/i, extension: /\w{2,}/}
+  get "uploads/:site/:sha" => "uploads#show", constraints: { site: /\w+/, sha: /[a-z0-9]{40}/}
+  post "uploads" => "uploads#create"
+
+  get "posts/by_number/:topic_id/:post_number" => "posts#by_number"
+  get "posts/:id/reply-history" => "posts#reply_history"
+  get "posts/:username/deleted" => "posts#deleted_posts", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "posts/:username/flagged" => "posts#flagged_posts", constraints: {username: USERNAME_ROUTE_FORMAT}
+
+  resources :groups do
+    get 'members'
+    get 'posts'
+    get 'counts'
+  end
+
+  # In case people try the wrong URL
+  get '/group/:id', to: redirect('/groups/%{id}')
+  get '/group/:id/members', to: redirect('/groups/%{id}/members')
+
+  resources :posts do
+    put "bookmark"
+    put "wiki"
+    put "post_type"
+    put "rebake"
+    put "unhide"
+    get "replies"
+    get "revisions/latest" => "posts#latest_revision"
+    get "revisions/:revision" => "posts#revisions", constraints: { revision: /\d+/ }
+    put "revisions/:revision/hide" => "posts#hide_revision", constraints: { revision: /\d+/ }
+    put "revisions/:revision/show" => "posts#show_revision", constraints: { revision: /\d+/ }
+    put "recover"
+    collection do
+      delete "destroy_many"
+    end
+  end
+
+  get "notifications" => "notifications#recent"
+  get "notifications/history" => "notifications#history"
+  put "notifications/reset-new" => 'notifications#reset_new'
+
+  match "/auth/:provider/callback", to: "users/omniauth_callbacks#complete", via: [:get, :post]
+  match "/auth/failure", to: "users/omniauth_callbacks#failure", via: [:get, :post]
+
+  resources :clicks do
+    collection do
+      get "track"
+    end
+  end
+
+  get "excerpt" => "excerpt#show"
+
+  resources :post_actions do
+    collection do
+      get "users"
+      post "defer_flags"
+    end
+  end
+  resources :user_actions
+
+  resources :badges, only: [:index]
+  get "/badges/:id(/:slug)" => "badges#show"
+  resources :user_badges, only: [:index, :create, :destroy]
+
+  resources :categories, :except => :show
+  post "category/uploads" => "categories#upload"
+  post "category/:category_id/move" => "categories#move"
+  post "category/:category_id/notifications" => "categories#set_notifications"
+  put "category/:category_id/slug" => "categories#update_slug"
+
+  get "c/:id/show" => "categories#show"
+  get "c/:category.rss" => "list#category_feed", format: :rss
+  get "c/:parent_category/:category.rss" => "list#category_feed", format: :rss
+  get "c/:category" => "list#category_latest"
+  get "c/:category/none" => "list#category_none_latest"
+  get "c/:parent_category/:category" => "list#parent_category_category_latest"
+  get "c/:category/l/top" => "list#category_top", as: "category_top"
+  get "c/:category/none/l/top" => "list#category_none_top", as: "category_none_top"
+  get "c/:parent_category/:category/l/top" => "list#parent_category_category_top", as: "parent_category_category_top"
+
+
+  TopTopic.periods.each do |period|
+    get "top/#{period}" => "list#top_#{period}"
+    get "c/:category/l/top/#{period}" => "list#category_top_#{period}", as: "category_top_#{period}"
+    get "c/:category/none/l/top/#{period}" => "list#category_none_top_#{period}", as: "category_none_top_#{period}"
+    get "c/:parent_category/:category/l/top/#{period}" => "list#parent_category_category_top_#{period}", as: "parent_category_category_top_#{period}"
+  end
+
+  Discourse.anonymous_filters.each do |filter|
+    get "#{filter}.rss" => "list##{filter}_feed", format: :rss
+  end
+
+  Discourse.filters.each do |filter|
+    get "#{filter}" => "list##{filter}"
+    get "c/:category/l/#{filter}" => "list#category_#{filter}", as: "category_#{filter}"
+    get "c/:category/none/l/#{filter}" => "list#category_none_#{filter}", as: "category_none_#{filter}"
+    get "c/:parent_category/:category/l/#{filter}" => "list#parent_category_category_#{filter}", as: "parent_category_category_#{filter}"
+  end
+
+  get "category/*path" => "categories#redirect"
+
+  get "top" => "list#top"
+  get "search" => "search#query"
+
+  # Topics resource
+  get "t/:id" => "topics#show"
+  post "t" => "topics#create"
+  put "t/:id" => "topics#update"
+  delete "t/:id" => "topics#destroy"
+  put "topics/bulk"
+  put "topics/reset-new" => 'topics#reset_new'
+  post "topics/timings"
+  get "topics/similar_to"
+  get "topics/created-by/:username" => "list#topics_by", as: "topics_by", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "topics/private-messages/:username" => "list#private_messages", as: "topics_private_messages", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "topics/private-messages-sent/:username" => "list#private_messages_sent", as: "topics_private_messages_sent", constraints: {username: USERNAME_ROUTE_FORMAT}
+  get "topics/private-messages-unread/:username" => "list#private_messages_unread", as: "topics_private_messages_unread", constraints: {username: USERNAME_ROUTE_FORMAT}
+
+  get 'embed/comments' => 'embed#comments'
+  get 'embed/count' => 'embed#count'
+
+  # Topic routes
+  get "t/id_for/:slug" => "topics#id_for_slug"
+  get "t/:slug/:topic_id/wordpress" => "topics#wordpress", constraints: {topic_id: /\d+/}
+  get "t/:slug/:topic_id/moderator-liked" => "topics#moderator_liked", constraints: {topic_id: /\d+/}
+  get "t/:topic_id/wordpress" => "topics#wordpress", constraints: {topic_id: /\d+/}
+  get "t/:slug/:topic_id/summary" => "topics#show", defaults: {summary: true}, constraints: {topic_id: /\d+/, post_number: /\d+/}
+  get "t/:topic_id/summary" => "topics#show", constraints: {topic_id: /\d+/, post_number: /\d+/}
+  put "t/:slug/:topic_id" => "topics#update", constraints: {topic_id: /\d+/}
+  put "t/:slug/:topic_id/star" => "topics#star", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/star" => "topics#star", constraints: {topic_id: /\d+/}
+  put "t/:slug/:topic_id/status" => "topics#status", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/status" => "topics#status", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/clear-pin" => "topics#clear_pin", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/re-pin" => "topics#re_pin", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/mute" => "topics#mute", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/unmute" => "topics#unmute", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/autoclose" => "topics#autoclose", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/make-banner" => "topics#make_banner", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/remove-banner" => "topics#remove_banner", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/remove-allowed-user" => "topics#remove_allowed_user", constraints: {topic_id: /\d+/}
+  put "t/:topic_id/recover" => "topics#recover", constraints: {topic_id: /\d+/}
+  get "t/:topic_id/:post_number" => "topics#show", constraints: {topic_id: /\d+/, post_number: /\d+/}
+  get "t/:topic_id/last" => "topics#show", post_number: 99999999, constraints: {topic_id: /\d+/}
+  get "t/:slug/:topic_id.rss" => "topics#feed", format: :rss, constraints: {topic_id: /\d+/}
+  get "t/:slug/:topic_id" => "topics#show", constraints: {topic_id: /\d+/}
+  get "t/:slug/:topic_id/:post_number" => "topics#show", constraints: {topic_id: /\d+/, post_number: /\d+/}
+  get "t/:slug/:topic_id/last" => "topics#show", post_number: 99999999, constraints: {topic_id: /\d+/}
+  get "t/:topic_id/posts" => "topics#posts", constraints: {topic_id: /\d+/}
+  post "t/:topic_id/timings" => "topics#timings", constraints: {topic_id: /\d+/}
+  post "t/:topic_id/invite" => "topics#invite", constraints: {topic_id: /\d+/}
+  post "t/:topic_id/move-posts" => "topics#move_posts", constraints: {topic_id: /\d+/}
+  post "t/:topic_id/merge-topic" => "topics#merge_topic", constraints: {topic_id: /\d+/}
+  post "t/:topic_id/change-owner" => "topics#change_post_owners", constraints: {topic_id: /\d+/}
+  delete "t/:topic_id/timings" => "topics#destroy_timings", constraints: {topic_id: /\d+/}
+
+  post "t/:topic_id/notifications" => "topics#set_notifications" , constraints: {topic_id: /\d+/}
+
+  get "p/:post_id(/:user_id)" => "posts#short_link"
+  get "/posts/:id/cooked" => "posts#cooked"
+  get "/posts/:id/expand-embed" => "posts#expand_embed"
+  get "/posts/:id/raw" => "posts#markdown_id"
+  get "/posts/:id/raw-email" => "posts#raw_email"
+  get "raw/:topic_id(/:post_number)" => "posts#markdown_num"
+
+  resources :invites do
+    collection do
+      get "upload" => "invites#check_csv_chunk"
+      post "upload" => "invites#upload_csv_chunk"
+    end
+  end
+  post "invites/reinvite" => "invites#resend_invite"
+  post "invites/disposable" => "invites#create_disposable_invite"
+  get "invites/redeem/:token" => "invites#redeem_disposable_invite"
+  delete "invites" => "invites#destroy"
+
+  resources :export_csv do
+    collection do
+      get "export_entity" => "export_csv#export_entity"
+    end
+    member do
+      get "" => "export_csv#show", constraints: { id: /[^\/]+/ }
+    end
+  end
+
+  get "onebox" => "onebox#show"
+
+  get "error" => "forums#error"
+  get "exception" => "list#latest"
+
+  get "message-bus/poll" => "message_bus#poll"
+
+  get "draft" => "draft#show"
+  post "draft" => "draft#update"
+  delete "draft" => "draft#destroy"
+
+  get "cdn_asset/:site/*path" => "static#cdn_asset", format: false
+
+  get "robots.txt" => "robots_txt#index"
+
+  Discourse.filters.each do |filter|
+    root to: "list##{filter}", constraints: HomePageConstraint.new("#{filter}"), :as => "list_#{filter}"
+  end
+  # special case for categories
+  root to: "categories#index", constraints: HomePageConstraint.new("categories"), :as => "categories_index"
+  # special case for top
+  root to: "list#top", constraints: HomePageConstraint.new("top"), :as => "top_lists"
+
+  get "*url", to: 'permalinks#show', constraints: PermalinkConstraint.new
+end
+
+
+===== FILE spec/controllers/admin/groups_controller_spec.rb (after PR) =====
+require 'spec_helper'
+
+describe Admin::GroupsController do
+
+  before do
+    @admin = log_in(:admin)
+  end
+
+  it "is a subclass of AdminController" do
+    (Admin::GroupsController < Admin::AdminController).should == true
+  end
+
+  context ".index" do
+
+    it "produces valid json for groups" do
+      group = Fabricate.build(:group, name: "test")
+      group.add(@admin)
+      group.save
+
+      xhr :get, :index
+      response.status.should == 200
+      ::JSON.parse(response.body).keep_if {|r| r["id"] == group.id }.should == [{
+        "id"=>group.id,
+        "name"=>group.name,
+        "user_count"=>1,
+        "automatic"=>false,
+        "alias_level"=>0,
+        "visible"=>true
+      }]
+    end
+
+  end
+
+  context ".create" do
+
+    it "strip spaces on the group name" do
+      xhr :post, :create, name: " bob "
+
+      response.status.should == 200
+
+      groups = Group.where(name: "bob").to_a
+
+      groups.count.should == 1
+      groups[0].name.should == "bob"
+    end
+
+  end
+
+  context ".update" do
+
+    it "ignore name change on automatic group" do
+      xhr :put, :update, id: 1, name: "WAT", visible: "true"
+      response.should be_success
+
+      group = Group.find(1)
+      group.name.should_not == "WAT"
+      group.visible.should == true
+    end
+
+  end
+
+  context ".destroy" do
+
+    it "returns a 422 if the group is automatic" do
+      group = Fabricate(:group, automatic: true)
+      xhr :delete, :destroy, id: group.id
+      response.status.should == 422
+      Group.where(id: group.id).count.should == 1
+    end
+
+    it "is able to destroy a non-automatic group" do
+      group = Fabricate(:group)
+      xhr :delete, :destroy, id: group.id
+      response.status.should == 200
+      Group.where(id: group.id).count.should == 0
+    end
+
+  end
+
+  context ".refresh_automatic_groups" do
+
+    it "is able to refresh automatic groups" do
+      Group.expects(:refresh_automatic_groups!).returns(true)
+
+      xhr :post, :refresh_automatic_groups
+      response.status.should == 200
+    end
+
+  end
+
+  context ".add_members" do
+
+    it "cannot add members to automatic groups" do
+      xhr :put, :add_members, group_id: 1, usernames: "l77t"
+      response.status.should == 422
+    end
+
+    it "is able to add several members to a group" do
+      user1 = Fabricate(:user)
+      user2 = Fabricate(:user)
+      group = Fabricate(:group)
+
+      xhr :put, :add_members, group_id: group.id, usernames: [user1.username, user2.username].join(",")
+
+      response.should be_success
+      group.reload
+      group.users.count.should == 2
+    end
+
+  end
+
+  context ".remove_member" do
+
+    it "cannot remove members from automatic groups" do
+      xhr :put, :remove_member, group_id: 1, user_id: 42
+      response.status.should == 422
+    end
+
+    it "is able to remove a member" do
+      group = Fabricate(:group)
+      user = Fabricate(:user)
+      group.add(user)
+      group.save
+
+      xhr :delete, :remove_member, group_id: group.id, user_id: user.id
+
+      response.should be_success
+      group.reload
+      group.users.count.should == 0
+    end
+
+  end
+
+end

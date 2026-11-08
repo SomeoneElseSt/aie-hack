@@ -1,0 +1,2063 @@
+===== FILE authz/client/pom.xml (after PR) =====
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.keycloak</groupId>
+        <artifactId>keycloak-authz-parent</artifactId>
+        <version>999.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>keycloak-authz-client-tests</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Keycloak Authz: Client API</name>
+    <description>Keycloak Authz: Client API. This module is supposed to be used just in the Keycloak repository for the testsuite. It is NOT supposed to be used by the 3rd party applications.
+        For the use by 3rd party applications, please use `org.keycloak:keycloak-authz-client` module.</description>
+
+    <properties>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
+        <maven.compiler.release>8</maven.compiler.release>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>commons-logging-jboss-logging</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.hamcrest</groupId>
+            <artifactId>hamcrest</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+    
+</project>
+
+
+===== FILE authz/client/src/main/java/org/keycloak/authorization/client/AuthzClient.java (after PR) =====
+/*
+ * JBoss, Home of Professional Open Source
+ *
+ * Copyright 2015 Red Hat, Inc. and/or its affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.authorization.client;
+
+import static org.keycloak.constants.ServiceUrlConstants.AUTHZ_DISCOVERY_URL;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Objects;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.keycloak.authorization.client.representation.ServerConfiguration;
+import org.keycloak.authorization.client.resource.AuthorizationResource;
+import org.keycloak.authorization.client.resource.ProtectionResource;
+import org.keycloak.authorization.client.util.Http;
+import org.keycloak.authorization.client.util.TokenCallable;
+import org.keycloak.common.crypto.CryptoIntegration;
+import org.keycloak.common.util.KeycloakUriBuilder;
+import org.keycloak.representations.AccessTokenResponse;
+import org.keycloak.util.SystemPropertiesJsonParserFactory;
+
+/**
+ * <p>This is class serves as an entry point for clients looking for access to Keycloak Authorization Services.
+ *
+ * <p>When creating a new instances make sure you have a Keycloak Server running at the location specified in the client
+ * configuration. The client tries to obtain server configuration by invoking the UMA Discovery Endpoint, usually available
+ * from the server at <i>http(s)://{server}:{port}/auth/realms/{realm}/.well-known/uma-configuration</i>.
+ *
+ * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
+ */
+public class AuthzClient {
+
+    private final Http http;
+    private TokenCallable patSupplier;
+
+    /**
+     * <p>Creates a new instance.
+     *
+     * <p>This method expects a <code>keycloak.json</code> in the classpath, otherwise an exception will be thrown.
+     *
+     * @return a new instance
+     * @throws RuntimeException in case there is no <code>keycloak.json</code> file in the classpath or the file could not be parsed
+     */
+    public static AuthzClient create() throws RuntimeException {
+        InputStream configStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("keycloak.json");
+
+        return create(configStream);
+    }
+
+    /**
+     * <p>Creates a new instance.
+     *
+     * @param configStream the input stream with the configuration data
+     * @return a new instance
+     */
+    public static AuthzClient create(InputStream configStream) throws RuntimeException {
+        if (configStream == null) {
+            throw new IllegalArgumentException("Config input stream can not be null");
+        }
+
+        try {
+            ObjectMapper mapper = new ObjectMapper(new SystemPropertiesJsonParserFactory());
+
+            mapper.setSerializationInclusion(JsonInclude.Include.NON_DEFAULT);
+
+            return create(mapper.readValue(configStream, Configuration.class));
+        } catch (IOException e) {
+            throw new RuntimeException("Could not parse configuration.", e);
+        }
+    }
+
+    /**
+     * <p>Creates a new instance.
+     *
+     * @param configuration the client configuration
+     * @return a new instance
+     */
+    public static AuthzClient create(Configuration configuration) {
+        CryptoIntegration.init(AuthzClient.class.getClassLoader());
+        return new AuthzClient(configuration);
+    }
+
+    private final ServerConfiguration serverConfiguration;
+    private final Configuration configuration;
+
+    /**
+     * <p>Creates a {@link ProtectionResource} instance which can be used to access the Protection API.
+     *
+     * <p>When using this method, the PAT (the access token with the uma_protection scope) is obtained for the client
+     * itself, using any of the supported credential types (client/secret, jwt, etc).
+     *
+     * @return a {@link ProtectionResource}
+     */
+    public ProtectionResource protection() {
+        return new ProtectionResource(this.http, this.serverConfiguration, configuration, createPatSupplier());
+    }
+
+    /**
+     * <p>Creates a {@link ProtectionResource} instance which can be used to access the Protection API.
+     *
+     * @param accessToken the PAT (the access token with the uma_protection scope)
+     * @return a {@link ProtectionResource}
+     */
+    public ProtectionResource protection(final String accessToken) {
+        return new ProtectionResource(this.http, this.serverConfiguration, configuration, new TokenCallable(http, configuration, serverConfiguration) {
+            @Override
+            public String call() {
+                return accessToken;
+            }
+
+            @Override
+            protected boolean isRetry() {
+                return false;
+            }
+        });
+    }
+
+    /**
+     * <p>Creates a {@link ProtectionResource} instance which can be used to access the Protection API.
+     *
+     * <p>When using this method, the PAT (the access token with the uma_protection scope) is obtained for a given user.
+     *
+     * @return a {@link ProtectionResource}
+     */
+    public ProtectionResource protection(String userName, String password) {
+        return new ProtectionResource(this.http, this.serverConfiguration, configuration, createPatSupplier(userName, password));
+    }
+
+    /**
+     * <p>Creates a {@link AuthorizationResource} instance which can be used to obtain permissions from the server.
+     *
+     * @return a {@link AuthorizationResource}
+     */
+    public AuthorizationResource authorization() {
+        return new AuthorizationResource(configuration, serverConfiguration, this.http, null);
+    }
+
+    /**
+     * <p>Creates a {@link AuthorizationResource} instance which can be used to obtain permissions from the server.
+     *
+     * @param accessToken the Access Token that will be used as a bearer to access the token endpoint
+     * @return a {@link AuthorizationResource}
+     */
+    public AuthorizationResource authorization(final String accessToken) {
+        return new AuthorizationResource(configuration, serverConfiguration, this.http, new TokenCallable(http, configuration, serverConfiguration) {
+            @Override
+            public String call() {
+                return accessToken;
+            }
+
+            @Override
+            protected boolean isRetry() {
+                return false;
+            }
+        });
+    }
+
+    /**
+     * <p>Creates a {@link AuthorizationResource} instance which can be used to obtain permissions from the server.
+     *
+     * @param userName an ID Token or Access Token representing an identity and/or access context
+     * @param password
+     * @return a {@link AuthorizationResource}
+     */
+    public AuthorizationResource authorization(final String userName, final String password) {
+        return authorization(userName, password, null);
+    }
+
+    public AuthorizationResource authorization(final String userName, final String password, final String scope) {
+        return new AuthorizationResource(configuration, serverConfiguration, this.http,
+            createRefreshableAccessTokenSupplier(userName, password, scope));
+    }
+
+    /**
+     * Obtains an access token using the client credentials.
+     *
+     * @return an {@link AccessTokenResponse}
+     */
+    public AccessTokenResponse obtainAccessToken() {
+        return this.http.<AccessTokenResponse>post(this.serverConfiguration.getTokenEndpoint())
+                .authentication()
+                    .client()
+                .response()
+                    .json(AccessTokenResponse.class)
+                .execute();
+    }
+
+    /**
+     * Obtains an access token using the resource owner credentials.
+     *
+     * @return an {@link AccessTokenResponse}
+     */
+    public AccessTokenResponse obtainAccessToken(String userName, String password) {
+        return this.http.<AccessTokenResponse>post(this.serverConfiguration.getTokenEndpoint())
+                .authentication()
+                    .oauth2ResourceOwnerPassword(userName, password)
+                .response()
+                    .json(AccessTokenResponse.class)
+                .execute();
+    }
+
+    /**
+     * Returns the configuration obtained from the server at the UMA Discovery Endpoint.
+     *
+     * @return the {@link ServerConfiguration}
+     */
+    public ServerConfiguration getServerConfiguration() {
+        return this.serverConfiguration;
+    }
+
+    /**
+     * Obtains the client configuration
+     *
+     * @return the {@link Configuration}
+     */
+    public Configuration getConfiguration() {
+        return this.configuration;
+    }
+
+    private AuthzClient(Configuration configuration) {
+        if (configuration == null) {
+            throw new IllegalArgumentException("Client configuration can not be null.");
+        }
+
+        String configurationUrl = configuration.getAuthServerUrl();
+
+        if (configurationUrl == null) {
+            throw new IllegalArgumentException("Configuration URL can not be null.");
+        }
+
+        configurationUrl = KeycloakUriBuilder.fromUri(configurationUrl).clone().path(AUTHZ_DISCOVERY_URL).build(configuration.getRealm()).toString();
+        this.configuration = configuration;
+
+        this.http = new Http(configuration, configuration.getClientCredentialsProvider());
+
+        try {
+            this.serverConfiguration = this.http.<ServerConfiguration>get(configurationUrl)
+                    .response().json(ServerConfiguration.class)
+                    .execute();
+        } catch (Exception e) {
+            throw new RuntimeException("Could not obtain configuration from server [" + configurationUrl + "].", e);
+        }
+    }
+
+    public TokenCallable createPatSupplier(String userName, String password) {
+        if (patSupplier == null) {
+            patSupplier = createRefreshableAccessTokenSupplier(userName, password);
+        }
+        return patSupplier;
+    }
+
+    public TokenCallable createPatSupplier() {
+        return createPatSupplier(null, null);
+    }
+
+    private TokenCallable createRefreshableAccessTokenSupplier(final String userName, final String password) {
+        return createRefreshableAccessTokenSupplier(userName, password, null);
+    }
+
+    private TokenCallable createRefreshableAccessTokenSupplier(final String userName, final String password,
+        final String scope) {
+        return new TokenCallable(userName, password, scope, http, configuration, serverConfiguration);
+    }
+}
+
+
+===== FILE authz/client/src/main/java/org/keycloak/authorization/client/util/crypto/ASN1Decoder.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ *  and other contributors as indicated by the @author tags.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ */
+
+package org.keycloak.authorization.client.util.crypto;
+
+import java.io.ByteArrayInputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ *
+ * @author rmartinc
+ */
+class ASN1Decoder {
+
+    private final ByteArrayInputStream is;
+    private final int limit;
+    private int count;
+
+    ASN1Decoder(byte[] bytes) {
+        is = new ByteArrayInputStream(bytes);
+        count = 0;
+        limit = bytes.length;
+    }
+
+    public static ASN1Decoder create(byte[] bytes) {
+        return new ASN1Decoder(bytes);
+    }
+
+    public List<byte[]> readSequence() throws IOException {
+        int tag = readTag();
+        int tagNo = readTagNumber(tag);
+        if (tagNo != ASN1Encoder.SEQUENCE) {
+            throw new IOException("Invalid Sequence tag " + tagNo);
+        }
+        int length = readLength();
+        List<byte[]> result = new ArrayList<>();
+        while (length > 0) {
+            byte[] bytes = readNext();
+            result.add(bytes);
+            length = length - bytes.length;
+        }
+        return result;
+    }
+
+    public BigInteger readInteger() throws IOException {
+        int tag = readTag();
+        int tagNo = readTagNumber(tag);
+        if (tagNo != ASN1Encoder.INTEGER) {
+            throw new IOException("Invalid Integer tag " + tagNo);
+        }
+        int length = readLength();
+        byte[] bytes = read(length);
+        return new BigInteger(bytes);
+    }
+
+    byte[] readNext() throws IOException {
+        mark();
+        int tag = readTag();
+        readTagNumber(tag);
+        int length = readLength();
+        length += reset();
+        return read(length);
+    }
+
+    int readTag() throws IOException {
+        int tag = read();
+        if (tag < 0) {
+            throw new EOFException("EOF found inside tag value.");
+        }
+        return tag;
+    }
+
+    int readTagNumber(int tag) throws IOException {
+        int tagNo = tag & 0x1f;
+
+        //
+        // with tagged object tag number is bottom 5 bits, or stored at the start of the content
+        //
+        if (tagNo == 0x1f) {
+            tagNo = 0;
+
+            int b = read();
+
+            // X.690-0207 8.1.2.4.2
+            // "c) bits 7 to 1 of the first subsequent octet shall not all be zero."
+            if ((b & 0x7f) == 0) // Note: -1 will pass
+            {
+                throw new IOException("corrupted stream - invalid high tag number found");
+            }
+
+            while ((b >= 0) && ((b & 0x80) != 0)) {
+                tagNo |= (b & 0x7f);
+                tagNo <<= 7;
+                b = read();
+            }
+
+            if (b < 0) {
+                throw new EOFException("EOF found inside tag value.");
+            }
+
+            tagNo |= (b & 0x7f);
+        }
+
+        return tagNo;
+    }
+
+    int readLength() throws IOException {
+        int length = read();
+        if (length < 0) {
+            throw new EOFException("EOF found when length expected");
+        }
+
+        if (length == 0x80) {
+            return -1;      // indefinite-length encoding
+        }
+
+        if (length > 127) {
+            int size = length & 0x7f;
+
+            // Note: The invalid long form "0xff" (see X.690 8.1.3.5c) will be caught here
+            if (size > 4) {
+                throw new IOException("DER length more than 4 bytes: " + size);
+            }
+
+            length = 0;
+            for (int i = 0; i < size; i++) {
+                int next = read();
+
+                if (next < 0) {
+                    throw new EOFException("EOF found reading length");
+                }
+
+                length = (length << 8) + next;
+            }
+
+            if (length < 0) {
+                throw new IOException("corrupted stream - negative length found");
+            }
+
+            if (length >= limit) // after all we must have read at least 1 byte
+            {
+                throw new IOException("corrupted stream - out of bounds length found");
+            }
+        }
+
+        return length;
+    }
+
+    byte[] read(int length) throws IOException {
+        byte[] bytes = new byte[length];
+        int totalBytesRead = 0;
+
+        while (totalBytesRead < length) {
+            int bytesRead = is.read(bytes, totalBytesRead, length - totalBytesRead);
+            if (bytesRead == -1) {
+                throw new IOException(String.format("EOF found reading %d bytes", length));
+            }
+            totalBytesRead += bytesRead;
+        }
+        count += length;
+        return bytes;
+    }
+
+    void mark() {
+        count = 0;
+        is.mark(is.available());
+    }
+
+    int reset() {
+        int tmp = count;
+        is.reset();
+        return tmp;
+    }
+
+    int read() {
+        int tmp = is.read();
+        if (tmp >= 0) {
+            count++;
+        }
+        return tmp;
+    }
+}
+
+
+
+===== FILE authz/client/src/main/java/org/keycloak/authorization/client/util/crypto/ASN1Encoder.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ *  and other contributors as indicated by the @author tags.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ */
+
+package org.keycloak.authorization.client.util.crypto;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.math.BigInteger;
+
+/**
+ *
+ * @author rmartinc
+ */
+class ASN1Encoder {
+
+    static final int INTEGER = 0x02;
+    static final int SEQUENCE = 0x10;
+    static final int CONSTRUCTED = 0x20;
+
+    private final ByteArrayOutputStream os;
+
+    private ASN1Encoder() {
+        this.os = new ByteArrayOutputStream();
+    }
+
+    static public ASN1Encoder create() {
+        return new ASN1Encoder();
+    }
+
+    public ASN1Encoder write(BigInteger value) throws IOException {
+        writeEncoded(INTEGER, value.toByteArray());
+        return this;
+    }
+
+    public ASN1Encoder writeDerSeq(ASN1Encoder... objects) throws IOException {
+        writeEncoded(CONSTRUCTED | SEQUENCE, concatenate(objects));
+        return this;
+    }
+
+    public byte[] toByteArray() {
+        return os.toByteArray();
+    }
+
+    void writeEncoded(int tag, byte[] bytes) throws IOException {
+        write(tag);
+        writeLength(bytes.length);
+        write(bytes);
+    }
+
+    void writeLength(int length) throws IOException {
+        if (length > 127) {
+            int size = 1;
+            int val = length;
+
+            while ((val >>>= 8) != 0) {
+                size++;
+            }
+
+            write((byte) (size | 0x80));
+
+            for (int i = (size - 1) * 8; i >= 0; i -= 8) {
+                write((byte) (length >> i));
+            }
+        } else {
+            write((byte) length);
+        }
+    }
+
+    void write(byte[] bytes) throws IOException {
+        os.write(bytes);
+    }
+
+    void write(int b) throws IOException {
+        os.write(b);
+    }
+
+    byte[] concatenate(ASN1Encoder... objects) throws IOException {
+        ByteArrayOutputStream tmp = new ByteArrayOutputStream();
+        for (ASN1Encoder object : objects) {
+            tmp.write(object.toByteArray());
+        }
+        return tmp.toByteArray();
+    }
+}
+
+
+
+===== FILE authz/client/src/main/java/org/keycloak/authorization/client/util/crypto/AuthzClientCryptoProvider.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ *  and other contributors as indicated by the @author tags.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ */
+
+package org.keycloak.authorization.client.util.crypto;
+
+import java.io.IOException;
+import java.math.BigInteger;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.Provider;
+import java.security.Signature;
+import java.security.cert.CertPathBuilder;
+import java.security.cert.CertStore;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.CollectionCertStoreParameters;
+import java.security.interfaces.ECPrivateKey;
+import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECParameterSpec;
+import java.util.List;
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKeyFactory;
+import javax.net.ssl.SSLSocketFactory;
+import org.keycloak.common.crypto.CertificateUtilsProvider;
+import org.keycloak.common.crypto.CryptoProvider;
+import org.keycloak.common.crypto.ECDSACryptoProvider;
+import org.keycloak.common.crypto.PemUtilsProvider;
+import org.keycloak.common.crypto.UserIdentityExtractorProvider;
+import org.keycloak.common.util.KeystoreUtil;
+
+/**
+ * <p>Simple crypto provider to be used with the authz-client.</p>
+ *
+ * @author rmartinc
+ */
+public class AuthzClientCryptoProvider implements CryptoProvider {
+
+    @Override
+    public Provider getBouncyCastleProvider() {
+        try {
+            return KeyStore.getInstance(KeyStore.getDefaultType()).getProvider();
+        } catch (KeyStoreException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Override
+    public int order() {
+        return 100;
+    }
+
+    @Override
+    public <T> T getAlgorithmProvider(Class<T> clazz, String algorithm) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public CertificateUtilsProvider getCertificateUtils() {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public PemUtilsProvider getPemUtils() {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public <T> T getOCSPProver(Class<T> clazz) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public UserIdentityExtractorProvider getIdentityExtractorProvider() {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public ECDSACryptoProvider getEcdsaCryptoProvider() {
+        return new ECDSACryptoProvider() {
+            @Override
+            public byte[] concatenatedRSToASN1DER(byte[] signature, int signLength) throws IOException {
+                int len = signLength / 2;
+                int arraySize = len + 1;
+
+                byte[] r = new byte[arraySize];
+                byte[] s = new byte[arraySize];
+                System.arraycopy(signature, 0, r, 1, len);
+                System.arraycopy(signature, len, s, 1, len);
+                BigInteger rBigInteger = new BigInteger(r);
+                BigInteger sBigInteger = new BigInteger(s);
+
+                ASN1Encoder.create().write(rBigInteger);
+                ASN1Encoder.create().write(sBigInteger);
+
+                return ASN1Encoder.create()
+                        .writeDerSeq(
+                                ASN1Encoder.create().write(rBigInteger),
+                                ASN1Encoder.create().write(sBigInteger))
+                        .toByteArray();
+            }
+
+            @Override
+            public byte[] asn1derToConcatenatedRS(byte[] derEncodedSignatureValue, int signLength) throws IOException {
+                int len = signLength / 2;
+
+                List<byte[]> seq = ASN1Decoder.create(derEncodedSignatureValue).readSequence();
+                if (seq.size() != 2) {
+                    throw new IOException("Invalid sequence with size different to 2");
+                }
+
+                BigInteger rBigInteger = ASN1Decoder.create(seq.get(0)).readInteger();
+                BigInteger sBigInteger = ASN1Decoder.create(seq.get(1)).readInteger();
+
+                byte[] r = integerToBytes(rBigInteger, len);
+                byte[] s = integerToBytes(sBigInteger, len);
+
+                byte[] concatenatedSignatureValue = new byte[signLength];
+                System.arraycopy(r, 0, concatenatedSignatureValue, 0, len);
+                System.arraycopy(s, 0, concatenatedSignatureValue, len, len);
+
+                return concatenatedSignatureValue;
+            }
+
+            @Override
+            public ECPublicKey getPublicFromPrivate(ECPrivateKey ecPrivateKey) {
+                throw new UnsupportedOperationException("Not supported yet.");
+            }
+
+            private byte[] integerToBytes(BigInteger s, int qLength) {
+                byte[] bytes = s.toByteArray();
+                if (qLength < bytes.length) {
+                    byte[] tmp = new byte[qLength];
+                    System.arraycopy(bytes, bytes.length - tmp.length, tmp, 0, tmp.length);
+                    return tmp;
+                } else if (qLength > bytes.length) {
+                    byte[] tmp = new byte[qLength];
+                    System.arraycopy(bytes, 0, tmp, tmp.length - bytes.length, bytes.length);
+                    return tmp;
+                }
+                return bytes;
+            }
+        };
+    }
+
+    @Override
+    public ECParameterSpec createECParams(String curveName) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public KeyPairGenerator getKeyPairGen(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public KeyFactory getKeyFactory(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public Cipher getAesCbcCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public Cipher getAesGcmCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public SecretKeyFactory getSecretKeyFact(String keyAlgorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public KeyStore getKeyStore(KeystoreUtil.KeystoreFormat format) throws KeyStoreException, NoSuchProviderException {
+        return KeyStore.getInstance(format.name());
+    }
+
+    @Override
+    public CertificateFactory getX509CertFactory() throws CertificateException, NoSuchProviderException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public CertStore getCertStore(CollectionCertStoreParameters collectionCertStoreParameters) throws InvalidAlgorithmParameterException, NoSuchAlgorithmException, NoSuchProviderException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public CertPathBuilder getCertPathBuilder() throws NoSuchAlgorithmException, NoSuchProviderException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public Signature getSignature(String sigAlgName) throws NoSuchAlgorithmException, NoSuchProviderException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public SSLSocketFactory wrapFactoryForTruststore(SSLSocketFactory delegate) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+}
+
+
+===== FILE authz/client/src/main/resources/META-INF/services/org.keycloak.common.crypto.CryptoProvider (after PR) =====
+#
+# Copyright 2024 Red Hat, Inc. and/or its affiliates
+#  and other contributors as indicated by the @author tags.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#  http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+#
+
+org.keycloak.authorization.client.util.crypto.AuthzClientCryptoProvider
+
+
+===== FILE authz/client/src/test/java/org/keycloak/authorization/client/test/ECDSAAlgorithmTest.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ *  and other contributors as indicated by the @author tags.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ */
+
+package org.keycloak.authorization.client.test;
+
+import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.Signature;
+
+import org.junit.Assert;
+import org.junit.Test;
+import org.keycloak.authorization.client.util.crypto.AuthzClientCryptoProvider;
+import org.keycloak.crypto.ECDSAAlgorithm;
+import org.keycloak.crypto.JavaAlgorithm;
+
+/**
+ *
+ * @author rmartinc
+ */
+public class ECDSAAlgorithmTest {
+
+    private final KeyPair keyPair;
+
+    public ECDSAAlgorithmTest() throws Exception {
+        keyPair = KeyPairGenerator.getInstance("EC").genKeyPair();
+    }
+
+
+    private void test(ECDSAAlgorithm algorithm) throws Exception {
+        AuthzClientCryptoProvider prov = new AuthzClientCryptoProvider();
+        byte[] data = "Something to sign".getBytes(StandardCharsets.UTF_8);
+        Signature signature = Signature.getInstance(JavaAlgorithm.getJavaAlgorithm(algorithm.name()));
+        signature.initSign(keyPair.getPrivate());
+        signature.update(data);
+        byte[] sign = signature.sign();
+        byte[] rsConcat = prov.getEcdsaCryptoProvider().asn1derToConcatenatedRS(sign, algorithm.getSignatureLength());
+        byte[] asn1Des = prov.getEcdsaCryptoProvider().concatenatedRSToASN1DER(rsConcat, algorithm.getSignatureLength());
+        byte[] rsConcat2 = prov.getEcdsaCryptoProvider().asn1derToConcatenatedRS(asn1Des, algorithm.getSignatureLength());
+        Assert.assertArrayEquals(rsConcat, rsConcat2);
+    }
+
+    @Test
+    public void testES256() throws Exception {
+        test(ECDSAAlgorithm.ES256);
+    }
+
+    @Test
+    public void testES384() throws Exception {
+        test(ECDSAAlgorithm.ES384);
+    }
+
+    @Test
+    public void testES512() throws Exception {
+        test(ECDSAAlgorithm.ES512);
+    }
+}
+
+
+
+===== FILE common/src/main/java/org/keycloak/common/crypto/CryptoIntegration.java (after PR) =====
+package org.keycloak.common.crypto;
+
+import java.security.KeyStore;
+import java.security.Provider;
+import java.security.Security;
+import java.util.Comparator;
+import java.util.List;
+import java.util.ServiceLoader;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.TrustManagerFactory;
+
+import org.jboss.logging.Logger;
+import org.keycloak.common.util.BouncyIntegration;
+
+/**
+ * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
+ */
+public class CryptoIntegration {
+
+    protected static final Logger logger = Logger.getLogger(CryptoIntegration.class);
+
+    private static final Object lock = new Object();
+    private static volatile CryptoProvider cryptoProvider;
+
+    public static void init(ClassLoader classLoader) {
+        if (cryptoProvider == null) {
+            synchronized (lock) {
+                if (cryptoProvider == null) {
+                    cryptoProvider = detectProvider(classLoader);
+                    logger.debugv("java security provider: {0}", BouncyIntegration.PROVIDER);
+
+                }
+            }
+        }
+
+        if (logger.isTraceEnabled()) {
+            logger.tracef(dumpJavaSecurityProviders());
+            logger.tracef(dumpSecurityProperties());
+        }
+    }
+
+    public static CryptoProvider getProvider() {
+        if (cryptoProvider == null) {
+            throw new IllegalStateException("Illegal state. Please init first before obtaining provider");
+        }
+        return cryptoProvider;
+    }
+
+
+    // Try to auto-detect provider
+    private static CryptoProvider detectProvider(ClassLoader classLoader) {
+        List<CryptoProvider> foundProviders = StreamSupport.stream(ServiceLoader.load(CryptoProvider.class, classLoader).spliterator(), false)
+                .sorted(Comparator.comparingInt(CryptoProvider::order).reversed())
+                .collect(Collectors.toList());
+
+        if (foundProviders.isEmpty()) {
+            throw new IllegalStateException("Not able to load any cryptoProvider with the classLoader: " + classLoader);
+        } else {
+            logger.debugf("Detected crypto provider: %s", foundProviders.get(0).getClass().getName());
+            if (foundProviders.size() > 1) {
+                StringBuilder builder = new StringBuilder("Ignored crypto providers: ");
+                for (int i = 1 ; i < foundProviders.size() ; i++) {
+                    builder.append(foundProviders.get(i).getClass().getName() + ", ");
+                }
+                logger.debugf(builder.toString());
+            }
+            return foundProviders.get(0);
+        }
+    }
+
+    public static String dumpJavaSecurityProviders() {
+        StringBuilder builder = new StringBuilder("Java security providers: [ \n");
+        for (Provider p : Security.getProviders()) {
+            builder.append(" " + p.toString() + " - " + p.getClass() + ", \n");
+        }
+        return builder.append("]").toString();
+    }
+
+    public static String dumpSecurityProperties() {
+        StringBuilder builder = new StringBuilder("Security properties: [ \n")
+                .append(" Java security properties file: " + System.getProperty("java.security.properties") + "\n")
+                .append(" Default keystore type: " + KeyStore.getDefaultType() + "\n")
+                .append(" KeyManagerFactory.getDefaultAlgorithm(): " + KeyManagerFactory.getDefaultAlgorithm() + "\n")
+                .append(" TrustManagerFactory.getDefaultAlgorithm(): " + TrustManagerFactory.getDefaultAlgorithm() + "\n")
+                .append(" keystore.type.compat: " + Security.getProperty("keystore.type.compat") + "\n");
+        Stream.of("javax.net.ssl.trustStoreType", "javax.net.ssl.trustStore", "javax.net.ssl.trustStoreProvider",
+                        "javax.net.ssl.keyStoreType", "javax.net.ssl.keyStore", "javax.net.ssl.keyStoreProvider")
+                .forEach(propertyName -> builder.append(" " + propertyName + ": " + System.getProperty(propertyName) + "\n"));
+        return builder.append("]").toString();
+    }
+
+    public static void setProvider(CryptoProvider provider) {
+        logger.debugf("Using the crypto provider: %s", provider.getClass().getName());
+        cryptoProvider = provider;
+    }
+}
+
+
+===== FILE common/src/main/java/org/keycloak/common/crypto/CryptoProvider.java (after PR) =====
+package org.keycloak.common.crypto;
+
+import java.security.InvalidAlgorithmParameterException;
+import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.Provider;
+import java.security.Signature;
+import java.security.cert.CertPathBuilder;
+import java.security.cert.CertStore;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.CollectionCertStoreParameters;
+import java.security.spec.ECParameterSpec;
+import java.util.stream.Stream;
+
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKeyFactory;
+import javax.net.ssl.SSLSocketFactory;
+
+import org.keycloak.common.util.KeystoreUtil.KeystoreFormat;
+
+/**
+ * Abstraction to handle differences between the APIs for non-fips and fips mode
+ *
+ * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
+ */
+public interface CryptoProvider {
+
+    /**
+     * @return BouncyCastle security provider. Can be either non-FIPS or FIPS based provider
+     */
+    Provider getBouncyCastleProvider();
+
+    /**
+     * Order of this provider. This allows to specify which CryptoProvider will have preference in case that more of them are on the classpath.
+     *
+     * The higher number has preference over the lower number
+     */
+    int order();
+
+    /**
+     * Get some algorithm provider implementation. Returned implementation can be dependent according to if we have
+     * non-fips bouncycastle or fips bouncycastle on the classpath.
+     *
+     * @param clazz Returned class.
+     * @param algorithm Type of the algorithm, which we want to return
+     * @return
+     */
+    <T> T getAlgorithmProvider(Class<T> clazz, String algorithm);
+
+    /**
+     * Get CertificateUtils implementation. Returned implementation can be dependent according to if we have
+     * non-fips bouncycastle or fips bouncycastle on the classpath.
+     *
+     * @return
+     */
+    CertificateUtilsProvider getCertificateUtils();
+
+
+    /**
+     * Get PEMUtils implementation. Returned implementation can be dependent according to if we have
+     * non-fips bouncycastle or fips bouncycastle on the classpath.
+     *
+     * @return
+     */
+    PemUtilsProvider getPemUtils();
+
+    <T> T getOCSPProver(Class<T> clazz);
+
+
+    public UserIdentityExtractorProvider getIdentityExtractorProvider();
+
+    public ECDSACryptoProvider getEcdsaCryptoProvider();
+
+
+    /**
+     * Create the param spec for the EC curve
+     *
+     * @param curveName
+     * @return
+     */
+    ECParameterSpec createECParams(String curveName);
+
+    KeyPairGenerator getKeyPairGen(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException;
+
+    KeyFactory getKeyFactory(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException;
+
+    Cipher getAesCbcCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException;
+
+    Cipher getAesGcmCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException;
+
+    SecretKeyFactory getSecretKeyFact(String keyAlgorithm) throws NoSuchAlgorithmException, NoSuchProviderException;
+
+    KeyStore getKeyStore(KeystoreFormat format) throws KeyStoreException, NoSuchProviderException;
+
+    /**
+     * @return Keystore types/algorithms supported by this CryptoProvider
+     */
+    default Stream<KeystoreFormat> getSupportedKeyStoreTypes() {
+        return Stream.of(KeystoreFormat.values())
+                .filter(format -> {
+                    try {
+                        getKeyStore(format);
+                        return true;
+                    } catch (KeyStoreException | NoSuchProviderException ex) {
+                        return false;
+                    }
+                });
+    }
+
+    CertificateFactory getX509CertFactory() throws CertificateException, NoSuchProviderException;
+
+    CertStore getCertStore(CollectionCertStoreParameters collectionCertStoreParameters) throws InvalidAlgorithmParameterException, NoSuchAlgorithmException, NoSuchProviderException;
+
+    CertPathBuilder getCertPathBuilder() throws NoSuchAlgorithmException, NoSuchProviderException;
+
+    Signature getSignature(String sigAlgName) throws NoSuchAlgorithmException, NoSuchProviderException;
+
+    /**
+     * Wrap given SSLSocketFactory and decorate it with some additional functionality.
+     *
+     * This method is used in the context of truststore (where Keycloak is SSL client)
+     *
+     * @param delegate The original factory to wrap. Usually default java SSLSocketFactory
+     * @return decorated factory
+     */
+    SSLSocketFactory wrapFactoryForTruststore(SSLSocketFactory delegate);
+
+    /**
+     * @return Allowed key sizes of RSA key modulus, which this cryptoProvider supports
+     */
+    default String[] getSupportedRsaKeySizes() {
+        return new String[] {"1024", "2048", "4096"};
+    }
+}
+
+
+===== FILE crypto/default/src/main/java/org/keycloak/crypto/def/DefaultCryptoProvider.java (after PR) =====
+package org.keycloak.crypto.def;
+
+import java.security.InvalidAlgorithmParameterException;
+import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.Provider;
+import java.security.Security;
+import java.security.Signature;
+import java.security.cert.CertPathBuilder;
+import java.security.cert.CertStore;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.CollectionCertStoreParameters;
+import java.security.spec.ECParameterSpec;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
+
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKeyFactory;
+import javax.net.ssl.SSLSocketFactory;
+
+import org.bouncycastle.jce.ECNamedCurveTable;
+import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec;
+import org.bouncycastle.jce.spec.ECNamedCurveSpec;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.jboss.logging.Logger;
+import org.keycloak.common.crypto.CryptoProvider;
+import org.keycloak.common.crypto.CryptoConstants;
+import org.keycloak.common.crypto.ECDSACryptoProvider;
+import org.keycloak.common.crypto.CertificateUtilsProvider;
+import org.keycloak.common.crypto.PemUtilsProvider;
+import org.keycloak.common.crypto.UserIdentityExtractorProvider;
+import org.keycloak.common.util.BouncyIntegration;
+import org.keycloak.common.util.KeystoreUtil.KeystoreFormat;
+import org.keycloak.crypto.JavaAlgorithm;
+
+/**
+ * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
+ */
+public class DefaultCryptoProvider implements CryptoProvider {
+
+    private static final Logger log = Logger.getLogger(DefaultCryptoProvider.class);
+
+    private final Provider bcProvider;
+
+    private Map<String, Object> providers = new ConcurrentHashMap<>();
+
+    public DefaultCryptoProvider() {
+        // Make sure to instantiate this only once due it is expensive. And skip registration if already available in Java security providers (EG. due explicitly configured in java security file)
+        Provider existingBc = Security.getProvider(CryptoConstants.BC_PROVIDER_ID);
+        this.bcProvider = existingBc == null ? new BouncyCastleProvider() : existingBc;
+
+        providers.put(CryptoConstants.A128KW, new AesKeyWrapAlgorithmProvider());
+        providers.put(CryptoConstants.RSA1_5, new DefaultRsaKeyEncryptionJWEAlgorithmProvider("RSA/ECB/PKCS1Padding"));
+        providers.put(CryptoConstants.RSA_OAEP, new DefaultRsaKeyEncryptionJWEAlgorithmProvider("RSA/ECB/OAEPWithSHA-1AndMGF1Padding"));
+        providers.put(CryptoConstants.RSA_OAEP_256, new DefaultRsaKeyEncryption256JWEAlgorithmProvider("RSA/ECB/OAEPWithSHA-256AndMGF1Padding"));
+        providers.put(CryptoConstants.ECDH_ES, new BCEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A128KW, new BCEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A192KW, new BCEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A256KW, new BCEcdhEsAlgorithmProvider());
+
+        if (existingBc == null) {
+            Security.addProvider(this.bcProvider);
+            log.debugv("Loaded {0} security provider", this.bcProvider.getClass().getName());
+        } else {
+            log.debugv("Security provider {0} already loaded", this.bcProvider.getClass().getName());
+        }
+    }
+
+
+    @Override
+    public Provider getBouncyCastleProvider() {
+        return bcProvider;
+    }
+
+    @Override
+    public int order() {
+        return 200;
+    }
+
+    @Override
+    public <T> T getAlgorithmProvider(Class<T> clazz, String algorithmType) {
+        Object o = providers.get(algorithmType);
+        if (o == null) {
+            throw new IllegalArgumentException("Not found provider of algorithm type: " + algorithmType);
+        }
+        return clazz.cast(o);
+    }
+
+    @Override
+    public CertificateUtilsProvider getCertificateUtils() {
+        return new BCCertificateUtilsProvider();
+    }
+
+    @Override
+    public PemUtilsProvider getPemUtils() {
+        return new BCPemUtilsProvider();
+    }
+
+    @Override
+    public ECParameterSpec createECParams(String curveName) {
+        ECNamedCurveParameterSpec spec = ECNamedCurveTable.getParameterSpec(curveName);
+        return new ECNamedCurveSpec("prime256v1", spec.getCurve(), spec.getG(), spec.getN());
+    }
+
+    @Override
+    public UserIdentityExtractorProvider getIdentityExtractorProvider() {
+        return new BCUserIdentityExtractorProvider();
+    }
+
+    @Override
+    public ECDSACryptoProvider getEcdsaCryptoProvider() {
+        return new BCECDSACryptoProvider();
+    }
+
+
+    @Override
+    public <T> T getOCSPProver(Class<T> clazz) {
+        return clazz.cast(new BCOCSPProvider());
+    }
+
+
+    @Override
+    public KeyPairGenerator getKeyPairGen(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        return KeyPairGenerator.getInstance(algorithm, BouncyIntegration.PROVIDER);
+    }
+
+
+    @Override
+    public KeyFactory getKeyFactory(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        return KeyFactory.getInstance(algorithm, BouncyIntegration.PROVIDER);
+    }
+
+
+    @Override
+    public Cipher getAesCbcCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException {
+        return Cipher.getInstance("AES/CBC/PKCS7Padding", BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public Cipher getAesGcmCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException {
+        return Cipher.getInstance("AES/GCM/NoPadding", BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public SecretKeyFactory getSecretKeyFact(String keyAlgorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        return SecretKeyFactory.getInstance(keyAlgorithm, BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public KeyStore getKeyStore(KeystoreFormat format) throws KeyStoreException, NoSuchProviderException {
+        if (format == KeystoreFormat.JKS) {
+            return KeyStore.getInstance(format.toString());
+        } else {
+            return KeyStore.getInstance(format.toString(), BouncyIntegration.PROVIDER);
+        }
+    }
+
+    @Override
+    public CertificateFactory getX509CertFactory() throws CertificateException, NoSuchProviderException {
+        return CertificateFactory.getInstance("X.509", BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public CertStore getCertStore(CollectionCertStoreParameters certStoreParams) throws InvalidAlgorithmParameterException, NoSuchAlgorithmException, NoSuchProviderException {
+
+        return CertStore.getInstance("Collection", certStoreParams, BouncyIntegration.PROVIDER);
+
+    }
+
+
+    @Override
+    public CertPathBuilder getCertPathBuilder() throws NoSuchAlgorithmException, NoSuchProviderException {
+        return CertPathBuilder.getInstance("PKIX", BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public Signature getSignature(String sigAlgName) throws NoSuchAlgorithmException, NoSuchProviderException {
+        return Signature.getInstance(JavaAlgorithm.getJavaAlgorithm(sigAlgName), BouncyIntegration.PROVIDER);
+
+    }
+
+    @Override
+    public SSLSocketFactory wrapFactoryForTruststore(SSLSocketFactory delegate) {
+        return delegate;
+    }
+}
+
+
+===== FILE crypto/elytron/src/main/java/org/keycloak/crypto/elytron/WildFlyElytronProvider.java (after PR) =====
+/*
+ * Copyright 2017 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.crypto.elytron;
+
+import java.security.AlgorithmParameters;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.Provider;
+import java.security.Signature;
+import java.security.cert.CertPathBuilder;
+import java.security.cert.CertStore;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.CollectionCertStoreParameters;
+import java.security.spec.AlgorithmParameterSpec;
+import java.security.spec.ECGenParameterSpec;
+import java.security.spec.ECParameterSpec;
+import java.security.spec.MGF1ParameterSpec;
+import java.security.spec.PSSParameterSpec;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKeyFactory;
+import javax.net.ssl.SSLSocketFactory;
+
+import org.keycloak.common.crypto.CertificateUtilsProvider;
+import org.keycloak.common.crypto.CryptoConstants;
+import org.keycloak.common.crypto.CryptoProvider;
+import org.keycloak.common.crypto.ECDSACryptoProvider;
+import org.keycloak.common.crypto.PemUtilsProvider;
+import org.keycloak.common.crypto.UserIdentityExtractorProvider;
+import org.keycloak.common.util.KeystoreUtil.KeystoreFormat;
+import org.keycloak.crypto.JavaAlgorithm;
+
+public class WildFlyElytronProvider implements CryptoProvider {
+
+    private Map<String, Object> providers = new ConcurrentHashMap<>();
+
+    public WildFlyElytronProvider() {
+        providers.put(CryptoConstants.A128KW, new AesKeyWrapAlgorithmProvider());
+        providers.put(CryptoConstants.RSA1_5, new ElytronRsaKeyEncryptionJWEAlgorithmProvider("RSA/ECB/PKCS1Padding"));
+        providers.put(CryptoConstants.RSA_OAEP, new ElytronRsaKeyEncryptionJWEAlgorithmProvider("RSA/ECB/OAEPWithSHA-1AndMGF1Padding"));
+        providers.put(CryptoConstants.RSA_OAEP_256, new ElytronRsaKeyEncryption256JWEAlgorithmProvider("RSA/ECB/OAEPWithSHA-256AndMGF1Padding"));
+        providers.put(CryptoConstants.ECDH_ES, new ElytronEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A128KW, new ElytronEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A192KW, new ElytronEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A256KW, new ElytronEcdhEsAlgorithmProvider());
+    }
+
+    @Override
+    public Provider getBouncyCastleProvider() {
+        return null;
+    }
+
+    @Override
+    public int order() {
+        return 200;
+    }
+
+    @Override
+    public <T> T getAlgorithmProvider(Class<T> clazz, String algorithm) {
+        Object o = providers.get(algorithm);
+        if (o == null) {
+            throw new IllegalArgumentException("Not found provider of algorithm type: " + algorithm);
+        }
+        return clazz.cast(o);
+    }
+
+    @Override
+    public CertificateUtilsProvider getCertificateUtils() {
+        return new ElytronCertificateUtilsProvider();
+    }
+
+    @Override
+    public PemUtilsProvider getPemUtils() {
+        return new ElytronPEMUtilsProvider();
+    }
+
+    @Override
+    public <T> T getOCSPProver(Class<T> clazz) {
+        return clazz.cast(new ElytronOCSPProvider());
+    }
+
+    @Override
+    public UserIdentityExtractorProvider getIdentityExtractorProvider() {
+        return new ElytronUserIdentityExtractorProvider();
+    }
+
+    @Override
+    public ECDSACryptoProvider getEcdsaCryptoProvider() {
+        return new ElytronECDSACryptoProvider();
+    }
+
+    @Override
+    public ECParameterSpec createECParams(String curveName) {
+        AlgorithmParameters params;
+        try {
+            params = AlgorithmParameters.getInstance("EC");
+            params.init(new ECGenParameterSpec(curveName));
+            return params.getParameterSpec(ECParameterSpec.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to generate EC parameter spec", e);
+        }
+    }
+
+    @Override
+    public KeyPairGenerator getKeyPairGen(String algorithm) throws NoSuchAlgorithmException {
+        return KeyPairGenerator.getInstance(algorithm);
+    }
+
+    @Override
+    public KeyFactory getKeyFactory(String algorithm) throws NoSuchAlgorithmException {
+        if("ECDSA".equals(algorithm)) {
+            // ECDSA is not a listed JavaSE KeyFactory algorithm
+            // see https://docs.oracle.com/en/java/javase/11/docs/specs/security/standard-names.html#cipher-algorithm-names
+            algorithm = "EC";
+        }
+        return KeyFactory.getInstance(algorithm);
+    }
+
+    @Override
+    public Cipher getAesCbcCipher() throws NoSuchAlgorithmException, NoSuchPaddingException {
+        return Cipher.getInstance("AES/CBC/PKCS5Padding");
+    }
+
+    @Override
+    public Cipher getAesGcmCipher() throws NoSuchAlgorithmException, NoSuchPaddingException {
+        return Cipher.getInstance("AES/GCM/NoPadding");
+    }
+
+    @Override
+    public SecretKeyFactory getSecretKeyFact(String keyAlgorithm) throws NoSuchAlgorithmException {
+        return SecretKeyFactory.getInstance(keyAlgorithm);
+    }
+
+    @Override
+    public KeyStore getKeyStore(KeystoreFormat format) throws KeyStoreException {
+            return KeyStore.getInstance(format.toString());
+    }
+
+    @Override
+    public CertificateFactory getX509CertFactory() throws CertificateException {
+        return CertificateFactory.getInstance("X.509");
+    }
+
+    @Override
+    public CertStore getCertStore(CollectionCertStoreParameters certStoreParams) throws InvalidAlgorithmParameterException, NoSuchAlgorithmException {
+
+        return CertStore.getInstance("Collection", certStoreParams);
+
+    }
+
+    @Override
+    public CertPathBuilder getCertPathBuilder() throws NoSuchAlgorithmException {
+        return CertPathBuilder.getInstance("PKIX");
+    }
+
+    @Override
+    public Signature getSignature(String sigAlgName) throws NoSuchAlgorithmException {
+        String javaAlgorithm = JavaAlgorithm.getJavaAlgorithm(sigAlgName);
+
+        switch (javaAlgorithm) {
+            case JavaAlgorithm.PS256, JavaAlgorithm.PS384, JavaAlgorithm.PS512:
+                var signature = Signature.getInstance("RSASSA-PSS");
+
+                int digestLength = Integer.parseInt(javaAlgorithm.substring(3, 6));
+                MGF1ParameterSpec ps = new MGF1ParameterSpec("SHA-" + digestLength);
+                AlgorithmParameterSpec params = new PSSParameterSpec(
+                        ps.getDigestAlgorithm(), "MGF1", ps, digestLength / 8, 1);
+
+                try {
+                    signature.setParameter(params);
+                } catch (InvalidAlgorithmParameterException e) {
+                    throw new RuntimeException(e);
+                }
+
+                return signature;
+
+            default:
+                return Signature.getInstance(javaAlgorithm);
+        }
+    }
+
+    @Override
+    public SSLSocketFactory wrapFactoryForTruststore(SSLSocketFactory delegate) {
+        return delegate;
+    }
+}
+
+
+===== FILE crypto/fips1402/src/main/java/org/keycloak/crypto/fips/FIPS1402Provider.java (after PR) =====
+package org.keycloak.crypto.fips;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.UnknownHostException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.Provider;
+import java.security.SecureRandom;
+import java.security.spec.ECField;
+import java.security.spec.ECFieldF2m;
+import java.security.spec.ECFieldFp;
+import java.security.spec.ECParameterSpec;
+import java.security.spec.ECPoint;
+import java.security.spec.EllipticCurve;
+import java.security.Security;
+import java.security.Signature;
+import java.security.cert.CertPathBuilder;
+import java.security.cert.CertStore;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.CollectionCertStoreParameters;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKeyFactory;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SNIHostName;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
+
+import org.bouncycastle.asn1.x9.ECNamedCurveTable;
+import org.bouncycastle.asn1.x9.X9ECParameters;
+import org.bouncycastle.crypto.fips.FipsRSA;
+import org.bouncycastle.crypto.fips.FipsSHS;
+import org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider;
+import org.bouncycastle.jsse.provider.BouncyCastleJsseProvider;
+import org.bouncycastle.jsse.util.CustomSSLSocketFactory;
+import org.bouncycastle.math.ec.ECCurve;
+import org.bouncycastle.util.IPAddress;
+import org.jboss.logging.Logger;
+import org.keycloak.common.crypto.CryptoProvider;
+import org.keycloak.common.crypto.ECDSACryptoProvider;
+import org.keycloak.common.crypto.CryptoConstants;
+import org.keycloak.common.crypto.CertificateUtilsProvider;
+import org.keycloak.common.crypto.PemUtilsProvider;
+import org.keycloak.common.crypto.UserIdentityExtractorProvider;
+import org.keycloak.common.util.BouncyIntegration;
+import org.keycloak.common.util.KeystoreUtil.KeystoreFormat;
+import org.keycloak.crypto.JavaAlgorithm;
+
+
+/**
+ * Integration based on FIPS 140-2
+ *
+ * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
+ */
+public class FIPS1402Provider implements CryptoProvider {
+
+    private static final Logger log = Logger.getLogger(FIPS1402Provider.class);
+
+    private final BouncyCastleFipsProvider bcFipsProvider;
+    private final Map<String, Object> providers = new ConcurrentHashMap<>();
+
+    public FIPS1402Provider() {
+        // Case when BCFIPS provider already registered in Java security file
+        BouncyCastleFipsProvider existingBcFipsProvider = (BouncyCastleFipsProvider) Security.getProvider(CryptoConstants.BCFIPS_PROVIDER_ID);
+        this.bcFipsProvider = existingBcFipsProvider == null ? new BouncyCastleFipsProvider() : existingBcFipsProvider;
+
+        providers.put(CryptoConstants.A128KW, new FIPSAesKeyWrapAlgorithmProvider());
+        providers.put(CryptoConstants.RSA1_5, new FIPSRsaKeyEncryptionJWEAlgorithmProvider(FipsRSA.WRAP_PKCS1v1_5));
+        providers.put(CryptoConstants.RSA_OAEP, new FIPSRsaKeyEncryptionJWEAlgorithmProvider(FipsRSA.WRAP_OAEP));
+        providers.put(CryptoConstants.RSA_OAEP_256, new FIPSRsaKeyEncryptionJWEAlgorithmProvider(FipsRSA.WRAP_OAEP.withDigest(FipsSHS.Algorithm.SHA256)));
+        providers.put(CryptoConstants.ECDH_ES, new BCFIPSEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A128KW, new BCFIPSEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A192KW, new BCFIPSEcdhEsAlgorithmProvider());
+        providers.put(CryptoConstants.ECDH_ES_A256KW, new BCFIPSEcdhEsAlgorithmProvider());
+
+        Security.insertProviderAt(new KeycloakFipsSecurityProvider(bcFipsProvider), 1);
+        if (existingBcFipsProvider == null) {
+            checkSecureRandom(() -> Security.insertProviderAt(this.bcFipsProvider, 2));
+            Provider bcJsseProvider = new BouncyCastleJsseProvider("fips:BCFIPS");
+            Security.insertProviderAt(bcJsseProvider, 3);
+            // force the key and trust manager factories if default values not present in BCJSSE
+            modifyKeyTrustManagerSecurityProperties(bcJsseProvider);
+            log.debugf("Inserted security providers: %s", Arrays.asList(this.bcFipsProvider.getName(),bcJsseProvider.getName()));
+        } else {
+            log.debugf("Security provider %s already loaded", existingBcFipsProvider.getName());
+        }
+    }
+
+
+    @Override
+    public Provider getBouncyCastleProvider() {
+        return bcFipsProvider;
+    }
+
+    @Override
+    public int order() {
+        return 200;
+    }
+
+    @Override
+    public <T> T getAlgorithmProvider(Class<T> clazz, String algorithm) {
+        Object o = providers.get(algorithm);
+        if (o == null) {
+            throw new IllegalArgumentException("Not found provider of algorithm: " + algorithm);
+        }
+        return clazz.cast(o);
+    }
+
+    @Override
+    public CertificateUtilsProvider getCertificateUtils() {
+        return new BCFIPSCertificateUtilsProvider();
+    }
+
+    @Override
+    public PemUtilsProvider getPemUtils() {
+        return new BCFIPSPemUtilsProvider();
+    }
+
+    /* Create EC Params using BC FipS APIs.
+     *
+     * @see org.keycloak.common.crypto.CryptoProvider#createECParams(java.lang.String)
+     */
+    @Override
+    public ECParameterSpec createECParams(String curveName) {
+        X9ECParameters params = ECNamedCurveTable.getByName(curveName);
+        ECField field ;
+        ECCurve ecCurve = params.getCurve();
+        if (ecCurve instanceof ECCurve.F2m) {
+            ECCurve.F2m f2m = (ECCurve.F2m) ecCurve;
+            field = new ECFieldF2m(f2m.getM(), new int[] { f2m.getK1(), f2m.getK2(), f2m.getK3()});
+        }
+        else
+        if (ecCurve instanceof ECCurve.Fp) {
+            ECCurve.Fp fp = (ECCurve.Fp) ecCurve;
+            field = new ECFieldFp(fp.getQ());
+        }
+        else
+            throw new RuntimeException("Unsupported curve");
+
+
+        EllipticCurve c = new EllipticCurve(field,
+                ecCurve.getA().toBigInteger(),
+                ecCurve.getB().toBigInteger(),
+                params.getSeed());
+        ECPoint point = new ECPoint( params.getG().getXCoord().toBigInteger(), params.getG().getYCoord().toBigInteger());
+        return new ECParameterSpec( c,point, params.getN(), params.getH().intValue());
+    }
+
+    @Override
+    public UserIdentityExtractorProvider getIdentityExtractorProvider() {
+        return new BCFIPSUserIdentityExtractorProvider();
+    }
+
+    @Override
+    public ECDSACryptoProvider getEcdsaCryptoProvider() {
+        return new BCFIPSECDSACryptoProvider();
+    }
+
+
+    @Override
+    public <T> T getOCSPProver(Class<T> clazz) {
+        return clazz.cast(new BCFIPSOCSPProvider());
+    }
+
+
+    @Override
+    public KeyPairGenerator getKeyPairGen(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        return KeyPairGenerator.getInstance(algorithm, BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public KeyFactory getKeyFactory(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        return KeyFactory.getInstance(algorithm , BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public Cipher getAesCbcCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException {
+        return Cipher.getInstance("AES/CBC/PKCS7Padding", BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public Cipher getAesGcmCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException {
+        return Cipher.getInstance("AES/GCM/NoPadding", BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public SecretKeyFactory getSecretKeyFact(String keyAlgorithm) throws NoSuchAlgorithmException, NoSuchProviderException {
+        return SecretKeyFactory.getInstance(keyAlgorithm, BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public KeyStore getKeyStore(KeystoreFormat format) throws KeyStoreException, NoSuchProviderException {
+        return KeyStore.getInstance(format.toString(), BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public CertificateFactory getX509CertFactory() throws CertificateException, NoSuchProviderException {
+        return CertificateFactory.getInstance("X.509", BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public CertStore getCertStore(CollectionCertStoreParameters certStoreParams) throws InvalidAlgorithmParameterException, NoSuchAlgorithmException, NoSuchProviderException {
+
+        return CertStore.getInstance("Collection", certStoreParams, BouncyIntegration.PROVIDER);
+
+    }
+
+    @Override
+    public CertPathBuilder getCertPathBuilder() throws NoSuchAlgorithmException, NoSuchProviderException {
+        return CertPathBuilder.getInstance("PKIX", BouncyIntegration.PROVIDER);
+    }
+
+    @Override
+    public Signature getSignature(String sigAlgName) throws NoSuchAlgorithmException, NoSuchProviderException {
+        return Signature.getInstance(JavaAlgorithm.getJavaAlgorithm(sigAlgName), BouncyIntegration.PROVIDER);
+
+    }
+
+    @Override
+    public SSLSocketFactory wrapFactoryForTruststore(SSLSocketFactory delegate) {
+        // See https://downloads.bouncycastle.org/fips-java/BC-FJA-(D)TLSUserGuide-1.0.9.pdf - Section 3.5.2 (Endpoint identification)
+        return new CustomSSLSocketFactory(delegate) {
+
+            @Override
+            public Socket createSocket() throws IOException {
+                // Creating unconnected socket (Used for example by com.sun.jndi.ldap.Connection.createSocket - when connectionTimeout > 0)
+                // Configuration of SNI hostname needs to be postponed as we don't yet know the hostname
+                Socket socket = delegate.createSocket();
+
+                if (socket instanceof SSLSocket) {
+                    return new AbstractDelegatingSSLSocket((SSLSocket) socket) {
+                        @Override
+                        public void connect(SocketAddress endpoint) throws IOException {
+                            log.tracef("Calling connect(%s)", endpoint);
+                            if (endpoint instanceof InetSocketAddress) {
+                                configureSocket(getDelegate(), ((InetSocketAddress) endpoint).getHostName());
+                            }
+                            super.connect(endpoint);
+                        }
+
+                        @Override
+                        public void connect(SocketAddress endpoint, int timeout) throws IOException {
+                            log.tracef("Calling connect(%s, %d)", endpoint, timeout);
+                            if (endpoint instanceof InetSocketAddress) {
+                                configureSocket(getDelegate(), ((InetSocketAddress) endpoint).getHostName());
+                            }
+                            super.connect(endpoint, timeout);
+                        }
+                    };
+                }
+                return socket;
+            }
+
+            @Override
+            public Socket createSocket(String host, int port) throws IOException, UnknownHostException {
+                return configureSocket(delegate.createSocket(host, port), host);
+            }
+
+            @Override
+            public Socket createSocket(String host, int port, InetAddress localHost, int localPort) throws IOException, UnknownHostException {
+                return configureSocket(delegate.createSocket(host, port, localHost, localPort), host);
+            }
+
+            @Override
+            protected Socket configureSocket(Socket s) {
+                if (s instanceof SSLSocket) {
+                    if (s.getInetAddress() == null) {
+                        throw new IllegalArgumentException("Socket not connected before trying to configure SSL Hostname");
+                    }
+                    String hostname = s.getInetAddress().getHostName();
+                    configureSocket(s, hostname);
+                }
+                return s;
+            }
+
+            private Socket configureSocket(Socket s, String hostname) {
+                if (s instanceof SSLSocket) {
+                    SSLSocket ssl = (SSLSocket)s;
+                    SNIHostName sniHostname = getSNIHostName(hostname);
+                    log.tracef("Configuration of SSL Socket - using sniHostname '%s' for the socket host '%s'", sniHostname, hostname);
+
+                    if (sniHostname != null) {
+                        SSLParameters sslParameters = ssl.getSSLParameters();
+                        if (sslParameters == null) {
+                            sslParameters = new SSLParameters();
+                        }
+                        sslParameters.setServerNames(Collections.singletonList(sniHostname));
+                        ssl.setSSLParameters(sslParameters);
+                    }
+                }
+                return s;
+            }
+
+            private SNIHostName getSNIHostName(String host) {
+                if (!IPAddress.isValid(host)) {
+                    try {
+                        return new SNIHostName(host);
+                    } catch (RuntimeException e) {
+                        log.warnf(e, "Not possible to create SNIHostName from the host '%s'", host);
+                    }
+                }
+                return null;
+            }
+
+        };
+    }
+
+    // BCFIPS require "SecureRandom.getInstanceStrong" to be available. But it may not be available on RHEL 8 on OpenJDK 17 due the https://bugzilla.redhat.com/show_bug.cgi?id=2155060
+    private void checkSecureRandom(Runnable insertBcFipsProvider) {
+        try {
+            SecureRandom sr = SecureRandom.getInstanceStrong();
+            log.debugf("Strong secure random available. Algorithm: %s, Provider: %s", sr.getAlgorithm(), sr.getProvider());
+            insertBcFipsProvider.run();
+        } catch (NoSuchAlgorithmException nsae) {
+
+            // Fallback to regular SecureRandom
+            // We could delete this once https://issues.redhat.com/browse/RHEL-3478 is fixed
+            SecureRandom secRandom = new SecureRandom();
+            String origStrongAlgs = Security.getProperty("securerandom.strongAlgorithms");
+            String usedAlg = secRandom.getAlgorithm() + ":" + secRandom.getProvider().getName();
+            log.debugf("Strong secure random not available. Tried algorithms: %s. Using algorithm as a fallback for strong secure random: %s", origStrongAlgs, usedAlg);
+
+            Security.setProperty("securerandom.strongAlgorithms", usedAlg);
+
+            try {
+                // Need to insert BCFIPS provider to security providers with "strong algorithm" available
+                insertBcFipsProvider.run();
+                SecureRandom.getInstance("DEFAULT", "BCFIPS");
+                log.debugf("Initialized BCFIPS secured random");
+            } catch (NoSuchAlgorithmException | NoSuchProviderException nsaee) {
+                throw new IllegalStateException("Not possible to initiate BCFIPS secure random", nsaee);
+            }
+        }
+    }
+
+    /**
+     * BCJSSE manages X.509, X509 and PKIX for KeyManagerFactory and
+     * TrustManagerFactory (names or aliases) while JSSE manages SunX509,
+     * NewSunX509 and PKIX for KeyManagerFactory and SunX509, PKIX, SunPKIX,
+     * X509 and X.509 for the TrustManagerFactory. As BCJSSE is used when
+     * fips enabled, the default implementations are changed to the ones
+     * provided by BC if selected ones are not present in the BCJSSE.
+     *
+     * @param bcJsseProvider The BCJSSE provider
+     */
+    private static void modifyKeyTrustManagerSecurityProperties(Provider bcJsseProvider) {
+        boolean setKey = bcJsseProvider.getService(KeyManagerFactory.class.getSimpleName(), KeyManagerFactory.getDefaultAlgorithm()) == null;
+        boolean setTrust = bcJsseProvider.getService(TrustManagerFactory.class.getSimpleName(), TrustManagerFactory.getDefaultAlgorithm()) == null;
+        if (!setKey && !setTrust) {
+            return;
+        }
+        Set<Provider.Service> services = bcJsseProvider.getServices();
+        if (services != null) {
+            for (Provider.Service service : services) {
+                if (setKey && KeyManagerFactory.class.getSimpleName().equals(service.getType())) {
+                    Security.setProperty("ssl.KeyManagerFactory.algorithm", service.getAlgorithm());
+                    setKey = false;
+                    if (!setTrust) {
+                        return;
+                    }
+                } else if (setTrust && TrustManagerFactory.class.getSimpleName().equals(service.getType())) {
+                    Security.setProperty("ssl.TrustManagerFactory.algorithm", service.getAlgorithm());
+                    setTrust = false;
+                    if (!setKey) {
+                        return;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("Provider " + bcJsseProvider.getName()
+                + " does not provide KeyManagerFactory or TrustManagerFactory algorithms for TLS");
+    }
+}

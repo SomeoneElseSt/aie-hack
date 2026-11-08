@@ -1,0 +1,1 @@
+{"AssignmentSource.queued is initialized with timezone.now() at class definition time, so all AssignmentSource instances created without an explicit queued value share the same stale timestamp. This makes the context carrier's timing data incorrect. The fix is to use field(default_factory=timezone.now) instead of timezone.now() as the default value.": 0.9381168484687805}

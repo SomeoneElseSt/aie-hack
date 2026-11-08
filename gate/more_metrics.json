@@ -1,0 +1,1138 @@
+{
+  "crjudge": {
+    "threshold": 0.4973278045654297,
+    "validation_accuracy": 0.8888888888888888,
+    "test_accuracy": 0.8579387186629527,
+    "accuracy_at_half": 0.8579387186629527,
+    "auroc": 0.9159892509237487,
+    "validation_rows": 126,
+    "test_rows": 359
+  },
+  "runs": [
+    {
+      "mode": "crjudge",
+      "counts": {
+        "crjudge:attempts": 100,
+        "crjudge:successes": 93,
+        "crjudge:errors": 7
+      }
+    },
+    {
+      "mode": "crjudge",
+      "counts": {
+        "crjudge:cached_requests": 93,
+        "crjudge:attempts": 1,
+        "crjudge:successes": 1
+      }
+    },
+    {
+      "mode": "martian",
+      "counts": {
+        "martian:attempts": 46,
+        "martian:errors": 46
+      }
+    },
+    {
+      "mode": "martian",
+      "counts": {
+        "martian:attempts": 176,
+        "martian:successes": 140,
+        "martian:errors": 36
+      }
+    },
+    {
+      "mode": "martian",
+      "counts": {
+        "martian:cached_requests": 140,
+        "martian:attempts": 16,
+        "martian:errors": 12,
+        "martian:successes": 4
+      }
+    }
+  ],
+  "martian": {
+    "rows": [
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "augment",
+        "baseline_f1": 0.5495207667731629,
+        "heldout_gain": -0.012679325026768551,
+        "fold_gains": [
+          -0.06987308574907514,
+          0.044514435695538035
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "baz",
+        "baseline_f1": 0.4491525423728813,
+        "heldout_gain": 0.0044444671715787865,
+        "fold_gains": [
+          0.017883357800613897,
+          -0.008994423457456324
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "bito",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "bugbot",
+        "baseline_f1": 0.4885496183206107,
+        "heldout_gain": 0.013226277372262701,
+        "fold_gains": [
+          -0.025547445255474588,
+          0.05199999999999999
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "claude",
+        "baseline_f1": 0.3674911660777386,
+        "heldout_gain": 0.08481739469981539,
+        "fold_gains": [
+          0.06056616194865039,
+          0.1090686274509804
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "claude-code",
+        "baseline_f1": 0.37942122186495175,
+        "heldout_gain": 0.04180817695536704,
+        "fold_gains": [
+          0.042606516290726926,
+          0.04100983762000715
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "codeant",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "codeant-v2",
+        "baseline_f1": 0.33986928104575165,
+        "heldout_gain": 0.0191016093169514,
+        "fold_gains": [
+          0.004691531785127823,
+          0.03351168684877498
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "coderabbit",
+        "baseline_f1": 0.4168734491315137,
+        "heldout_gain": 0.12353158093658229,
+        "fold_gains": [
+          0.10190659178244166,
+          0.14515657009072291
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "copilot",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "copilot-v2",
+        "baseline_f1": 0.41646489104116224,
+        "heldout_gain": 0.12470072208700964,
+        "fold_gains": [
+          0.12163537462712776,
+          0.12776606954689151
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "cubic-dev",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "cubic-v2",
+        "baseline_f1": 0.5608108108108107,
+        "heldout_gain": -0.00629082269959097,
+        "fold_gains": [
+          -0.01455868971792551,
+          0.0019770443187435705
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "devin",
+        "baseline_f1": 0.5321888412017167,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0.0,
+          0.0
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "entelligence",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "gemini",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "gemini-v2",
+        "baseline_f1": 0.4298507462686567,
+        "heldout_gain": 0.08703162518364127,
+        "fold_gains": [
+          0.08176729308276687,
+          0.09229595728451567
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "gitar",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "gitlab",
+        "baseline_f1": 0.46735395189003437,
+        "heldout_gain": 0.05164772509575413,
+        "fold_gains": [
+          0.045163543242928705,
+          0.05813190694857956
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "graphite",
+        "baseline_f1": 0.14666666666666667,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0.0,
+          0.0
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "greptile",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "greptile-v4",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "greptile-v4-1",
+        "baseline_f1": 0.4745762711864407,
+        "heldout_gain": 0.016631957904471528,
+        "fold_gains": [
+          0.009508259700345745,
+          0.02375565610859731
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "greptile-v5",
+        "baseline_f1": 0.39880952380952384,
+        "heldout_gain": 0.03761261019999354,
+        "fold_gains": [
+          0.038461538461538436,
+          0.036763681938448645
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "kg",
+        "baseline_f1": 0.23076923076923078,
+        "heldout_gain": -0.020299843219231742,
+        "fold_gains": [
+          -0.04447565543071155,
+          0.003875968992248069
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "kodus",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "kodus-v2",
+        "baseline_f1": 0.4510638297872341,
+        "heldout_gain": 0.02563440150973817,
+        "fold_gains": [
+          0.022360248447204967,
+          0.028908554572271372
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "linearb",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "macroscope",
+        "baseline_f1": 0.47727272727272724,
+        "heldout_gain": 0.012903935852535214,
+        "fold_gains": [
+          -0.0028935185185184897,
+          0.02870139022358892
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mergemonkey",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mesa",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mra-a",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mra-b",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mra-claude",
+        "baseline_f1": 0.24747474747474746,
+        "heldout_gain": 0.09283234387971047,
+        "fold_gains": [
+          0.06436965811965806,
+          0.12129502963976288
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mra-max",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mra-mix",
+        "baseline_f1": 0.2538860103626943,
+        "heldout_gain": 0.09407108640853928,
+        "fold_gains": [
+          0.05897870736762767,
+          0.1291634654494509
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mra-nano",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mra-openai",
+        "baseline_f1": 0.26535626535626533,
+        "heldout_gain": 0.04006075933645879,
+        "fold_gains": [
+          0.0030359251138471766,
+          0.07708559355907041
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "mra-ultra",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "propel",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "propel-v2",
+        "baseline_f1": 0.4818481848184818,
+        "heldout_gain": 0.024914202465862206,
+        "fold_gains": [
+          0.021508898351348282,
+          0.02831950658037613
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "qodo",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "qodo-extended",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "qodo-extended-summary",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "qodo-extended-v2",
+        "baseline_f1": 0.5586206896551724,
+        "heldout_gain": -0.00023288147375735702,
+        "fold_gains": [
+          -0.010476190476190417,
+          0.010010427528675703
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "qodo-v2",
+        "baseline_f1": 0.5109034267912772,
+        "heldout_gain": 0.036965020350600286,
+        "fold_gains": [
+          0.03218390804597704,
+          0.04174613265522353
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "qodo-v2-2",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "qodo-v22",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "anthropic_claude-sonnet-4-5-20250929",
+        "tool": "sourcery",
+        "baseline_f1": 0.40236686390532544,
+        "heldout_gain": 0.09106221707548168,
+        "fold_gains": [
+          0.0847457627118644,
+          0.09737867143909895
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "augment",
+        "baseline_f1": 0.51875,
+        "heldout_gain": 0.05608368244600029,
+        "fold_gains": [
+          0.04321591650358769,
+          0.06895144838841288
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "baz",
+        "baseline_f1": 0.39525691699604737,
+        "heldout_gain": 0.00934965954379241,
+        "fold_gains": [
+          0.020214470602736345,
+          -0.001515151515151525
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "bito",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "bugbot",
+        "baseline_f1": 0.48529411764705876,
+        "heldout_gain": 0.02743133044198351,
+        "fold_gains": [
+          0.006861642294713088,
+          0.04800101858925393
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "claude",
+        "baseline_f1": 0.37762237762237766,
+        "heldout_gain": 0.07642374973163912,
+        "fold_gains": [
+          0.07809330628803246,
+          0.07475419317524579
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "claude-code",
+        "baseline_f1": 0.4054054054054054,
+        "heldout_gain": 0.006220123962059426,
+        "fold_gains": [
+          0.01981351981351981,
+          -0.007373271889400956
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "codeant",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "codeant-v2",
+        "baseline_f1": 0.33125,
+        "heldout_gain": 0.03280462122814101,
+        "fold_gains": [
+          0.0166158958737192,
+          0.048993346582562824
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "coderabbit",
+        "baseline_f1": 0.3739130434782609,
+        "heldout_gain": 0.13519248918492816,
+        "fold_gains": [
+          0.10852713178294565,
+          0.16185784658691066
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "copilot",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "copilot-v2",
+        "baseline_f1": 0.411214953271028,
+        "heldout_gain": 0.09995645433780126,
+        "fold_gains": [
+          0.08496060294621444,
+          0.11495230572938808
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "cubic-dev",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "cubic-v2",
+        "baseline_f1": 0.5627118644067797,
+        "heldout_gain": -0.0004050479141114449,
+        "fold_gains": [
+          -0.008361501512186398,
+          0.007551405683963508
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "devin",
+        "baseline_f1": 0.4897959183673469,
+        "heldout_gain": -0.013157894736842146,
+        "fold_gains": [
+          -0.026315789473684292,
+          0.0
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "entelligence",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "gemini",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "gemini-v2",
+        "baseline_f1": 0.43352601156069365,
+        "heldout_gain": 0.09982486592755727,
+        "fold_gains": [
+          0.10105204872646723,
+          0.0985976831286473
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "gitar",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "gitlab",
+        "baseline_f1": 0.45333333333333337,
+        "heldout_gain": 0.04660085987540588,
+        "fold_gains": [
+          0.03885057471264364,
+          0.054351145038168125
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "graphite",
+        "baseline_f1": 0.13071895424836602,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0.0,
+          0.0
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "greptile",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "greptile-v4",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "greptile-v4-1",
+        "baseline_f1": 0.4472843450479233,
+        "heldout_gain": 0.045818807810913686,
+        "fold_gains": [
+          0.03254462432544619,
+          0.05909299129638118
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "greptile-v5",
+        "baseline_f1": 0.3953488372093023,
+        "heldout_gain": 0.020690404501604226,
+        "fold_gains": [
+          0.017051077110451396,
+          0.024329731892757056
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "kg",
+        "baseline_f1": 0.25274725274725274,
+        "heldout_gain": -0.011915352953038444,
+        "fold_gains": [
+          -0.02923976608187137,
+          0.005409060175794483
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "kodus",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "kodus-v2",
+        "baseline_f1": 0.42016806722689076,
+        "heldout_gain": 0.012724834068707558,
+        "fold_gains": [
+          0.007729468599033784,
+          0.01772019953838133
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "linearb",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "macroscope",
+        "baseline_f1": 0.4609665427509294,
+        "heldout_gain": 0.012550529008703265,
+        "fold_gains": [
+          0.009481481481481535,
+          0.015619576535924995
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mergemonkey",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mesa",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mra-a",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mra-b",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mra-claude",
+        "baseline_f1": 0.22391857506361326,
+        "heldout_gain": 0.10162492001912404,
+        "fold_gains": [
+          0.0647030420086914,
+          0.1385467980295567
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mra-max",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mra-mix",
+        "baseline_f1": 0.25,
+        "heldout_gain": 0.10193064384697677,
+        "fold_gains": [
+          0.06620141514006009,
+          0.13765987255389345
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mra-nano",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mra-openai",
+        "baseline_f1": 0.23267326732673269,
+        "heldout_gain": 0.060579733209451064,
+        "fold_gains": [
+          0.0499463193763712,
+          0.07121314704253093
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "mra-ultra",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "propel",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "propel-v2",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "qodo",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "qodo-extended",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "qodo-extended-summary",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "qodo-extended-v2",
+        "baseline_f1": 0.5841924398625429,
+        "heldout_gain": -0.01738069856809571,
+        "fold_gains": [
+          -0.0457103022456804,
+          0.010948905109488982
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "qodo-v2",
+        "baseline_f1": 0.5247813411078717,
+        "heldout_gain": 0.06670037630595266,
+        "fold_gains": [
+          0.0551476331823153,
+          0.07825311942959001
+        ],
+        "strict_positives": 139
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "qodo-v2-2",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "qodo-v22",
+        "baseline_f1": 0,
+        "heldout_gain": 0.0,
+        "fold_gains": [
+          0,
+          0
+        ],
+        "strict_positives": 0
+      },
+      {
+        "judge": "openai_gpt-5.2",
+        "tool": "sourcery",
+        "baseline_f1": 0.4011461318051576,
+        "heldout_gain": 0.07373768870251454,
+        "fold_gains": [
+          0.0761077648596909,
+          0.07136761254533819
+        ],
+        "strict_positives": 139
+      }
+    ],
+    "failures": [],
+    "reused_candidate_assignments": 3256,
+    "new_request_groups": 144
+  }
+}

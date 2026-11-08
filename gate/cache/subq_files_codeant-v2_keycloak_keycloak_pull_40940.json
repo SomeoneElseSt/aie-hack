@@ -1,0 +1,1 @@
+{"Test spawns a background thread to read groups but never waits for it to finish before asserting that no exceptions were caught, creating a race condition where exceptions thrown in the final iteration may be added to caughtExceptions after the assertion has already passed": 0.9404800534248352}

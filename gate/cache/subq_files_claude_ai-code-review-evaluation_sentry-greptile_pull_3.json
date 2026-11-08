@@ -1,0 +1,1 @@
+{"Non-deterministic cache keys due to Python hash() behavior across processes - using hash(tuple(sorted(snuba_params.project_ids))) generates different hash values for identical project_ids in different workers sharing a Redis cache, causing cache misses and defeating the caching mechanism": 0.9587625861167908}

@@ -1,0 +1,1 @@
+{"isinstance(process, multiprocessing.Process) in join() is always False for spawn-context processes, preventing terminate() from being called during shutdown, which can cause consumer shutdown to hang or leave orphan processes": 0.3986254334449768}

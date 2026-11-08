@@ -1,0 +1,1 @@
+{"Logic error in permission check - using `&&` instead of `||` for admin or owner. The variable `isTeamAdminOrOwner` suggests it should allow if user is admin OR owner, but the code uses `&&` which requires both.": 0.9788405895233154, "Missing uniqueness validation for guest emails - the schema should ensure emails are unique to prevent duplicates": 0.8367984890937805}

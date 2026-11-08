@@ -1,0 +1,4313 @@
+===== FILE packages/grafana-data/src/types/config.ts (after PR) =====
+import { SystemDateFormatSettings } from '../datetime';
+import { MapLayerOptions } from '../geo/layer';
+import { GrafanaTheme2 } from '../themes';
+
+import { DataSourceInstanceSettings } from './datasource';
+import { FeatureToggles } from './featureToggles.gen';
+import { PanelPluginMeta } from './panel';
+
+import { GrafanaTheme, IconName, NavLinkDTO, OrgRole } from '.';
+
+/**
+ * Describes the build information that will be available via the Grafana configuration.
+ *
+ * @public
+ */
+export interface BuildInfo {
+  version: string;
+  commit: string;
+  env: string;
+  edition: GrafanaEdition;
+  latestVersion: string;
+  hasUpdate: boolean;
+  hideVersion: boolean;
+}
+
+/**
+ * @internal
+ */
+export enum GrafanaEdition {
+  OpenSource = 'Open Source',
+  Pro = 'Pro',
+  Enterprise = 'Enterprise',
+}
+
+/**
+ * Describes the license information about the current running instance of Grafana.
+ *
+ * @public
+ */
+export interface LicenseInfo {
+  expiry: number;
+  licenseUrl: string;
+  stateInfo: string;
+  edition: GrafanaEdition;
+  enabledFeatures: { [key: string]: boolean };
+  trialExpiry?: number;
+}
+
+/**
+ * Describes GrafanaJavascriptAgentConfig integration config
+ *
+ * @public
+ */
+export interface GrafanaJavascriptAgentConfig {
+  enabled: boolean;
+  customEndpoint: string;
+  errorInstrumentalizationEnabled: boolean;
+  consoleInstrumentalizationEnabled: boolean;
+  webVitalsInstrumentalizationEnabled: boolean;
+  apiKey: string;
+}
+
+export interface UnifiedAlertingConfig {
+  minInterval: string;
+  // will be undefined if alerStateHistory is not enabled
+  alertStateHistoryBackend?: string;
+  // will be undefined if implementation is not "multiple"
+  alertStateHistoryPrimary?: string;
+}
+
+/** Supported OAuth services
+ *
+ * @public
+ */
+export type OAuth =
+  | 'github'
+  | 'gitlab'
+  | 'google'
+  | 'generic_oauth'
+  // | 'grafananet' Deprecated. Key always changed to "grafana_com"
+  | 'grafana_com'
+  | 'azuread'
+  | 'okta';
+
+/** Map of enabled OAuth services and their respective names
+ *
+ * @public
+ */
+export type OAuthSettings = Partial<Record<OAuth, { name: string; icon?: IconName }>>;
+
+/**
+ * Information needed for analytics providers
+ *
+ * @internal
+ */
+export interface AnalyticsSettings {
+  identifier: string;
+  intercomIdentifier?: string;
+}
+
+/** Current user info included in bootData
+ *
+ * @internal
+ */
+export interface CurrentUserDTO {
+  isSignedIn: boolean;
+  id: number;
+  externalUserId: string;
+  login: string;
+  email: string;
+  name: string;
+  theme: string; // dark | light | system
+  orgCount: number;
+  orgId: number;
+  orgName: string;
+  orgRole: OrgRole | '';
+  isGrafanaAdmin: boolean;
+  gravatarUrl: string;
+  timezone: string;
+  weekStart: string;
+  locale: string;
+  language: string;
+  permissions?: Record<string, boolean>;
+  analytics: AnalyticsSettings;
+
+  /** @deprecated Use theme instead */
+  lightTheme: boolean;
+}
+
+/** Contains essential user and config info
+ *
+ * @internal
+ */
+export interface BootData {
+  user: CurrentUserDTO;
+  settings: GrafanaConfig;
+  navTree: NavLinkDTO[];
+  themePaths: {
+    light: string;
+    dark: string;
+  };
+}
+
+/**
+ * Describes all the different Grafana configuration values available for an instance.
+ *
+ * @internal
+ */
+export interface GrafanaConfig {
+  publicDashboardAccessToken?: string;
+  snapshotEnabled: boolean;
+  datasources: { [str: string]: DataSourceInstanceSettings };
+  panels: { [key: string]: PanelPluginMeta };
+  auth: AuthSettings;
+  minRefreshInterval: string;
+  appSubUrl: string;
+  windowTitlePrefix: string;
+  buildInfo: BuildInfo;
+  newPanelTitle: string;
+  bootData: BootData;
+  externalUserMngLinkUrl: string;
+  externalUserMngLinkName: string;
+  externalUserMngInfo: string;
+  allowOrgCreate: boolean;
+  disableLoginForm: boolean;
+  defaultDatasource: string;
+  alertingEnabled: boolean;
+  alertingErrorOrTimeout: string;
+  alertingNoDataOrNullValues: string;
+  alertingMinInterval: number;
+  authProxyEnabled: boolean;
+  exploreEnabled: boolean;
+  queryHistoryEnabled: boolean;
+  helpEnabled: boolean;
+  profileEnabled: boolean;
+  newsFeedEnabled: boolean;
+  ldapEnabled: boolean;
+  sigV4AuthEnabled: boolean;
+  azureAuthEnabled: boolean;
+  samlEnabled: boolean;
+  autoAssignOrg: boolean;
+  verifyEmailEnabled: boolean;
+  oauth: OAuthSettings;
+  /** @deprecated always set to true. */
+  rbacEnabled: boolean;
+  disableUserSignUp: boolean;
+  loginHint: string;
+  passwordHint: string;
+  loginError?: string;
+  viewersCanEdit: boolean;
+  editorsCanAdmin: boolean;
+  disableSanitizeHtml: boolean;
+  trustedTypesDefaultPolicyEnabled: boolean;
+  cspReportOnlyEnabled: boolean;
+  liveEnabled: boolean;
+  /** @deprecated Use `theme2` instead. */
+  theme: GrafanaTheme;
+  theme2: GrafanaTheme2;
+  anonymousEnabled: boolean;
+  anonymousDeviceLimit: number | undefined;
+  featureToggles: FeatureToggles;
+  licenseInfo: LicenseInfo;
+  http2Enabled: boolean;
+  dateFormats?: SystemDateFormatSettings;
+  grafanaJavascriptAgent: GrafanaJavascriptAgentConfig;
+  customTheme?: any;
+  geomapDefaultBaseLayer?: MapLayerOptions;
+  geomapDisableCustomBaseLayer?: boolean;
+  unifiedAlertingEnabled: boolean;
+  unifiedAlerting: UnifiedAlertingConfig;
+  angularSupportEnabled: boolean;
+  feedbackLinksEnabled: boolean;
+  secretsManagerPluginEnabled: boolean;
+  supportBundlesEnabled: boolean;
+  secureSocksDSProxyEnabled: boolean;
+  googleAnalyticsId: string | undefined;
+  googleAnalytics4Id: string | undefined;
+  googleAnalytics4SendManualPageViews: boolean;
+  rudderstackWriteKey: string | undefined;
+  rudderstackDataPlaneUrl: string | undefined;
+  rudderstackSdkUrl: string | undefined;
+  rudderstackConfigUrl: string | undefined;
+  rudderstackIntegrationsUrl: string | undefined;
+  sqlConnectionLimits: SqlConnectionLimits;
+  sharedWithMeFolderUID?: string;
+
+  // The namespace to use for kubernetes apiserver requests
+  namespace: string;
+}
+
+export interface SqlConnectionLimits {
+  maxOpenConns: number;
+  maxIdleConns: number;
+  connMaxLifetime: number;
+}
+
+export interface AuthSettings {
+  OAuthSkipOrgRoleUpdateSync?: boolean;
+  SAMLSkipOrgRoleSync?: boolean;
+  LDAPSkipOrgRoleSync?: boolean;
+  JWTAuthSkipOrgRoleSync?: boolean;
+  GrafanaComSkipOrgRoleSync?: boolean;
+  GithubSkipOrgRoleSync?: boolean;
+  GitLabSkipOrgRoleSync?: boolean;
+  OktaSkipOrgRoleSync?: boolean;
+  AzureADSkipOrgRoleSync?: boolean;
+  GoogleSkipOrgRoleSync?: boolean;
+  GenericOAuthSkipOrgRoleSync?: boolean;
+  AuthProxyEnableLoginToken?: boolean;
+}
+
+
+===== FILE packages/grafana-runtime/src/config.ts (after PR) =====
+import { merge } from 'lodash';
+
+import {
+  AuthSettings,
+  BootData,
+  BuildInfo,
+  DataSourceInstanceSettings,
+  FeatureToggles,
+  GrafanaConfig,
+  GrafanaTheme,
+  GrafanaTheme2,
+  LicenseInfo,
+  MapLayerOptions,
+  OAuthSettings,
+  PanelPluginMeta,
+  systemDateFormats,
+  SystemDateFormatSettings,
+  getThemeById,
+  AngularMeta,
+} from '@grafana/data';
+
+export interface AzureSettings {
+  cloud?: string;
+  managedIdentityEnabled: boolean;
+  workloadIdentityEnabled: boolean;
+  userIdentityEnabled: boolean;
+}
+
+export type AppPluginConfig = {
+  id: string;
+  path: string;
+  version: string;
+  preload: boolean;
+  angular: AngularMeta;
+};
+
+export class GrafanaBootConfig implements GrafanaConfig {
+  publicDashboardAccessToken?: string;
+  snapshotEnabled = true;
+  datasources: { [str: string]: DataSourceInstanceSettings } = {};
+  panels: { [key: string]: PanelPluginMeta } = {};
+  apps: Record<string, AppPluginConfig> = {};
+  auth: AuthSettings = {};
+  minRefreshInterval = '';
+  appUrl = '';
+  appSubUrl = '';
+  namespace = 'default';
+  windowTitlePrefix = '';
+  buildInfo: BuildInfo;
+  newPanelTitle = '';
+  bootData: BootData;
+  externalUserMngLinkUrl = '';
+  externalUserMngLinkName = '';
+  externalUserMngInfo = '';
+  allowOrgCreate = false;
+  feedbackLinksEnabled = true;
+  disableLoginForm = false;
+  defaultDatasource = ''; // UID
+  alertingEnabled = false;
+  alertingErrorOrTimeout = '';
+  alertingNoDataOrNullValues = '';
+  alertingMinInterval = 1;
+  angularSupportEnabled = false;
+  authProxyEnabled = false;
+  exploreEnabled = false;
+  queryHistoryEnabled = false;
+  helpEnabled = false;
+  profileEnabled = false;
+  newsFeedEnabled = true;
+  ldapEnabled = false;
+  jwtHeaderName = '';
+  jwtUrlLogin = false;
+  sigV4AuthEnabled = false;
+  azureAuthEnabled = false;
+  secureSocksDSProxyEnabled = false;
+  samlEnabled = false;
+  samlName = '';
+  autoAssignOrg = true;
+  verifyEmailEnabled = false;
+  oauth: OAuthSettings = {};
+  rbacEnabled = true;
+  disableUserSignUp = false;
+  loginHint = '';
+  passwordHint = '';
+  loginError: string | undefined = undefined;
+  viewersCanEdit = false;
+  editorsCanAdmin = false;
+  disableSanitizeHtml = false;
+  trustedTypesDefaultPolicyEnabled = false;
+  cspReportOnlyEnabled = false;
+  liveEnabled = true;
+  /** @deprecated Use `theme2` instead. */
+  theme: GrafanaTheme;
+  theme2: GrafanaTheme2;
+  featureToggles: FeatureToggles = {};
+  anonymousEnabled = false;
+  anonymousDeviceLimit = undefined;
+  licenseInfo: LicenseInfo = {} as LicenseInfo;
+  rendererAvailable = false;
+  rendererVersion = '';
+  secretsManagerPluginEnabled = false;
+  supportBundlesEnabled = false;
+  http2Enabled = false;
+  dateFormats?: SystemDateFormatSettings;
+  grafanaJavascriptAgent = {
+    enabled: false,
+    customEndpoint: '',
+    apiKey: '',
+    errorInstrumentalizationEnabled: true,
+    consoleInstrumentalizationEnabled: false,
+    webVitalsInstrumentalizationEnabled: false,
+  };
+  pluginCatalogURL = 'https://grafana.com/grafana/plugins/';
+  pluginAdminEnabled = true;
+  pluginAdminExternalManageEnabled = false;
+  pluginCatalogHiddenPlugins: string[] = [];
+  pluginsCDNBaseURL = '';
+  expressionsEnabled = false;
+  customTheme?: undefined;
+  awsAllowedAuthProviders: string[] = [];
+  awsAssumeRoleEnabled = false;
+  azure: AzureSettings = {
+    managedIdentityEnabled: false,
+    workloadIdentityEnabled: false,
+    userIdentityEnabled: false,
+  };
+  caching = {
+    enabled: false,
+  };
+  geomapDefaultBaseLayerConfig?: MapLayerOptions;
+  geomapDisableCustomBaseLayer?: boolean;
+  unifiedAlertingEnabled = false;
+  unifiedAlerting = {
+    minInterval: '',
+    alertStateHistoryBackend: undefined,
+    alertStateHistoryPrimary: undefined,
+  };
+  applicationInsightsConnectionString?: string;
+  applicationInsightsEndpointUrl?: string;
+  recordedQueries = {
+    enabled: true,
+  };
+  featureHighlights = {
+    enabled: false,
+  };
+  reporting = {
+    enabled: true,
+  };
+  analytics = {
+    enabled: true,
+  };
+  googleAnalyticsId: undefined;
+  googleAnalytics4Id: undefined;
+  googleAnalytics4SendManualPageViews = false;
+  rudderstackWriteKey: undefined;
+  rudderstackDataPlaneUrl: undefined;
+  rudderstackSdkUrl: undefined;
+  rudderstackConfigUrl: undefined;
+  rudderstackIntegrationsUrl: undefined;
+  sqlConnectionLimits = {
+    maxOpenConns: 100,
+    maxIdleConns: 100,
+    connMaxLifetime: 14400,
+  };
+
+  tokenExpirationDayLimit: undefined;
+  disableFrontendSandboxForPlugins: string[] = [];
+
+  constructor(options: GrafanaBootConfig) {
+    this.bootData = options.bootData;
+
+    const defaults = {
+      datasources: {},
+      windowTitlePrefix: 'Grafana - ',
+      panels: {},
+      newPanelTitle: 'Panel Title',
+      playlist_timespan: '1m',
+      unsaved_changes_warning: true,
+      appUrl: '',
+      appSubUrl: '',
+      buildInfo: {
+        version: '1.0',
+        commit: '1',
+        env: 'production',
+      },
+      viewersCanEdit: false,
+      editorsCanAdmin: false,
+      disableSanitizeHtml: false,
+    };
+
+    merge(this, defaults, options);
+
+    this.buildInfo = options.buildInfo || defaults.buildInfo;
+
+    if (this.dateFormats) {
+      systemDateFormats.update(this.dateFormats);
+    }
+
+    if (this.buildInfo.env === 'development') {
+      overrideFeatureTogglesFromUrl(this);
+    }
+
+    overrideFeatureTogglesFromLocalStorage(this);
+
+    if (this.featureToggles.disableAngular) {
+      this.angularSupportEnabled = false;
+    }
+
+    // Creating theme after applying feature toggle overrides in case we need to toggle anything
+    this.theme2 = getThemeById(this.bootData.user.theme);
+    this.bootData.user.lightTheme = this.theme2.isLight;
+    this.theme = this.theme2.v1;
+  }
+}
+
+// localstorage key: grafana.featureToggles
+// example value: panelEditor=1,panelInspector=1
+function overrideFeatureTogglesFromLocalStorage(config: GrafanaBootConfig) {
+  const featureToggles = config.featureToggles;
+  const localStorageKey = 'grafana.featureToggles';
+  const localStorageValue = window.localStorage.getItem(localStorageKey);
+  if (localStorageValue) {
+    const features = localStorageValue.split(',');
+    for (const feature of features) {
+      const [featureName, featureValue] = feature.split('=');
+      const toggleState = featureValue === 'true' || featureValue === '1';
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      featureToggles[featureName as keyof FeatureToggles] = toggleState;
+      console.log(`Setting feature toggle ${featureName} = ${toggleState} via localstorage`);
+    }
+  }
+}
+
+function overrideFeatureTogglesFromUrl(config: GrafanaBootConfig) {
+  if (window.location.href.indexOf('__feature') === -1) {
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  params.forEach((value, key) => {
+    if (key.startsWith('__feature.')) {
+      const featureToggles = config.featureToggles as Record<string, boolean>;
+      const featureName = key.substring(10);
+      const toggleState = value === 'true' || value === ''; // browser rewrites true as ''
+      if (toggleState !== featureToggles[key]) {
+        featureToggles[featureName] = toggleState;
+        console.log(`Setting feature toggle ${featureName} = ${toggleState} via url`);
+      }
+    }
+  });
+}
+
+const bootData = (window as any).grafanaBootData || {
+  settings: {},
+  user: {},
+  navTree: [],
+};
+
+const options = bootData.settings;
+options.bootData = bootData;
+
+/**
+ * Use this to access the {@link GrafanaBootConfig} for the current running Grafana instance.
+ *
+ * @public
+ */
+export const config = new GrafanaBootConfig(options);
+
+
+===== FILE pkg/api/dtos/frontend_settings.go (after PR) =====
+package dtos
+
+import (
+	"github.com/grafana/grafana/pkg/plugins"
+	"github.com/grafana/grafana/pkg/setting"
+)
+
+type FrontendSettingsAuthDTO struct {
+	OAuthSkipOrgRoleUpdateSync  bool `json:"OAuthSkipOrgRoleUpdateSync"`
+	SAMLSkipOrgRoleSync         bool `json:"SAMLSkipOrgRoleSync"`
+	LDAPSkipOrgRoleSync         bool `json:"LDAPSkipOrgRoleSync"`
+	GoogleSkipOrgRoleSync       bool `json:"GoogleSkipOrgRoleSync"`
+	GenericOAuthSkipOrgRoleSync bool `json:"GenericOAuthSkipOrgRoleSync"`
+	JWTAuthSkipOrgRoleSync      bool `json:"JWTAuthSkipOrgRoleSync"`
+	GrafanaComSkipOrgRoleSync   bool `json:"GrafanaComSkipOrgRoleSync"`
+	AzureADSkipOrgRoleSync      bool `json:"AzureADSkipOrgRoleSync"`
+	GithubSkipOrgRoleSync       bool `json:"GithubSkipOrgRoleSync"`
+	GitLabSkipOrgRoleSync       bool `json:"GitLabSkipOrgRoleSync"`
+	OktaSkipOrgRoleSync         bool `json:"OktaSkipOrgRoleSync"`
+	AuthProxyEnableLoginToken   bool `json:"AuthProxyEnableLoginToken"`
+}
+
+type FrontendSettingsBuildInfoDTO struct {
+	HideVersion   bool   `json:"hideVersion"`
+	Version       string `json:"version"`
+	Commit        string `json:"commit"`
+	Buildstamp    int64  `json:"buildstamp"`
+	Edition       string `json:"edition"`
+	LatestVersion string `json:"latestVersion"`
+	HasUpdate     bool   `json:"hasUpdate"`
+	Env           string `json:"env"`
+}
+
+type FrontendSettingsLicenseInfoDTO struct {
+	Expiry          int64           `json:"expiry"`
+	StateInfo       string          `json:"stateInfo"`
+	LicenseUrl      string          `json:"licenseUrl"`
+	Edition         string          `json:"edition"`
+	EnabledFeatures map[string]bool `json:"enabledFeatures"`
+
+	// Enterprise-only
+	TrialExpiry *int64  `json:"trialExpiry,omitempty"`
+	AppUrl      *string `json:"appUrl,omitempty"`
+}
+
+type FrontendSettingsAzureDTO struct {
+	Cloud                   string `json:"cloud"`
+	ManagedIdentityEnabled  bool   `json:"managedIdentityEnabled"`
+	WorkloadIdentityEnabled bool   `json:"workloadIdentityEnabled"`
+	UserIdentityEnabled     bool   `json:"userIdentityEnabled"`
+}
+
+type FrontendSettingsCachingDTO struct {
+	Enabled bool `json:"enabled"`
+}
+
+type FrontendSettingsRecordedQueriesDTO struct {
+	Enabled bool `json:"enabled"`
+}
+
+type FrontendSettingsReportingDTO struct {
+	Enabled bool `json:"enabled"`
+}
+
+type FrontendSettingsAnalyticsDTO struct {
+	Enabled bool `json:"enabled"`
+}
+
+type FrontendSettingsUnifiedAlertingDTO struct {
+	MinInterval              string `json:"minInterval"`
+	AlertStateHistoryBackend string `json:"alertStateHistoryBackend,omitempty"`
+	AlertStateHistoryPrimary string `json:"alertStateHistoryPrimary,omitempty"`
+}
+
+// Enterprise-only
+type FrontendSettingsLicensingDTO struct {
+	Slug                   *string `json:"slug,omitempty"`
+	LimitBy                *string `json:"limitBy,omitempty"`
+	IncludedUsers          *int64  `json:"includedUsers,omitempty"`
+	LicenseExpiry          *int64  `json:"licenseExpiry,omitempty"`
+	LicenseExpiryWarnDays  *int64  `json:"licenseExpiryWarnDays,omitempty"`
+	TokenExpiry            *int64  `json:"tokenExpiry,omitempty"`
+	IsTrial                *bool   `json:"isTrial,omitempty"`
+	TokenExpiryWarnDays    *int64  `json:"tokenExpiryWarnDays,omitempty"`
+	UsageBilling           *bool   `json:"usageBilling,omitempty"`
+	ActiveAdminsAndEditors *int64  `json:"activeAdminsAndEditors,omitempty"`
+	ActiveViewers          *int64  `json:"activeViewers,omitempty"`
+	ActiveUsers            *int64  `json:"ActiveUsers,omitempty"`
+}
+
+// Enterprise-only
+type FrontendSettingsFooterConfigItemDTO struct {
+	Text   string `json:"text"`
+	Url    string `json:"url"`
+	Icon   string `json:"icon"`
+	Target string `json:"blank"`
+}
+
+// Enterprise-only
+type FrontendSettingsPublicDashboardConfigDTO struct {
+	FooterHide     bool   `json:"footerHide"`
+	FooterText     string `json:"footerText"`
+	FooterLogo     string `json:"footerLogo"`
+	FooterLink     string `json:"footerLink"`
+	HeaderLogoHide bool   `json:"headerLogoHide"`
+}
+
+// Enterprise-only
+type FrontendSettingsWhitelabelingDTO struct {
+	Links              []FrontendSettingsFooterConfigItemDTO     `json:"links"`
+	LoginTitle         string                                    `json:"loginTitle"`
+	AppTitle           *string                                   `json:"appTitle,omitempty"`
+	LoginLogo          *string                                   `json:"loginLogo,omitempty"`
+	MenuLogo           *string                                   `json:"menuLogo,omitempty"`
+	LoginBackground    *string                                   `json:"loginBackground,omitempty"`
+	LoginSubtitle      *string                                   `json:"loginSubtitle,omitempty"`
+	LoginBoxBackground *string                                   `json:"loginBoxBackground,omitempty"`
+	LoadingLogo        *string                                   `json:"loadingLogo,omitempty"`
+	HideEdition        *bool                                     `json:"hideEdition,omitempty"`
+	PublicDashboard    *FrontendSettingsPublicDashboardConfigDTO `json:"publicDashboard,omitempty"`
+}
+
+type FrontendSettingsSqlConnectionLimitsDTO struct {
+	MaxOpenConns    int `json:"maxOpenConns"`
+	MaxIdleConns    int `json:"maxIdleConns"`
+	ConnMaxLifetime int `json:"connMaxLifetime"`
+}
+
+type FrontendSettingsDTO struct {
+	DefaultDatasource          string                           `json:"defaultDatasource"`
+	Datasources                map[string]plugins.DataSourceDTO `json:"datasources"`
+	MinRefreshInterval         string                           `json:"minRefreshInterval"`
+	Panels                     map[string]plugins.PanelDTO      `json:"panels"`
+	Apps                       map[string]*plugins.AppDTO       `json:"apps"`
+	AppUrl                     string                           `json:"appUrl"`
+	AppSubUrl                  string                           `json:"appSubUrl"`
+	AllowOrgCreate             bool                             `json:"allowOrgCreate"`
+	AuthProxyEnabled           bool                             `json:"authProxyEnabled"`
+	LdapEnabled                bool                             `json:"ldapEnabled"`
+	JwtHeaderName              string                           `json:"jwtHeaderName"`
+	JwtUrlLogin                bool                             `json:"jwtUrlLogin"`
+	AlertingEnabled            bool                             `json:"alertingEnabled"`
+	AlertingErrorOrTimeout     string                           `json:"alertingErrorOrTimeout"`
+	AlertingNoDataOrNullValues string                           `json:"alertingNoDataOrNullValues"`
+	AlertingMinInterval        int64                            `json:"alertingMinInterval"`
+	LiveEnabled                bool                             `json:"liveEnabled"`
+	AutoAssignOrg              bool                             `json:"autoAssignOrg"`
+
+	VerifyEmailEnabled  bool `json:"verifyEmailEnabled"`
+	SigV4AuthEnabled    bool `json:"sigV4AuthEnabled"`
+	AzureAuthEnabled    bool `json:"azureAuthEnabled"`
+	RbacEnabled         bool `json:"rbacEnabled"`
+	ExploreEnabled      bool `json:"exploreEnabled"`
+	HelpEnabled         bool `json:"helpEnabled"`
+	ProfileEnabled      bool `json:"profileEnabled"`
+	NewsFeedEnabled     bool `json:"newsFeedEnabled"`
+	QueryHistoryEnabled bool `json:"queryHistoryEnabled"`
+
+	GoogleAnalyticsId                   string `json:"googleAnalyticsId"`
+	GoogleAnalytics4Id                  string `json:"googleAnalytics4Id"`
+	GoogleAnalytics4SendManualPageViews bool   `json:"GoogleAnalytics4SendManualPageViews"`
+
+	RudderstackWriteKey        string `json:"rudderstackWriteKey"`
+	RudderstackDataPlaneUrl    string `json:"rudderstackDataPlaneUrl"`
+	RudderstackSdkUrl          string `json:"rudderstackSdkUrl"`
+	RudderstackConfigUrl       string `json:"rudderstackConfigUrl"`
+	RudderstackIntegrationsUrl string `json:"rudderstackIntegrationsUrl"`
+
+	FeedbackLinksEnabled                bool     `json:"feedbackLinksEnabled"`
+	ApplicationInsightsConnectionString string   `json:"applicationInsightsConnectionString"`
+	ApplicationInsightsEndpointUrl      string   `json:"applicationInsightsEndpointUrl"`
+	DisableLoginForm                    bool     `json:"disableLoginForm"`
+	DisableUserSignUp                   bool     `json:"disableUserSignUp"`
+	LoginHint                           string   `json:"loginHint"`
+	PasswordHint                        string   `json:"passwordHint"`
+	ExternalUserMngInfo                 string   `json:"externalUserMngInfo"`
+	ExternalUserMngLinkUrl              string   `json:"externalUserMngLinkUrl"`
+	ExternalUserMngLinkName             string   `json:"externalUserMngLinkName"`
+	ViewersCanEdit                      bool     `json:"viewersCanEdit"`
+	AngularSupportEnabled               bool     `json:"angularSupportEnabled"`
+	EditorsCanAdmin                     bool     `json:"editorsCanAdmin"`
+	DisableSanitizeHtml                 bool     `json:"disableSanitizeHtml"`
+	TrustedTypesDefaultPolicyEnabled    bool     `json:"trustedTypesDefaultPolicyEnabled"`
+	CSPReportOnlyEnabled                bool     `json:"cspReportOnlyEnabled"`
+	DisableFrontendSandboxForPlugins    []string `json:"disableFrontendSandboxForPlugins"`
+
+	Auth FrontendSettingsAuthDTO `json:"auth"`
+
+	BuildInfo FrontendSettingsBuildInfoDTO `json:"buildInfo"`
+
+	LicenseInfo FrontendSettingsLicenseInfoDTO `json:"licenseInfo"`
+
+	FeatureToggles                   map[string]bool                `json:"featureToggles"`
+	AnonymousEnabled                 bool                           `json:"anonymousEnabled"`
+	AnonymousDeviceLimit             int64                          `json:"anonymousDeviceLimit"`
+	RendererAvailable                bool                           `json:"rendererAvailable"`
+	RendererVersion                  string                         `json:"rendererVersion"`
+	SecretsManagerPluginEnabled      bool                           `json:"secretsManagerPluginEnabled"`
+	Http2Enabled                     bool                           `json:"http2Enabled"`
+	GrafanaJavascriptAgent           setting.GrafanaJavascriptAgent `json:"grafanaJavascriptAgent"`
+	PluginCatalogURL                 string                         `json:"pluginCatalogURL"`
+	PluginAdminEnabled               bool                           `json:"pluginAdminEnabled"`
+	PluginAdminExternalManageEnabled bool                           `json:"pluginAdminExternalManageEnabled"`
+	PluginCatalogHiddenPlugins       []string                       `json:"pluginCatalogHiddenPlugins"`
+	ExpressionsEnabled               bool                           `json:"expressionsEnabled"`
+	AwsAllowedAuthProviders          []string                       `json:"awsAllowedAuthProviders"`
+	AwsAssumeRoleEnabled             bool                           `json:"awsAssumeRoleEnabled"`
+	SupportBundlesEnabled            bool                           `json:"supportBundlesEnabled"`
+	SnapshotEnabled                  bool                           `json:"snapshotEnabled"`
+	SecureSocksDSProxyEnabled        bool                           `json:"secureSocksDSProxyEnabled"`
+
+	Azure FrontendSettingsAzureDTO `json:"azure"`
+
+	Caching                 FrontendSettingsCachingDTO         `json:"caching"`
+	RecordedQueries         FrontendSettingsRecordedQueriesDTO `json:"recordedQueries"`
+	Reporting               FrontendSettingsReportingDTO       `json:"reporting"`
+	Analytics               FrontendSettingsAnalyticsDTO       `json:"analytics"`
+	UnifiedAlertingEnabled  bool                               `json:"unifiedAlertingEnabled"`
+	UnifiedAlerting         FrontendSettingsUnifiedAlertingDTO `json:"unifiedAlerting"`
+	Oauth                   map[string]any                     `json:"oauth"`
+	SamlEnabled             bool                               `json:"samlEnabled"`
+	SamlName                string                             `json:"samlName"`
+	TokenExpirationDayLimit int                                `json:"tokenExpirationDayLimit"`
+	SharedWithMeFolderUID   string                             `json:"sharedWithMeFolderUID"`
+
+	GeomapDefaultBaseLayerConfig *map[string]any `json:"geomapDefaultBaseLayerConfig,omitempty"`
+	GeomapDisableCustomBaseLayer bool            `json:"geomapDisableCustomBaseLayer"`
+
+	PublicDashboardAccessToken string `json:"publicDashboardAccessToken"`
+
+	DateFormats setting.DateFormats `json:"dateFormats,omitempty"`
+
+	LoginError string `json:"loginError,omitempty"`
+
+	// The K8s namespace to use for this user
+	Namespace string `json:"namespace,omitempty"`
+
+	PluginsCDNBaseURL string `json:"pluginsCDNBaseURL,omitempty"`
+
+	SqlConnectionLimits FrontendSettingsSqlConnectionLimitsDTO `json:"sqlConnectionLimits"`
+
+	// Enterprise
+	Licensing     *FrontendSettingsLicensingDTO     `json:"licensing,omitempty"`
+	Whitelabeling *FrontendSettingsWhitelabelingDTO `json:"whitelabeling,omitempty"`
+}
+
+
+===== FILE pkg/api/frontendsettings.go (after PR) =====
+package api
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+
+	"github.com/grafana/grafana/pkg/api/dtos"
+	"github.com/grafana/grafana/pkg/plugins"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
+	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
+	"github.com/grafana/grafana/pkg/services/datasources"
+	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/folder"
+	"github.com/grafana/grafana/pkg/services/licensing"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginsettings"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
+	"github.com/grafana/grafana/pkg/services/secrets/kvstore"
+	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/tsdb/grafanads"
+	"github.com/grafana/grafana/pkg/util"
+)
+
+func (hs *HTTPServer) GetFrontendSettings(c *contextmodel.ReqContext) {
+	settings, err := hs.getFrontendSettings(c)
+	if err != nil {
+		c.JsonApiErr(400, "Failed to get frontend settings", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, settings)
+}
+
+// getFrontendSettings returns a json object with all the settings needed for front end initialisation.
+func (hs *HTTPServer) getFrontendSettings(c *contextmodel.ReqContext) (*dtos.FrontendSettingsDTO, error) {
+	availablePlugins, err := hs.availablePlugins(c.Req.Context(), c.SignedInUser.GetOrgID())
+	if err != nil {
+		return nil, err
+	}
+
+	apps := make(map[string]*plugins.AppDTO, 0)
+	for _, ap := range availablePlugins[plugins.TypeApp] {
+		apps[ap.Plugin.ID] = newAppDTO(
+			ap.Plugin,
+			ap.Settings,
+		)
+	}
+
+	dataSources, err := hs.getFSDataSources(c, availablePlugins)
+	if err != nil {
+		return nil, err
+	}
+
+	defaultDS := "-- Grafana --"
+	for n, ds := range dataSources {
+		if ds.IsDefault {
+			defaultDS = n
+		}
+	}
+
+	panels := make(map[string]plugins.PanelDTO)
+	for _, ap := range availablePlugins[plugins.TypePanel] {
+		panel := ap.Plugin
+		if panel.State == plugins.ReleaseStateAlpha && !hs.Cfg.PluginsEnableAlpha {
+			continue
+		}
+
+		if panel.ID == "datagrid" && !hs.Features.IsEnabled(c.Req.Context(), featuremgmt.FlagEnableDatagridEditing) {
+			continue
+		}
+
+		panels[panel.ID] = plugins.PanelDTO{
+			ID:            panel.ID,
+			Name:          panel.Name,
+			AliasIDs:      panel.AliasIDs,
+			Info:          panel.Info,
+			Module:        panel.Module,
+			BaseURL:       panel.BaseURL,
+			SkipDataQuery: panel.SkipDataQuery,
+			HideFromList:  panel.HideFromList,
+			ReleaseState:  string(panel.State),
+			Signature:     string(panel.Signature),
+			Sort:          getPanelSort(panel.ID),
+			Angular:       panel.Angular,
+		}
+	}
+
+	hideVersion := hs.Cfg.AnonymousHideVersion && !c.IsSignedIn
+	version := setting.BuildVersion
+	commit := setting.BuildCommit
+	buildstamp := setting.BuildStamp
+
+	if hideVersion {
+		version = ""
+		commit = ""
+		buildstamp = 0
+	}
+
+	hasAccess := accesscontrol.HasAccess(hs.AccessControl, c)
+	secretsManagerPluginEnabled := kvstore.EvaluateRemoteSecretsPlugin(c.Req.Context(), hs.secretsPluginManager, hs.Cfg) == nil
+	trustedTypesDefaultPolicyEnabled := (hs.Cfg.CSPEnabled && strings.Contains(hs.Cfg.CSPTemplate, "require-trusted-types-for")) || (hs.Cfg.CSPReportOnlyEnabled && strings.Contains(hs.Cfg.CSPReportOnlyTemplate, "require-trusted-types-for"))
+
+	frontendSettings := &dtos.FrontendSettingsDTO{
+		DefaultDatasource:                   defaultDS,
+		Datasources:                         dataSources,
+		MinRefreshInterval:                  setting.MinRefreshInterval,
+		Panels:                              panels,
+		Apps:                                apps,
+		AppUrl:                              hs.Cfg.AppURL,
+		AppSubUrl:                           hs.Cfg.AppSubURL,
+		AllowOrgCreate:                      (setting.AllowUserOrgCreate && c.IsSignedIn) || c.IsGrafanaAdmin,
+		AuthProxyEnabled:                    hs.Cfg.AuthProxyEnabled,
+		LdapEnabled:                         hs.Cfg.LDAPAuthEnabled,
+		JwtHeaderName:                       hs.Cfg.JWTAuthHeaderName,
+		JwtUrlLogin:                         hs.Cfg.JWTAuthURLLogin,
+		AlertingErrorOrTimeout:              setting.AlertingErrorOrTimeout,
+		AlertingNoDataOrNullValues:          setting.AlertingNoDataOrNullValues,
+		AlertingMinInterval:                 setting.AlertingMinInterval,
+		LiveEnabled:                         hs.Cfg.LiveMaxConnections != 0,
+		AutoAssignOrg:                       hs.Cfg.AutoAssignOrg,
+		VerifyEmailEnabled:                  setting.VerifyEmailEnabled,
+		SigV4AuthEnabled:                    setting.SigV4AuthEnabled,
+		AzureAuthEnabled:                    setting.AzureAuthEnabled,
+		RbacEnabled:                         true,
+		ExploreEnabled:                      setting.ExploreEnabled,
+		HelpEnabled:                         setting.HelpEnabled,
+		ProfileEnabled:                      setting.ProfileEnabled,
+		NewsFeedEnabled:                     setting.NewsFeedEnabled,
+		QueryHistoryEnabled:                 hs.Cfg.QueryHistoryEnabled,
+		GoogleAnalyticsId:                   hs.Cfg.GoogleAnalyticsID,
+		GoogleAnalytics4Id:                  hs.Cfg.GoogleAnalytics4ID,
+		GoogleAnalytics4SendManualPageViews: hs.Cfg.GoogleAnalytics4SendManualPageViews,
+		RudderstackWriteKey:                 hs.Cfg.RudderstackWriteKey,
+		RudderstackDataPlaneUrl:             hs.Cfg.RudderstackDataPlaneURL,
+		RudderstackSdkUrl:                   hs.Cfg.RudderstackSDKURL,
+		RudderstackConfigUrl:                hs.Cfg.RudderstackConfigURL,
+		RudderstackIntegrationsUrl:          hs.Cfg.RudderstackIntegrationsURL,
+		FeedbackLinksEnabled:                hs.Cfg.FeedbackLinksEnabled,
+		ApplicationInsightsConnectionString: hs.Cfg.ApplicationInsightsConnectionString,
+		ApplicationInsightsEndpointUrl:      hs.Cfg.ApplicationInsightsEndpointUrl,
+		DisableLoginForm:                    hs.Cfg.DisableLoginForm,
+		DisableUserSignUp:                   !setting.AllowUserSignUp,
+		LoginHint:                           setting.LoginHint,
+		PasswordHint:                        setting.PasswordHint,
+		ExternalUserMngInfo:                 setting.ExternalUserMngInfo,
+		ExternalUserMngLinkUrl:              setting.ExternalUserMngLinkUrl,
+		ExternalUserMngLinkName:             setting.ExternalUserMngLinkName,
+		ViewersCanEdit:                      hs.Cfg.ViewersCanEdit,
+		AngularSupportEnabled:               hs.Cfg.AngularSupportEnabled,
+		EditorsCanAdmin:                     hs.Cfg.EditorsCanAdmin,
+		DisableSanitizeHtml:                 hs.Cfg.DisableSanitizeHtml,
+		TrustedTypesDefaultPolicyEnabled:    trustedTypesDefaultPolicyEnabled,
+		CSPReportOnlyEnabled:                hs.Cfg.CSPReportOnlyEnabled,
+		DateFormats:                         hs.Cfg.DateFormats,
+		SecureSocksDSProxyEnabled:           hs.Cfg.SecureSocksDSProxy.Enabled && hs.Cfg.SecureSocksDSProxy.ShowUI,
+		DisableFrontendSandboxForPlugins:    hs.Cfg.DisableFrontendSandboxForPlugins,
+		PublicDashboardAccessToken:          c.PublicDashboardAccessToken,
+		SharedWithMeFolderUID:               folder.SharedWithMeFolderUID,
+
+		Auth: dtos.FrontendSettingsAuthDTO{
+			OAuthSkipOrgRoleUpdateSync:  hs.Cfg.OAuthSkipOrgRoleUpdateSync,
+			SAMLSkipOrgRoleSync:         hs.Cfg.SAMLSkipOrgRoleSync,
+			LDAPSkipOrgRoleSync:         hs.Cfg.LDAPSkipOrgRoleSync,
+			GoogleSkipOrgRoleSync:       hs.Cfg.GoogleSkipOrgRoleSync,
+			JWTAuthSkipOrgRoleSync:      hs.Cfg.JWTAuthSkipOrgRoleSync,
+			GrafanaComSkipOrgRoleSync:   hs.Cfg.GrafanaComSkipOrgRoleSync,
+			GenericOAuthSkipOrgRoleSync: hs.Cfg.GenericOAuthSkipOrgRoleSync,
+			AzureADSkipOrgRoleSync:      hs.Cfg.AzureADSkipOrgRoleSync,
+			GithubSkipOrgRoleSync:       hs.Cfg.GitHubSkipOrgRoleSync,
+			GitLabSkipOrgRoleSync:       hs.Cfg.GitLabSkipOrgRoleSync,
+			OktaSkipOrgRoleSync:         hs.Cfg.OktaSkipOrgRoleSync,
+			AuthProxyEnableLoginToken:   hs.Cfg.AuthProxyEnableLoginToken,
+		},
+
+		BuildInfo: dtos.FrontendSettingsBuildInfoDTO{
+			HideVersion:   hideVersion,
+			Version:       version,
+			Commit:        commit,
+			Buildstamp:    buildstamp,
+			Edition:       hs.License.Edition(),
+			LatestVersion: hs.grafanaUpdateChecker.LatestVersion(),
+			HasUpdate:     hs.grafanaUpdateChecker.UpdateAvailable(),
+			Env:           setting.Env,
+		},
+
+		LicenseInfo: dtos.FrontendSettingsLicenseInfoDTO{
+			Expiry:          hs.License.Expiry(),
+			StateInfo:       hs.License.StateInfo(),
+			LicenseUrl:      hs.License.LicenseURL(hasAccess(licensing.PageAccess)),
+			Edition:         hs.License.Edition(),
+			EnabledFeatures: hs.License.EnabledFeatures(),
+		},
+
+		FeatureToggles:                   hs.Features.GetEnabled(c.Req.Context()),
+		AnonymousEnabled:                 hs.Cfg.AnonymousEnabled,
+		AnonymousDeviceLimit:             hs.Cfg.AnonymousDeviceLimit,
+		RendererAvailable:                hs.RenderService.IsAvailable(c.Req.Context()),
+		RendererVersion:                  hs.RenderService.Version(),
+		SecretsManagerPluginEnabled:      secretsManagerPluginEnabled,
+		Http2Enabled:                     hs.Cfg.Protocol == setting.HTTP2Scheme,
+		GrafanaJavascriptAgent:           hs.Cfg.GrafanaJavascriptAgent,
+		PluginCatalogURL:                 hs.Cfg.PluginCatalogURL,
+		PluginAdminEnabled:               hs.Cfg.PluginAdminEnabled,
+		PluginAdminExternalManageEnabled: hs.Cfg.PluginAdminEnabled && hs.Cfg.PluginAdminExternalManageEnabled,
+		PluginCatalogHiddenPlugins:       hs.Cfg.PluginCatalogHiddenPlugins,
+		ExpressionsEnabled:               hs.Cfg.ExpressionsEnabled,
+		AwsAllowedAuthProviders:          hs.Cfg.AWSAllowedAuthProviders,
+		AwsAssumeRoleEnabled:             hs.Cfg.AWSAssumeRoleEnabled,
+		SupportBundlesEnabled:            isSupportBundlesEnabled(hs),
+
+		Azure: dtos.FrontendSettingsAzureDTO{
+			Cloud:                   hs.Cfg.Azure.Cloud,
+			ManagedIdentityEnabled:  hs.Cfg.Azure.ManagedIdentityEnabled,
+			WorkloadIdentityEnabled: hs.Cfg.Azure.WorkloadIdentityEnabled,
+			UserIdentityEnabled:     hs.Cfg.Azure.UserIdentityEnabled,
+		},
+
+		Caching: dtos.FrontendSettingsCachingDTO{
+			Enabled: hs.Cfg.SectionWithEnvOverrides("caching").Key("enabled").MustBool(true),
+		},
+		RecordedQueries: dtos.FrontendSettingsRecordedQueriesDTO{
+			Enabled: hs.Cfg.SectionWithEnvOverrides("recorded_queries").Key("enabled").MustBool(true),
+		},
+		Reporting: dtos.FrontendSettingsReportingDTO{
+			Enabled: hs.Cfg.SectionWithEnvOverrides("reporting").Key("enabled").MustBool(true),
+		},
+		Analytics: dtos.FrontendSettingsAnalyticsDTO{
+			Enabled: hs.Cfg.SectionWithEnvOverrides("analytics").Key("enabled").MustBool(true),
+		},
+
+		UnifiedAlerting: dtos.FrontendSettingsUnifiedAlertingDTO{
+			MinInterval: hs.Cfg.UnifiedAlerting.MinInterval.String(),
+		},
+
+		Oauth:                   hs.getEnabledOAuthProviders(),
+		SamlEnabled:             hs.samlEnabled(),
+		SamlName:                hs.samlName(),
+		TokenExpirationDayLimit: hs.Cfg.SATokenExpirationDayLimit,
+
+		SnapshotEnabled: hs.Cfg.SnapshotEnabled,
+
+		SqlConnectionLimits: dtos.FrontendSettingsSqlConnectionLimitsDTO{
+			MaxOpenConns:    hs.Cfg.SqlDatasourceMaxOpenConnsDefault,
+			MaxIdleConns:    hs.Cfg.SqlDatasourceMaxIdleConnsDefault,
+			ConnMaxLifetime: hs.Cfg.SqlDatasourceMaxConnLifetimeDefault,
+		},
+	}
+
+	if hs.Cfg.UnifiedAlerting.StateHistory.Enabled {
+		frontendSettings.UnifiedAlerting.AlertStateHistoryBackend = hs.Cfg.UnifiedAlerting.StateHistory.Backend
+		frontendSettings.UnifiedAlerting.AlertStateHistoryPrimary = hs.Cfg.UnifiedAlerting.StateHistory.MultiPrimary
+	}
+
+	if hs.Cfg.UnifiedAlerting.Enabled != nil {
+		frontendSettings.UnifiedAlertingEnabled = *hs.Cfg.UnifiedAlerting.Enabled
+	}
+
+	if setting.AlertingEnabled != nil {
+		frontendSettings.AlertingEnabled = *setting.AlertingEnabled
+	}
+
+	if hs.pluginsCDNService != nil && hs.pluginsCDNService.IsEnabled() {
+		cdnBaseURL, err := hs.pluginsCDNService.BaseURL()
+		if err != nil {
+			return nil, fmt.Errorf("plugins cdn base url: %w", err)
+		}
+		frontendSettings.PluginsCDNBaseURL = cdnBaseURL
+	}
+
+	if hs.Cfg.GeomapDefaultBaseLayerConfig != nil {
+		frontendSettings.GeomapDefaultBaseLayerConfig = &hs.Cfg.GeomapDefaultBaseLayerConfig
+	}
+
+	if !hs.Cfg.GeomapEnableCustomBaseLayers {
+		frontendSettings.GeomapDisableCustomBaseLayer = true
+	}
+
+	// Set the kubernetes namespace
+	frontendSettings.Namespace = hs.namespacer(c.SignedInUser.OrgID)
+
+	return frontendSettings, nil
+}
+
+func isSupportBundlesEnabled(hs *HTTPServer) bool {
+	return hs.Cfg.SectionWithEnvOverrides("support_bundles").Key("enabled").MustBool(true)
+}
+
+func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlugins AvailablePlugins) (map[string]plugins.DataSourceDTO, error) {
+	orgDataSources := make([]*datasources.DataSource, 0)
+	if c.SignedInUser.GetOrgID() != 0 {
+		query := datasources.GetDataSourcesQuery{OrgID: c.SignedInUser.GetOrgID(), DataSourceLimit: hs.Cfg.DataSourceLimit}
+		dataSources, err := hs.DataSourcesService.GetDataSources(c.Req.Context(), &query)
+		if err != nil {
+			return nil, err
+		}
+
+		if c.IsPublicDashboardView() {
+			// If RBAC is enabled, it will filter out all datasources for a public user, so we need to skip it
+			orgDataSources = dataSources
+		} else {
+			filtered, err := hs.dsGuardian.New(c.SignedInUser.OrgID, c.SignedInUser).FilterDatasourcesByQueryPermissions(dataSources)
+			if err != nil {
+				return nil, err
+			}
+			orgDataSources = filtered
+		}
+	}
+
+	dataSources := make(map[string]plugins.DataSourceDTO)
+
+	for _, ds := range orgDataSources {
+		url := ds.URL
+
+		if ds.Access == datasources.DS_ACCESS_PROXY {
+			url = "/api/datasources/proxy/uid/" + ds.UID
+		}
+
+		dsDTO := plugins.DataSourceDTO{
+			ID:        ds.ID,
+			UID:       ds.UID,
+			Type:      ds.Type,
+			Name:      ds.Name,
+			URL:       url,
+			IsDefault: ds.IsDefault,
+			Access:    string(ds.Access),
+			ReadOnly:  ds.ReadOnly,
+		}
+
+		ap, exists := availablePlugins.Get(plugins.TypeDataSource, ds.Type)
+		if !exists {
+			c.Logger.Error("Could not find plugin definition for data source", "datasource_type", ds.Type)
+			continue
+		}
+		plugin := ap.Plugin
+		dsDTO.Type = plugin.ID
+		dsDTO.Preload = plugin.Preload
+		dsDTO.Module = plugin.Module
+		dsDTO.PluginMeta = &plugins.PluginMetaDTO{
+			JSONData:  plugin.JSONData,
+			Signature: plugin.Signature,
+			Module:    plugin.Module,
+			BaseURL:   plugin.BaseURL,
+			Angular:   plugin.Angular,
+		}
+
+		if ds.JsonData == nil {
+			dsDTO.JSONData = make(map[string]any)
+		} else {
+			dsDTO.JSONData = ds.JsonData.MustMap()
+		}
+
+		if ds.Access == datasources.DS_ACCESS_DIRECT {
+			if ds.BasicAuth {
+				password, err := hs.DataSourcesService.DecryptedBasicAuthPassword(c.Req.Context(), ds)
+				if err != nil {
+					return nil, err
+				}
+
+				dsDTO.BasicAuth = util.GetBasicAuthHeader(
+					ds.BasicAuthUser,
+					password,
+				)
+			}
+			if ds.WithCredentials {
+				dsDTO.WithCredentials = ds.WithCredentials
+			}
+
+			if ds.Type == datasources.DS_INFLUXDB_08 {
+				password, err := hs.DataSourcesService.DecryptedPassword(c.Req.Context(), ds)
+				if err != nil {
+					return nil, err
+				}
+
+				dsDTO.Username = ds.User
+				dsDTO.Password = password
+				dsDTO.URL = url + "/db/" + ds.Database
+			}
+
+			if ds.Type == datasources.DS_INFLUXDB {
+				password, err := hs.DataSourcesService.DecryptedPassword(c.Req.Context(), ds)
+				if err != nil {
+					return nil, err
+				}
+
+				dsDTO.Username = ds.User
+				dsDTO.Password = password
+				dsDTO.URL = url
+			}
+		}
+
+		// Update `jsonData.database` for outdated provisioned SQL datasources created WITHOUT the `jsonData` object in their configuration.
+		// In these cases, the `Database` value is defined (if at all) on the root level of the provisioning config object.
+		// This is done for easier warning/error checking on the front end.
+		if (ds.Type == datasources.DS_MSSQL) || (ds.Type == datasources.DS_MYSQL) || (ds.Type == datasources.DS_POSTGRES) {
+			// Only update if the value isn't already assigned.
+			if dsDTO.JSONData["database"] == nil || dsDTO.JSONData["database"] == "" {
+				dsDTO.JSONData["database"] = ds.Database
+			}
+		}
+
+		if (ds.Type == datasources.DS_INFLUXDB) || (ds.Type == datasources.DS_ES) {
+			dsDTO.Database = ds.Database
+		}
+
+		if ds.Type == datasources.DS_PROMETHEUS {
+			// add unproxied server URL for link to Prometheus web UI
+			ds.JsonData.Set("directUrl", ds.URL)
+		}
+
+		dataSources[ds.Name] = dsDTO
+	}
+
+	// add data sources that are built in (meaning they are not added via data sources page, nor have any entry in
+	// the datasource table)
+	for _, ds := range hs.pluginStore.Plugins(c.Req.Context(), plugins.TypeDataSource) {
+		if ds.BuiltIn {
+			dto := plugins.DataSourceDTO{
+				Type:     string(ds.Type),
+				Name:     ds.Name,
+				JSONData: make(map[string]any),
+				PluginMeta: &plugins.PluginMetaDTO{
+					JSONData:  ds.JSONData,
+					Signature: ds.Signature,
+					Module:    ds.Module,
+					BaseURL:   ds.BaseURL,
+					Angular:   ds.Angular,
+				},
+			}
+			if ds.Name == grafanads.DatasourceName {
+				dto.ID = grafanads.DatasourceID
+				dto.UID = grafanads.DatasourceUID
+			}
+			dataSources[ds.Name] = dto
+		}
+	}
+
+	return dataSources, nil
+}
+
+func newAppDTO(plugin pluginstore.Plugin, settings pluginsettings.InfoDTO) *plugins.AppDTO {
+	app := &plugins.AppDTO{
+		ID:      plugin.ID,
+		Version: plugin.Info.Version,
+		Path:    plugin.Module,
+		Preload: false,
+		Angular: plugin.Angular,
+	}
+
+	if settings.Enabled {
+		app.Preload = plugin.Preload
+	}
+
+	return app
+}
+
+func getPanelSort(id string) int {
+	sort := 100
+	switch id {
+	case "timeseries":
+		sort = 1
+	case "barchart":
+		sort = 2
+	case "stat":
+		sort = 3
+	case "gauge":
+		sort = 4
+	case "bargauge":
+		sort = 5
+	case "table":
+		sort = 6
+	case "singlestat":
+		sort = 7
+	case "piechart":
+		sort = 8
+	case "state-timeline":
+		sort = 9
+	case "heatmap":
+		sort = 10
+	case "status-history":
+		sort = 11
+	case "histogram":
+		sort = 12
+	case "graph":
+		sort = 13
+	case "text":
+		sort = 14
+	case "alertlist":
+		sort = 15
+	case "dashlist":
+		sort = 16
+	case "news":
+		sort = 17
+	}
+	return sort
+}
+
+type availablePluginDTO struct {
+	Plugin   pluginstore.Plugin
+	Settings pluginsettings.InfoDTO
+}
+
+// AvailablePlugins represents a mapping from plugin types (panel, data source, etc.) to plugin IDs to plugins
+// For example ["panel"] -> ["piechart"] -> {pie chart plugin DTO}
+type AvailablePlugins map[plugins.Type]map[string]*availablePluginDTO
+
+func (ap AvailablePlugins) Get(pluginType plugins.Type, pluginID string) (*availablePluginDTO, bool) {
+	p, exists := ap[pluginType][pluginID]
+	if exists {
+		return p, true
+	}
+	for _, p = range ap[pluginType] {
+		if p.Plugin.ID == pluginID || slices.Contains(p.Plugin.AliasIDs, pluginID) {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+func (hs *HTTPServer) availablePlugins(ctx context.Context, orgID int64) (AvailablePlugins, error) {
+	ap := make(AvailablePlugins)
+
+	pluginSettingMap, err := hs.pluginSettings(ctx, orgID)
+	if err != nil {
+		return ap, err
+	}
+
+	apps := make(map[string]*availablePluginDTO)
+	for _, app := range hs.pluginStore.Plugins(ctx, plugins.TypeApp) {
+		if s, exists := pluginSettingMap[app.ID]; exists {
+			app.Pinned = s.Pinned
+			apps[app.ID] = &availablePluginDTO{
+				Plugin:   app,
+				Settings: *s,
+			}
+		}
+	}
+	ap[plugins.TypeApp] = apps
+
+	dataSources := make(map[string]*availablePluginDTO)
+	for _, ds := range hs.pluginStore.Plugins(ctx, plugins.TypeDataSource) {
+		if s, exists := pluginSettingMap[ds.ID]; exists {
+			dataSources[ds.ID] = &availablePluginDTO{
+				Plugin:   ds,
+				Settings: *s,
+			}
+		}
+	}
+	ap[plugins.TypeDataSource] = dataSources
+
+	panels := make(map[string]*availablePluginDTO)
+	for _, p := range hs.pluginStore.Plugins(ctx, plugins.TypePanel) {
+		if s, exists := pluginSettingMap[p.ID]; exists {
+			panels[p.ID] = &availablePluginDTO{
+				Plugin:   p,
+				Settings: *s,
+			}
+		}
+	}
+	ap[plugins.TypePanel] = panels
+
+	return ap, nil
+}
+
+func (hs *HTTPServer) pluginSettings(ctx context.Context, orgID int64) (map[string]*pluginsettings.InfoDTO, error) {
+	pluginSettings := make(map[string]*pluginsettings.InfoDTO)
+
+	// fill settings from database
+	if pss, err := hs.PluginSettings.GetPluginSettings(ctx, &pluginsettings.GetArgs{OrgID: orgID}); err != nil {
+		return nil, err
+	} else {
+		for _, ps := range pss {
+			pluginSettings[ps.PluginID] = ps
+		}
+	}
+
+	// fill settings from app plugins
+	for _, plugin := range hs.pluginStore.Plugins(ctx, plugins.TypeApp) {
+		// ignore settings that already exist
+		if _, exists := pluginSettings[plugin.ID]; exists {
+			continue
+		}
+
+		// add new setting which is enabled depending on if AutoEnabled: true
+		pluginSetting := &pluginsettings.InfoDTO{
+			PluginID:      plugin.ID,
+			OrgID:         orgID,
+			Enabled:       plugin.AutoEnabled,
+			Pinned:        plugin.AutoEnabled,
+			PluginVersion: plugin.Info.Version,
+		}
+
+		pluginSettings[plugin.ID] = pluginSetting
+	}
+
+	// fill settings from all remaining plugins (including potential app child plugins)
+	for _, plugin := range hs.pluginStore.Plugins(ctx) {
+		// ignore settings that already exist
+		if _, exists := pluginSettings[plugin.ID]; exists {
+			continue
+		}
+
+		// add new setting which is enabled by default
+		pluginSetting := &pluginsettings.InfoDTO{
+			PluginID:      plugin.ID,
+			OrgID:         orgID,
+			Enabled:       true,
+			Pinned:        false,
+			PluginVersion: plugin.Info.Version,
+		}
+
+		// if plugin is included in an app, check app settings
+		if plugin.IncludedInAppID != "" {
+			// app child plugins are disabled unless app is enabled
+			pluginSetting.Enabled = false
+			if p, exists := pluginSettings[plugin.IncludedInAppID]; exists {
+				pluginSetting.Enabled = p.Enabled
+			}
+		}
+		pluginSettings[plugin.ID] = pluginSetting
+	}
+
+	return pluginSettings, nil
+}
+
+func (hs *HTTPServer) getEnabledOAuthProviders() map[string]any {
+	providers := make(map[string]any)
+	for key, oauth := range hs.SocialService.GetOAuthInfoProviders() {
+		providers[key] = map[string]string{
+			"name": oauth.Name,
+			"icon": oauth.Icon,
+		}
+	}
+	return providers
+}
+
+
+===== FILE pkg/services/anonymous/anonimpl/anonstore/database.go (after PR) =====
+package anonstore
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/grafana/grafana/pkg/infra/db"
+	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/sqlstore"
+	"github.com/grafana/grafana/pkg/services/sqlstore/migrator"
+)
+
+const cacheKeyPrefix = "anon-device"
+const anonymousDeviceExpiration = 30 * 24 * time.Hour
+
+var ErrDeviceLimitReached = fmt.Errorf("device limit reached")
+
+type AnonDBStore struct {
+	sqlStore    db.DB
+	log         log.Logger
+	deviceLimit int64
+}
+
+type Device struct {
+	ID        int64     `json:"-" xorm:"id" db:"id"`
+	DeviceID  string    `json:"deviceId" xorm:"device_id" db:"device_id"`
+	ClientIP  string    `json:"clientIp" xorm:"client_ip" db:"client_ip"`
+	UserAgent string    `json:"userAgent" xorm:"user_agent" db:"user_agent"`
+	CreatedAt time.Time `json:"createdAt" xorm:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updatedAt" xorm:"updated_at" db:"updated_at"`
+}
+
+func (a *Device) CacheKey() string {
+	return strings.Join([]string{cacheKeyPrefix, a.DeviceID}, ":")
+}
+
+type AnonStore interface {
+	// ListDevices returns all devices that have been updated between the given times.
+	ListDevices(ctx context.Context, from *time.Time, to *time.Time) ([]*Device, error)
+	// CreateOrUpdateDevice creates or updates a device.
+	CreateOrUpdateDevice(ctx context.Context, device *Device) error
+	// CountDevices returns the number of devices that have been updated between the given times.
+	CountDevices(ctx context.Context, from time.Time, to time.Time) (int64, error)
+	// DeleteDevice deletes a device by its ID.
+	DeleteDevice(ctx context.Context, deviceID string) error
+	// DeleteDevicesOlderThan deletes all devices that have no been updated since the given time.
+	DeleteDevicesOlderThan(ctx context.Context, olderThan time.Time) error
+}
+
+func ProvideAnonDBStore(sqlStore db.DB, deviceLimit int64) *AnonDBStore {
+	return &AnonDBStore{sqlStore: sqlStore, log: log.New("anonstore"), deviceLimit: deviceLimit}
+}
+
+func (s *AnonDBStore) ListDevices(ctx context.Context, from *time.Time, to *time.Time) ([]*Device, error) {
+	devices := []*Device{}
+	query := "SELECT * FROM anon_device"
+	args := []any{}
+	if from != nil && to != nil {
+		query += " WHERE updated_at BETWEEN ? AND ?"
+		args = append(args, from.UTC(), to.UTC())
+	}
+
+	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		return dbSession.SQL(query, args...).Find(&devices)
+	})
+
+	return devices, err
+}
+
+// updateDevice updates a device if it exists and has been updated between the given times.
+func (s *AnonDBStore) updateDevice(ctx context.Context, device *Device) error {
+	const query = `UPDATE anon_device SET
+client_ip = ?,
+user_agent = ?,
+updated_at = ?
+WHERE device_id = ? AND updated_at BETWEEN ? AND ?`
+
+	args := []interface{}{device.ClientIP, device.UserAgent, device.UpdatedAt.UTC(), device.DeviceID,
+		device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration), device.UpdatedAt.UTC().Add(time.Minute),
+	}
+	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		args = append([]interface{}{query}, args...)
+		result, err := dbSession.Exec(args...)
+		if err != nil {
+			return err
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+
+		if rowsAffected == 0 {
+			return ErrDeviceLimitReached
+		}
+
+		return nil
+	})
+
+	return err
+}
+
+func (s *AnonDBStore) CreateOrUpdateDevice(ctx context.Context, device *Device) error {
+	var query string
+
+	// if device limit is reached, only update devices
+	if s.deviceLimit > 0 {
+		count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))
+		if err != nil {
+			return err
+		}
+
+		if count >= s.deviceLimit {
+			return s.updateDevice(ctx, device)
+		}
+	}
+
+	args := []any{device.DeviceID, device.ClientIP, device.UserAgent,
+		device.CreatedAt.UTC(), device.UpdatedAt.UTC()}
+	switch s.sqlStore.GetDBType() {
+	case migrator.Postgres:
+		query = `INSERT INTO anon_device (device_id, client_ip, user_agent, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (device_id) DO UPDATE SET
+client_ip = $2,
+user_agent = $3,
+updated_at = $5
+RETURNING id`
+	case migrator.MySQL:
+		query = `INSERT INTO anon_device (device_id, client_ip, user_agent, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+client_ip = VALUES(client_ip),
+user_agent = VALUES(user_agent),
+updated_at = VALUES(updated_at)`
+	case migrator.SQLite:
+		query = `INSERT INTO anon_device (device_id, client_ip, user_agent, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (device_id) DO UPDATE SET
+client_ip = excluded.client_ip,
+user_agent = excluded.user_agent,
+updated_at = excluded.updated_at`
+	default:
+		return fmt.Errorf("unsupported database driver: %s", s.sqlStore.GetDBType())
+	}
+
+	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		args = append([]any{query}, args...)
+		_, err := dbSession.Exec(args...)
+		return err
+	})
+
+	return err
+}
+
+func (s *AnonDBStore) CountDevices(ctx context.Context, from time.Time, to time.Time) (int64, error) {
+	var count int64
+	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		_, err := dbSession.SQL("SELECT COUNT(*) FROM anon_device WHERE updated_at BETWEEN ? AND ?", from.UTC(), to.UTC()).Get(&count)
+		return err
+	})
+
+	return count, err
+}
+
+func (s *AnonDBStore) DeleteDevice(ctx context.Context, deviceID string) error {
+	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		_, err := dbSession.Exec("DELETE FROM anon_device WHERE device_id = ?", deviceID)
+		return err
+	})
+
+	return err
+}
+
+// deleteOldDevices deletes all devices that have no been updated since the given time.
+func (s *AnonDBStore) DeleteDevicesOlderThan(ctx context.Context, olderThan time.Time) error {
+	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		_, err := dbSession.Exec("DELETE FROM anon_device WHERE updated_at <= ?", olderThan.UTC())
+		return err
+	})
+
+	return err
+}
+
+
+===== FILE pkg/services/anonymous/anonimpl/anonstore/database_test.go (after PR) =====
+package anonstore
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/grafana/grafana/pkg/infra/db"
+)
+
+func TestIntegrationAnonStore_DeleteDevicesOlderThan(t *testing.T) {
+	store := db.InitTestDB(t)
+	anonDBStore := ProvideAnonDBStore(store, 0)
+	const keepFor = time.Hour * 24 * 61
+
+	anonDevice := &Device{
+		DeviceID:  "32mdo31deeqwes",
+		ClientIP:  "10.30.30.2",
+		UserAgent: "test",
+		UpdatedAt: time.Now().Add(-keepFor).Add(-time.Hour),
+	}
+
+	err := anonDBStore.CreateOrUpdateDevice(context.Background(), anonDevice)
+	require.NoError(t, err)
+
+	anonDevice.DeviceID = "keep"
+	anonDevice.UpdatedAt = time.Now().Add(-time.Hour)
+
+	err = anonDBStore.CreateOrUpdateDevice(context.Background(), anonDevice)
+	require.NoError(t, err)
+
+	from := time.Now().Add(-2 * keepFor)
+	to := time.Now()
+
+	count, err := anonDBStore.CountDevices(context.Background(), from, to)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), count)
+
+	err = anonDBStore.DeleteDevicesOlderThan(context.Background(), time.Now().Add(-keepFor))
+	require.NoError(t, err)
+
+	devices, err := anonDBStore.ListDevices(context.Background(), &from, &to)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(devices))
+	assert.Equal(t, "keep", devices[0].DeviceID)
+}
+
+func TestIntegrationBeyondDeviceLimit(t *testing.T) {
+	store := db.InitTestDB(t)
+	anonDBStore := ProvideAnonDBStore(store, 1)
+
+	anonDevice := &Device{
+		DeviceID:  "32mdo31deeqwes",
+		ClientIP:  "10.30.30.2",
+		UserAgent: "test",
+		UpdatedAt: time.Now().Add(-time.Hour),
+	}
+
+	err := anonDBStore.CreateOrUpdateDevice(context.Background(), anonDevice)
+	require.NoError(t, err)
+
+	anonDevice.DeviceID = "keep"
+	anonDevice.UpdatedAt = time.Now().Add(-time.Hour)
+
+	err = anonDBStore.CreateOrUpdateDevice(context.Background(), anonDevice)
+	require.ErrorIs(t, err, ErrDeviceLimitReached)
+}
+
+func TestIntegrationAnonStore_DeleteDevice(t *testing.T) {
+	store := db.InitTestDB(t)
+	anonDBStore := ProvideAnonDBStore(store, 0)
+	const keepFor = time.Hour * 24 * 61
+
+	anonDevice := &Device{
+		DeviceID:  "32mdo31deeqwes",
+		ClientIP:  "10.30.30.2",
+		UserAgent: "test",
+		UpdatedAt: time.Now().Add(-keepFor).Add(-time.Hour),
+	}
+
+	err := anonDBStore.CreateOrUpdateDevice(context.Background(), anonDevice)
+	require.NoError(t, err)
+
+	from := time.Now().Add(-2 * keepFor)
+	to := time.Now()
+
+	count, err := anonDBStore.CountDevices(context.Background(), from, to)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+
+	err = anonDBStore.DeleteDevice(context.Background(), "32mdo31deeqwes")
+	require.NoError(t, err)
+
+	devices, err := anonDBStore.ListDevices(context.Background(), &from, &to)
+	require.NoError(t, err)
+	require.Equal(t, 0, len(devices))
+}
+
+
+===== FILE pkg/services/anonymous/anonimpl/api/api.go (after PR) =====
+package api
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/grafana/grafana/pkg/api/dtos"
+	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/api/routing"
+	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
+	"github.com/grafana/grafana/pkg/services/anonymous/anonimpl/anonstore"
+	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
+	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/util"
+)
+
+const anonymousDeviceExpiration = 30 * 24 * time.Hour
+
+type deviceDTO struct {
+	anonstore.Device
+	LastSeenAt string `json:"lastSeenAt"`
+	AvatarUrl  string `json:"avatarUrl"`
+}
+
+type AnonDeviceServiceAPI struct {
+	cfg            *setting.Cfg
+	store          anonstore.AnonStore
+	accesscontrol  accesscontrol.AccessControl
+	RouterRegister routing.RouteRegister
+	log            log.Logger
+}
+
+func NewAnonDeviceServiceAPI(
+	cfg *setting.Cfg,
+	anonstore anonstore.AnonStore,
+	accesscontrol accesscontrol.AccessControl,
+	routerRegister routing.RouteRegister,
+) *AnonDeviceServiceAPI {
+	return &AnonDeviceServiceAPI{
+		cfg:            cfg,
+		store:          anonstore,
+		accesscontrol:  accesscontrol,
+		RouterRegister: routerRegister,
+		log:            log.New("anon.api"),
+	}
+}
+
+func (api *AnonDeviceServiceAPI) RegisterAPIEndpoints() {
+	auth := accesscontrol.Middleware(api.accesscontrol)
+	api.RouterRegister.Group("/api/anonymous", func(anonRoutes routing.RouteRegister) {
+		anonRoutes.Get("/devices", auth(accesscontrol.EvalPermission(accesscontrol.ActionUsersRead)), routing.Wrap(api.ListDevices))
+	})
+}
+
+// swagger:route GET /stats devices listDevices
+//
+// # Lists all devices within the last 30 days
+//
+// Produces:
+// - application/json
+//
+// Responses:
+//
+//	200: devicesResponse
+//	401: unauthorisedError
+//	403: forbiddenError
+//	404: notFoundError
+//	500: internalServerError
+func (api *AnonDeviceServiceAPI) ListDevices(c *contextmodel.ReqContext) response.Response {
+	fromTime := time.Now().Add(-anonymousDeviceExpiration)
+	toTime := time.Now()
+
+	devices, err := api.store.ListDevices(c.Req.Context(), &fromTime, &toTime)
+	if err != nil {
+		return response.ErrOrFallback(http.StatusInternalServerError, "Failed to list devices", err)
+	}
+
+	// convert to response format
+	resDevices := make([]*deviceDTO, 0, len(devices))
+	for _, device := range devices {
+		resDevices = append(resDevices, &deviceDTO{
+			Device:     *device,
+			LastSeenAt: util.GetAgeString(device.UpdatedAt),
+			AvatarUrl:  dtos.GetGravatarUrl(device.DeviceID),
+		})
+	}
+
+	return response.JSON(http.StatusOK, resDevices)
+}
+
+// swagger:response devicesResponse
+type DevicesResponse struct {
+	// in:body
+	Body []deviceDTO `json:"body"`
+}
+
+
+===== FILE pkg/services/anonymous/anonimpl/client.go (after PR) =====
+package anonimpl
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/anonymous"
+	"github.com/grafana/grafana/pkg/services/anonymous/anonimpl/anonstore"
+	"github.com/grafana/grafana/pkg/services/authn"
+	"github.com/grafana/grafana/pkg/services/org"
+	"github.com/grafana/grafana/pkg/setting"
+)
+
+var _ authn.ContextAwareClient = new(Anonymous)
+
+type Anonymous struct {
+	cfg               *setting.Cfg
+	log               log.Logger
+	orgService        org.Service
+	anonDeviceService anonymous.Service
+}
+
+func (a *Anonymous) Name() string {
+	return authn.ClientAnonymous
+}
+
+func (a *Anonymous) Authenticate(ctx context.Context, r *authn.Request) (*authn.Identity, error) {
+	o, err := a.orgService.GetByName(ctx, &org.GetOrgByNameQuery{Name: a.cfg.AnonymousOrgName})
+	if err != nil {
+		a.log.FromContext(ctx).Error("Failed to find organization", "name", a.cfg.AnonymousOrgName, "error", err)
+		return nil, err
+	}
+
+	httpReqCopy := &http.Request{}
+	if r.HTTPRequest != nil && r.HTTPRequest.Header != nil {
+		// avoid r.HTTPRequest.Clone(context.Background()) as we do not require a full clone
+		httpReqCopy.Header = r.HTTPRequest.Header.Clone()
+		httpReqCopy.RemoteAddr = r.HTTPRequest.RemoteAddr
+	}
+
+	if err := a.anonDeviceService.TagDevice(ctx, httpReqCopy, anonymous.AnonDeviceUI); err != nil {
+		if errors.Is(err, anonstore.ErrDeviceLimitReached) {
+			return nil, err
+		}
+
+		a.log.Warn("Failed to tag anonymous session", "error", err)
+	}
+
+	return &authn.Identity{
+		ID:           authn.AnonymousNamespaceID,
+		OrgID:        o.ID,
+		OrgName:      o.Name,
+		OrgRoles:     map[int64]org.RoleType{o.ID: org.RoleType(a.cfg.AnonymousOrgRole)},
+		ClientParams: authn.ClientParams{SyncPermissions: true},
+	}, nil
+}
+
+func (a *Anonymous) Test(ctx context.Context, r *authn.Request) bool {
+	// If anonymous client is register it can always be used for authentication
+	return true
+}
+
+func (a *Anonymous) Priority() uint {
+	return 100
+}
+
+func (a *Anonymous) UsageStatFn(ctx context.Context) (map[string]any, error) {
+	m := map[string]any{}
+
+	// Add stats about anonymous auth
+	m["stats.anonymous.customized_role.count"] = 0
+	if !strings.EqualFold(a.cfg.AnonymousOrgRole, "Viewer") {
+		m["stats.anonymous.customized_role.count"] = 1
+	}
+
+	return m, nil
+}
+
+
+===== FILE pkg/services/anonymous/anonimpl/impl.go (after PR) =====
+package anonimpl
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/grafana/grafana/pkg/api/routing"
+	"github.com/grafana/grafana/pkg/infra/db"
+	"github.com/grafana/grafana/pkg/infra/localcache"
+	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/infra/network"
+	"github.com/grafana/grafana/pkg/infra/serverlock"
+	"github.com/grafana/grafana/pkg/infra/usagestats"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
+	"github.com/grafana/grafana/pkg/services/anonymous"
+	"github.com/grafana/grafana/pkg/services/anonymous/anonimpl/anonstore"
+	"github.com/grafana/grafana/pkg/services/anonymous/anonimpl/api"
+	"github.com/grafana/grafana/pkg/services/authn"
+	"github.com/grafana/grafana/pkg/services/org"
+	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/web"
+)
+
+const thirtyDays = 30 * 24 * time.Hour
+const deviceIDHeader = "X-Grafana-Device-Id"
+const keepFor = time.Hour * 24 * 61
+
+type AnonDeviceService struct {
+	log        log.Logger
+	localCache *localcache.CacheService
+	anonStore  anonstore.AnonStore
+	serverLock *serverlock.ServerLockService
+}
+
+func ProvideAnonymousDeviceService(usageStats usagestats.Service, authBroker authn.Service,
+	sqlStore db.DB, cfg *setting.Cfg, orgService org.Service,
+	serverLockService *serverlock.ServerLockService, accesscontrol accesscontrol.AccessControl, routeRegister routing.RouteRegister,
+) *AnonDeviceService {
+	a := &AnonDeviceService{
+		log:        log.New("anonymous-session-service"),
+		localCache: localcache.New(29*time.Minute, 15*time.Minute),
+		anonStore:  anonstore.ProvideAnonDBStore(sqlStore, cfg.AnonymousDeviceLimit),
+		serverLock: serverLockService,
+	}
+
+	usageStats.RegisterMetricsFunc(a.usageStatFn)
+
+	anonClient := &Anonymous{
+		cfg:               cfg,
+		log:               log.New("authn.anonymous"),
+		orgService:        orgService,
+		anonDeviceService: a,
+	}
+
+	if anonClient.cfg.AnonymousEnabled {
+		authBroker.RegisterClient(anonClient)
+		authBroker.RegisterPostLoginHook(a.untagDevice, 100)
+	}
+
+	anonAPI := api.NewAnonDeviceServiceAPI(cfg, a.anonStore, accesscontrol, routeRegister)
+	anonAPI.RegisterAPIEndpoints()
+
+	return a
+}
+
+func (a *AnonDeviceService) usageStatFn(ctx context.Context) (map[string]any, error) {
+	// Count the number of unique devices that have been updated in the last 30 days.
+	// One minute is added to the end time as mysql has a precision of seconds and it will break tests that write too fast.
+	anonUIDeviceCount, err := a.anonStore.CountDevices(ctx, time.Now().Add(-thirtyDays), time.Now().Add(time.Minute))
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"stats.anonymous.device.ui.count": anonUIDeviceCount,
+	}, nil
+}
+
+func (a *AnonDeviceService) tagDeviceUI(ctx context.Context, httpReq *http.Request, device *anonstore.Device) error {
+	key := device.CacheKey()
+
+	if _, ok := a.localCache.Get(key); ok {
+		return nil
+	}
+
+	a.localCache.SetDefault(key, struct{}{})
+
+	if setting.Env == setting.Dev {
+		a.log.Debug("Tagging device for UI", "deviceID", device.DeviceID, "device", device, "key", key)
+	}
+
+	if err := a.anonStore.CreateOrUpdateDevice(ctx, device); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *AnonDeviceService) untagDevice(ctx context.Context,
+	identity *authn.Identity, r *authn.Request, err error) {
+	if err != nil {
+		return
+	}
+
+	deviceID := r.HTTPRequest.Header.Get(deviceIDHeader)
+	if deviceID == "" {
+		return
+	}
+
+	errD := a.anonStore.DeleteDevice(ctx, deviceID)
+	if errD != nil {
+		a.log.Debug("Failed to untag device", "error", err)
+	}
+}
+
+// FIXME: Unexport and remove interface
+func (a *AnonDeviceService) TagDevice(ctx context.Context, httpReq *http.Request, kind anonymous.DeviceKind) error {
+	deviceID := httpReq.Header.Get(deviceIDHeader)
+	if deviceID == "" {
+		return nil
+	}
+
+	addr := web.RemoteAddr(httpReq)
+	ip, err := network.GetIPFromAddress(addr)
+	if err != nil {
+		a.log.Debug("Failed to parse ip from address", "addr", addr)
+		return nil
+	}
+
+	clientIPStr := ip.String()
+	if len(ip) == 0 {
+		clientIPStr = ""
+	}
+
+	taggedDevice := &anonstore.Device{
+		DeviceID:  deviceID,
+		ClientIP:  clientIPStr,
+		UserAgent: httpReq.UserAgent(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	err = a.tagDeviceUI(ctx, httpReq, taggedDevice)
+	if err != nil {
+		a.log.Debug("Failed to tag device for UI", "error", err)
+		return err
+	}
+
+	return nil
+}
+
+// ListDevices returns all devices that have been updated between the given times.
+func (a *AnonDeviceService) ListDevices(ctx context.Context, from *time.Time, to *time.Time) ([]*anonstore.Device, error) {
+	return a.anonStore.ListDevices(ctx, from, to)
+}
+
+// CountDevices returns the number of devices that have been updated between the given times.
+func (a *AnonDeviceService) CountDevices(ctx context.Context, from time.Time, to time.Time) (int64, error) {
+	return a.anonStore.CountDevices(ctx, from, to)
+}
+
+func (a *AnonDeviceService) Run(ctx context.Context) error {
+	ticker := time.NewTicker(2 * time.Hour)
+
+	for {
+		select {
+		case <-ticker.C:
+			err := a.serverLock.LockAndExecute(ctx, "cleanup old anon devices", time.Hour*10, func(context.Context) {
+				if err := a.anonStore.DeleteDevicesOlderThan(ctx, time.Now().Add(-keepFor)); err != nil {
+					a.log.Error("An error occurred while deleting old anon devices", "err", err)
+				}
+			})
+			if err != nil {
+				a.log.Error("Failed to lock and execute cleanup old anon devices", "error", err)
+			}
+
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+
+===== FILE pkg/services/anonymous/anonimpl/impl_test.go (after PR) =====
+package anonimpl
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/grafana/grafana/pkg/api/routing"
+	"github.com/grafana/grafana/pkg/infra/db"
+	"github.com/grafana/grafana/pkg/infra/usagestats"
+	"github.com/grafana/grafana/pkg/services/accesscontrol/actest"
+	"github.com/grafana/grafana/pkg/services/anonymous"
+	"github.com/grafana/grafana/pkg/services/anonymous/anonimpl/anonstore"
+	"github.com/grafana/grafana/pkg/services/authn/authntest"
+	"github.com/grafana/grafana/pkg/services/org/orgtest"
+	"github.com/grafana/grafana/pkg/setting"
+)
+
+func TestIntegrationDeviceService_tag(t *testing.T) {
+	type tagReq struct {
+		httpReq *http.Request
+		kind    anonymous.DeviceKind
+	}
+	testCases := []struct {
+		name                string
+		req                 []tagReq
+		expectedAnonUICount int64
+		expectedKey         string
+		expectedDevice      *anonstore.Device
+	}{
+		{
+			name: "no requests",
+			req:  []tagReq{{httpReq: &http.Request{}, kind: anonymous.AnonDeviceUI}},
+		},
+		{
+			name: "missing info should not tag",
+			req: []tagReq{{httpReq: &http.Request{
+				Header: http.Header{
+					"User-Agent": []string{"test"},
+				},
+			},
+				kind: anonymous.AnonDeviceUI,
+			}},
+		},
+		{
+			name: "should tag device ID once",
+			req: []tagReq{{httpReq: &http.Request{
+				Header: http.Header{
+					"User-Agent":                            []string{"test"},
+					"X-Forwarded-For":                       []string{"10.30.30.1"},
+					http.CanonicalHeaderKey(deviceIDHeader): []string{"32mdo31deeqwes"},
+				},
+			},
+				kind: anonymous.AnonDeviceUI,
+			},
+			},
+			expectedAnonUICount: 1,
+			expectedKey:         "ui-anon-session:32mdo31deeqwes",
+			expectedDevice: &anonstore.Device{
+				DeviceID:  "32mdo31deeqwes",
+				ClientIP:  "10.30.30.1",
+				UserAgent: "test"},
+		},
+		{
+			name: "repeat request should not tag",
+			req: []tagReq{{httpReq: &http.Request{
+				Header: http.Header{
+					"User-Agent":                            []string{"test"},
+					http.CanonicalHeaderKey(deviceIDHeader): []string{"32mdo31deeqwes"},
+					"X-Forwarded-For":                       []string{"10.30.30.1"},
+				},
+			},
+				kind: anonymous.AnonDeviceUI,
+			}, {httpReq: &http.Request{
+				Header: http.Header{
+					"User-Agent":                            []string{"test"},
+					http.CanonicalHeaderKey(deviceIDHeader): []string{"32mdo31deeqwes"},
+					"X-Forwarded-For":                       []string{"10.30.30.1"},
+				},
+			},
+				kind: anonymous.AnonDeviceUI,
+			},
+			},
+			expectedAnonUICount: 1,
+		}, {
+			name: "tag 2 different requests",
+			req: []tagReq{{httpReq: &http.Request{
+				Header: http.Header{
+					http.CanonicalHeaderKey("User-Agent"):      []string{"test"},
+					http.CanonicalHeaderKey("X-Forwarded-For"): []string{"10.30.30.1"},
+					http.CanonicalHeaderKey(deviceIDHeader):    []string{"a"},
+				},
+			},
+				kind: anonymous.AnonDeviceUI,
+			}, {httpReq: &http.Request{
+				Header: http.Header{
+					"User-Agent":                            []string{"test"},
+					"X-Forwarded-For":                       []string{"10.30.30.2"},
+					http.CanonicalHeaderKey(deviceIDHeader): []string{"b"},
+				},
+			},
+				kind: anonymous.AnonDeviceUI,
+			},
+			},
+			expectedAnonUICount: 2,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := db.InitTestDB(t)
+			anonService := ProvideAnonymousDeviceService(&usagestats.UsageStatsMock{},
+				&authntest.FakeService{}, store, setting.NewCfg(), orgtest.NewOrgServiceFake(), nil, actest.FakeAccessControl{}, &routing.RouteRegisterImpl{})
+
+			for _, req := range tc.req {
+				err := anonService.TagDevice(context.Background(), req.httpReq, req.kind)
+				require.NoError(t, err)
+			}
+
+			devices, err := anonService.anonStore.ListDevices(context.Background(), nil, nil)
+			require.NoError(t, err)
+			require.Len(t, devices, int(tc.expectedAnonUICount))
+			if tc.expectedDevice != nil {
+				device := devices[0]
+				assert.NotZero(t, device.ID)
+				assert.NotZero(t, device.CreatedAt)
+				assert.NotZero(t, device.UpdatedAt)
+
+				tc.expectedDevice.ID = device.ID
+				tc.expectedDevice.CreatedAt = device.CreatedAt
+				tc.expectedDevice.UpdatedAt = device.UpdatedAt
+
+				assert.Equal(t, tc.expectedDevice, devices[0])
+			}
+
+			stats, err := anonService.usageStatFn(context.Background())
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectedAnonUICount, stats["stats.anonymous.device.ui.count"].(int64), stats)
+		})
+	}
+}
+
+// Ensure that the local cache prevents request from being tagged
+func TestIntegrationAnonDeviceService_localCacheSafety(t *testing.T) {
+	store := db.InitTestDB(t)
+	anonService := ProvideAnonymousDeviceService(&usagestats.UsageStatsMock{},
+		&authntest.FakeService{}, store, setting.NewCfg(), orgtest.NewOrgServiceFake(), nil, actest.FakeAccessControl{}, &routing.RouteRegisterImpl{})
+
+	req := &http.Request{
+		Header: http.Header{
+			"User-Agent":                            []string{"test"},
+			"X-Forwarded-For":                       []string{"10.30.30.2"},
+			http.CanonicalHeaderKey(deviceIDHeader): []string{"32mdo31deeqwes"},
+		},
+	}
+
+	anonDevice := &anonstore.Device{
+		DeviceID:  "32mdo31deeqwes",
+		ClientIP:  "10.30.30.2",
+		UserAgent: "test",
+		UpdatedAt: time.Now().UTC(),
+	}
+
+	key := anonDevice.CacheKey()
+	anonService.localCache.SetDefault(key, true)
+
+	err := anonService.TagDevice(context.Background(), req, anonymous.AnonDeviceUI)
+	require.NoError(t, err)
+
+	stats, err := anonService.usageStatFn(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(0), stats["stats.anonymous.device.ui.count"].(int64))
+}
+
+
+===== FILE pkg/setting/setting.go (after PR) =====
+// Copyright 2014 Unknwon
+// Copyright 2014 Torkel Ödegaard
+
+package setting
+
+import (
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gobwas/glob"
+	"github.com/prometheus/common/model"
+	"gopkg.in/ini.v1"
+
+	"github.com/grafana/grafana-aws-sdk/pkg/awsds"
+	"github.com/grafana/grafana-azure-sdk-go/azsettings"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/gtime"
+
+	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/models/roletype"
+	"github.com/grafana/grafana/pkg/util"
+)
+
+type Scheme string
+
+const (
+	HTTPScheme   Scheme = "http"
+	HTTPSScheme  Scheme = "https"
+	HTTP2Scheme  Scheme = "h2"
+	SocketScheme Scheme = "socket"
+)
+
+const (
+	RedactedPassword = "*********"
+	DefaultHTTPAddr  = "0.0.0.0"
+	Dev              = "development"
+	Prod             = "production"
+	ApplicationName  = "Grafana"
+)
+
+// zoneInfo names environment variable for setting the path to look for the timezone database in go
+const zoneInfo = "ZONEINFO"
+
+var (
+	// App settings.
+	Env              = Dev
+	AppUrl           string
+	AppSubUrl        string
+	ServeFromSubPath bool
+	InstanceName     string
+
+	// build
+	BuildVersion          string
+	BuildCommit           string
+	EnterpriseBuildCommit string
+	BuildBranch           string
+	BuildStamp            int64
+	IsEnterprise          bool
+
+	// packaging
+	Packaging = "unknown"
+
+	// Paths
+	HomePath       string
+	CustomInitPath = "conf/custom.ini"
+
+	// HTTP server options
+	StaticRootPath string
+
+	// Security settings.
+	SecretKey              string
+	DisableGravatar        bool
+	DataProxyWhiteList     map[string]bool
+	CookieSecure           bool
+	CookieSameSiteDisabled bool
+	CookieSameSiteMode     http.SameSite
+
+	// Dashboard history
+	DashboardVersionsToKeep int
+	MinRefreshInterval      string
+
+	// User settings
+	AllowUserSignUp         bool
+	AllowUserOrgCreate      bool
+	VerifyEmailEnabled      bool
+	LoginHint               string
+	PasswordHint            string
+	DisableSignoutMenu      bool
+	ExternalUserMngLinkUrl  string
+	ExternalUserMngLinkName string
+	ExternalUserMngInfo     string
+
+	// HTTP auth
+	SigV4AuthEnabled bool
+	AzureAuthEnabled bool
+
+	// Global setting objects.
+	Raw *ini.File
+
+	// for logging purposes
+	configFiles                  []string
+	appliedCommandLineProperties []string
+	appliedEnvOverrides          []string
+
+	// Alerting
+	AlertingEnabled            *bool
+	ExecuteAlerts              bool
+	AlertingRenderLimit        int
+	AlertingErrorOrTimeout     string
+	AlertingNoDataOrNullValues string
+
+	AlertingEvaluationTimeout   time.Duration
+	AlertingNotificationTimeout time.Duration
+	AlertingMaxAttempts         int
+	AlertingMinInterval         int64
+
+	// Explore UI
+	ExploreEnabled bool
+
+	// Help UI
+	HelpEnabled bool
+
+	// Profile UI
+	ProfileEnabled bool
+
+	// News Feed
+	NewsFeedEnabled bool
+
+	// Grafana.NET URL
+	GrafanaComUrl string
+
+	ImageUploadProvider string
+)
+
+// TODO move all global vars to this struct
+type Cfg struct {
+	Target []string
+	Raw    *ini.File
+	Logger log.Logger
+
+	// HTTP Server Settings
+	CertFile         string
+	KeyFile          string
+	HTTPAddr         string
+	HTTPPort         string
+	AppURL           string
+	AppSubURL        string
+	ServeFromSubPath bool
+	StaticRootPath   string
+	Protocol         Scheme
+	SocketGid        int
+	SocketMode       int
+	SocketPath       string
+	RouterLogging    bool
+	Domain           string
+	CDNRootURL       *url.URL
+	ReadTimeout      time.Duration
+	EnableGzip       bool
+	EnforceDomain    bool
+	MinTLSVersion    string
+
+	// Security settings
+	SecretKey             string
+	EmailCodeValidMinutes int
+
+	// build
+	BuildVersion          string
+	BuildCommit           string
+	EnterpriseBuildCommit string
+	BuildBranch           string
+	BuildStamp            int64
+	IsEnterprise          bool
+
+	// packaging
+	Packaging string
+
+	// Paths
+	HomePath              string
+	ProvisioningPath      string
+	DataPath              string
+	LogsPath              string
+	PluginsPath           string
+	BundledPluginsPath    string
+	EnterpriseLicensePath string
+
+	// SMTP email settings
+	Smtp SmtpSettings
+
+	// Rendering
+	ImagesDir                      string
+	CSVsDir                        string
+	RendererUrl                    string
+	RendererCallbackUrl            string
+	RendererAuthToken              string
+	RendererConcurrentRequestLimit int
+	RendererRenderKeyLifeTime      time.Duration
+
+	// Security
+	DisableInitAdminCreation          bool
+	DisableBruteForceLoginProtection  bool
+	CookieSecure                      bool
+	CookieSameSiteDisabled            bool
+	CookieSameSiteMode                http.SameSite
+	AllowEmbedding                    bool
+	XSSProtectionHeader               bool
+	ContentTypeProtectionHeader       bool
+	StrictTransportSecurity           bool
+	StrictTransportSecurityMaxAge     int
+	StrictTransportSecurityPreload    bool
+	StrictTransportSecuritySubDomains bool
+	// CSPEnabled toggles Content Security Policy support.
+	CSPEnabled bool
+	// CSPTemplate contains the Content Security Policy template.
+	CSPTemplate string
+	// CSPReportEnabled toggles Content Security Policy Report Only support.
+	CSPReportOnlyEnabled bool
+	// CSPReportOnlyTemplate contains the Content Security Policy Report Only template.
+	CSPReportOnlyTemplate            string
+	AngularSupportEnabled            bool
+	DisableFrontendSandboxForPlugins []string
+
+	TempDataLifetime time.Duration
+
+	// Plugins
+	PluginsEnableAlpha               bool
+	PluginsAppsSkipVerifyTLS         bool
+	PluginSettings                   PluginSettings
+	PluginsAllowUnsigned             []string
+	PluginCatalogURL                 string
+	PluginCatalogHiddenPlugins       []string
+	PluginAdminEnabled               bool
+	PluginAdminExternalManageEnabled bool
+	PluginForcePublicKeyDownload     bool
+	PluginSkipPublicKeyDownload      bool
+	DisablePlugins                   []string
+	PluginInstallToken               string
+
+	PluginsCDNURLTemplate    string
+	PluginLogBackendRequests bool
+
+	// Panels
+	DisableSanitizeHtml bool
+
+	// Metrics
+	MetricsEndpointEnabled           bool
+	MetricsEndpointBasicAuthUsername string
+	MetricsEndpointBasicAuthPassword string
+	MetricsEndpointDisableTotalStats bool
+	// MetricsIncludeTeamLabel configures grafana to set a label for
+	// the team responsible for the code at Grafana labs. We don't expect anyone else to
+	// use this setting.
+	MetricsIncludeTeamLabel          bool
+	MetricsTotalStatsIntervalSeconds int
+	MetricsGrafanaEnvironmentInfo    map[string]string
+
+	// Dashboards
+	DefaultHomeDashboardPath string
+
+	// Auth
+	LoginCookieName              string
+	LoginMaxInactiveLifetime     time.Duration
+	LoginMaxLifetime             time.Duration
+	TokenRotationIntervalMinutes int
+	SigV4AuthEnabled             bool
+	SigV4VerboseLogging          bool
+	AzureAuthEnabled             bool
+	AzureSkipOrgRoleSync         bool
+	BasicAuthEnabled             bool
+	AdminUser                    string
+	AdminPassword                string
+	DisableLogin                 bool
+	AdminEmail                   string
+	DisableLoginForm             bool
+	SignoutRedirectUrl           string
+	IDResponseHeaderEnabled      bool
+	IDResponseHeaderPrefix       string
+	IDResponseHeaderNamespaces   map[string]struct{}
+	// Not documented & not supported
+	// stand in until a more complete solution is implemented
+	AuthConfigUIAdminAccess bool
+
+	// AWS Plugin Auth
+	AWSAllowedAuthProviders []string
+	AWSAssumeRoleEnabled    bool
+	AWSListMetricsPageLimit int
+	AWSExternalId           string
+
+	// Azure Cloud settings
+	Azure *azsettings.AzureSettings
+
+	// Auth proxy settings
+	AuthProxyEnabled          bool
+	AuthProxyHeaderName       string
+	AuthProxyHeaderProperty   string
+	AuthProxyAutoSignUp       bool
+	AuthProxyEnableLoginToken bool
+	AuthProxyWhitelist        string
+	AuthProxyHeaders          map[string]string
+	AuthProxyHeadersEncoded   bool
+	AuthProxySyncTTL          int
+
+	// OAuth
+	OAuthAutoLogin                bool
+	OAuthCookieMaxAge             int
+	OAuthAllowInsecureEmailLookup bool
+
+	// JWT Auth
+	JWTAuthEnabled                 bool
+	JWTAuthHeaderName              string
+	JWTAuthURLLogin                bool
+	JWTAuthEmailClaim              string
+	JWTAuthUsernameClaim           string
+	JWTAuthExpectClaims            string
+	JWTAuthJWKSetURL               string
+	JWTAuthCacheTTL                time.Duration
+	JWTAuthKeyFile                 string
+	JWTAuthKeyID                   string
+	JWTAuthJWKSetFile              string
+	JWTAuthAutoSignUp              bool
+	JWTAuthRoleAttributePath       string
+	JWTAuthRoleAttributeStrict     bool
+	JWTAuthAllowAssignGrafanaAdmin bool
+	JWTAuthSkipOrgRoleSync         bool
+
+	// Extended JWT Auth
+	ExtendedJWTAuthEnabled    bool
+	ExtendedJWTExpectIssuer   string
+	ExtendedJWTExpectAudience string
+
+	// Dataproxy
+	SendUserHeader                 bool
+	DataProxyLogging               bool
+	DataProxyTimeout               int
+	DataProxyDialTimeout           int
+	DataProxyTLSHandshakeTimeout   int
+	DataProxyExpectContinueTimeout int
+	DataProxyMaxConnsPerHost       int
+	DataProxyMaxIdleConns          int
+	DataProxyKeepAlive             int
+	DataProxyIdleConnTimeout       int
+	ResponseLimit                  int64
+	DataProxyRowLimit              int64
+	DataProxyUserAgent             string
+
+	// DistributedCache
+	RemoteCacheOptions *RemoteCacheOptions
+
+	ViewersCanEdit  bool
+	EditorsCanAdmin bool
+
+	ApiKeyMaxSecondsToLive int64
+
+	// Check if a feature toggle is enabled
+	// Deprecated: use featuremgmt.FeatureFlags
+	IsFeatureToggleEnabled func(key string) bool // filled in dynamically
+
+	AnonymousEnabled     bool
+	AnonymousOrgName     string
+	AnonymousOrgRole     string
+	AnonymousHideVersion bool
+	AnonymousDeviceLimit int64
+
+	DateFormats DateFormats
+
+	// User
+	UserInviteMaxLifetime time.Duration
+	HiddenUsers           map[string]struct{}
+	CaseInsensitiveLogin  bool // Login and Email will be considered case insensitive
+
+	// Service Accounts
+	SATokenExpirationDayLimit int
+
+	// Annotations
+	AnnotationCleanupJobBatchSize      int64
+	AnnotationMaximumTagsLength        int64
+	AlertingAnnotationCleanupSetting   AnnotationCleanupSettings
+	DashboardAnnotationCleanupSettings AnnotationCleanupSettings
+	APIAnnotationCleanupSettings       AnnotationCleanupSettings
+
+	// GrafanaJavascriptAgent config
+	GrafanaJavascriptAgent GrafanaJavascriptAgent
+
+	// Data sources
+	DataSourceLimit int
+
+	// SQL Data sources
+	SqlDatasourceMaxOpenConnsDefault    int
+	SqlDatasourceMaxIdleConnsDefault    int
+	SqlDatasourceMaxConnLifetimeDefault int
+
+	// Snapshots
+	SnapshotEnabled       bool
+	ExternalSnapshotUrl   string
+	ExternalSnapshotName  string
+	ExternalEnabled       bool
+	SnapShotRemoveExpired bool
+
+	SnapshotPublicMode bool
+
+	ErrTemplateName string
+
+	Env string
+
+	StackID string
+	Slug    string
+
+	// Deprecated
+	ForceMigration bool
+
+	// Analytics
+	CheckForGrafanaUpdates              bool
+	CheckForPluginUpdates               bool
+	ReportingDistributor                string
+	ReportingEnabled                    bool
+	ApplicationInsightsConnectionString string
+	ApplicationInsightsEndpointUrl      string
+	FeedbackLinksEnabled                bool
+
+	// Frontend analytics
+	GoogleAnalyticsID                   string
+	GoogleAnalytics4ID                  string
+	GoogleAnalytics4SendManualPageViews bool
+	GoogleTagManagerID                  string
+	RudderstackDataPlaneURL             string
+	RudderstackWriteKey                 string
+	RudderstackSDKURL                   string
+	RudderstackConfigURL                string
+	RudderstackIntegrationsURL          string
+	IntercomSecret                      string
+
+	// AzureAD
+	AzureADEnabled         bool
+	AzureADSkipOrgRoleSync bool
+
+	// Google
+	GoogleAuthEnabled     bool
+	GoogleSkipOrgRoleSync bool
+
+	// Gitlab
+	GitLabAuthEnabled     bool
+	GitLabSkipOrgRoleSync bool
+
+	// Generic OAuth
+	GenericOAuthAuthEnabled     bool
+	GenericOAuthSkipOrgRoleSync bool
+
+	// LDAP
+	LDAPAuthEnabled       bool
+	LDAPSkipOrgRoleSync   bool
+	LDAPConfigFilePath    string
+	LDAPAllowSignup       bool
+	LDAPActiveSyncEnabled bool
+	LDAPSyncCron          string
+
+	DefaultTheme    string
+	DefaultLanguage string
+	HomePage        string
+
+	Quota QuotaSettings
+
+	AutoAssignOrg              bool
+	AutoAssignOrgId            int
+	AutoAssignOrgRole          string
+	OAuthSkipOrgRoleUpdateSync bool
+
+	// ExpressionsEnabled specifies whether expressions are enabled.
+	ExpressionsEnabled bool
+
+	ImageUploadProvider string
+
+	// LiveMaxConnections is a maximum number of WebSocket connections to
+	// Grafana Live ws endpoint (per Grafana server instance). 0 disables
+	// Live, -1 means unlimited connections.
+	LiveMaxConnections int
+	// LiveHAEngine is a type of engine to use to achieve HA with Grafana Live.
+	// Zero value means in-memory single node setup.
+	LiveHAEngine string
+	// LiveHAEngineAddress is a connection address for Live HA engine.
+	LiveHAEngineAddress  string
+	LiveHAEnginePassword string
+	// LiveAllowedOrigins is a set of origins accepted by Live. If not provided
+	// then Live uses AppURL as the only allowed origin.
+	LiveAllowedOrigins []string
+
+	// GitHub OAuth
+	GitHubAuthEnabled     bool
+	GitHubSkipOrgRoleSync bool
+
+	// Grafana.com URL, used for OAuth redirect.
+	GrafanaComURL string
+	// Grafana.com API URL. Can be set separately to GrafanaComURL
+	// in case API is not publicly accessible.
+	// Defaults to GrafanaComURL setting + "/api" if unset.
+	GrafanaComAPIURL string
+	// Grafana.com Auth enabled
+	GrafanaComAuthEnabled bool
+	// GrafanaComSkipOrgRoleSync can be set for
+	// letting users set org roles from within Grafana and
+	// skip the org roles coming from GrafanaCom
+	GrafanaComSkipOrgRoleSync bool
+
+	// Grafana.com Auth enabled through [auth.grafananet] config section
+	GrafanaNetAuthEnabled bool
+
+	// Geomap base layer config
+	GeomapDefaultBaseLayerConfig map[string]any
+	GeomapEnableCustomBaseLayers bool
+
+	// Unified Alerting
+	UnifiedAlerting UnifiedAlertingSettings
+
+	// Query history
+	QueryHistoryEnabled bool
+
+	Storage StorageSettings
+
+	Search SearchSettings
+
+	SecureSocksDSProxy SecureSocksDSProxySettings
+
+	// SAML Auth
+	SAMLAuthEnabled            bool
+	SAMLSkipOrgRoleSync        bool
+	SAMLRoleValuesGrafanaAdmin string
+
+	// Okta OAuth
+	OktaAuthEnabled     bool
+	OktaSkipOrgRoleSync bool
+
+	// OAuth2 Server
+	OAuth2ServerEnabled bool
+
+	// OAuth2Server supports the two recommended key types from the RFC https://www.rfc-editor.org/rfc/rfc7518#section-3.1: RS256 and ES256
+	OAuth2ServerGeneratedKeyTypeForClient string
+	OAuth2ServerAccessTokenLifespan       time.Duration
+
+	// Access Control
+	RBACPermissionCache bool
+	// Enable Permission validation during role creation and provisioning
+	RBACPermissionValidationEnabled bool
+	// Reset basic roles permissions on start-up
+	RBACResetBasicRoles bool
+	// RBAC single organization. This configuration option is subject to change.
+	RBACSingleOrganization bool
+
+	// GRPC Server.
+	GRPCServerNetwork   string
+	GRPCServerAddress   string
+	GRPCServerTLSConfig *tls.Config
+
+	CustomResponseHeaders map[string]string
+
+	// This is used to override the general error message shown to users when we want to obfuscate a sensitive backend error
+	UserFacingDefaultError string
+
+	// DatabaseInstrumentQueries is used to decide if database queries
+	// should be instrumented with metrics, logs and traces.
+	// This needs to be on the global object since its used in the
+	// sqlstore package and HTTP middlewares.
+	DatabaseInstrumentQueries bool
+
+	// Feature Management Settings
+	FeatureManagement FeatureMgmtSettings
+}
+
+// AddChangePasswordLink returns if login form is disabled or not since
+// the same intention can be used to hide both features.
+func (cfg *Cfg) AddChangePasswordLink() bool {
+	return !cfg.DisableLoginForm
+}
+
+type CommandLineArgs struct {
+	Config   string
+	HomePath string
+	Args     []string
+}
+
+func (cfg *Cfg) parseAppUrlAndSubUrl(section *ini.Section) (string, string, error) {
+	appUrl := valueAsString(section, "root_url", "http://localhost:3000/")
+
+	if appUrl[len(appUrl)-1] != '/' {
+		appUrl += "/"
+	}
+
+	// Check if has app suburl.
+	url, err := url.Parse(appUrl)
+	if err != nil {
+		cfg.Logger.Error("Invalid root_url.", "url", appUrl, "error", err)
+		os.Exit(1)
+	}
+
+	appSubUrl := strings.TrimSuffix(url.Path, "/")
+	return appUrl, appSubUrl, nil
+}
+
+func ToAbsUrl(relativeUrl string) string {
+	return AppUrl + relativeUrl
+}
+
+func RedactedValue(key, value string) string {
+	if value == "" {
+		return ""
+	}
+
+	uppercased := strings.ToUpper(key)
+	// Sensitive information: password, secrets etc
+	for _, pattern := range []string{
+		"PASSWORD",
+		"SECRET",
+		"PROVIDER_CONFIG",
+		"PRIVATE_KEY",
+		"SECRET_KEY",
+		"CERTIFICATE",
+		"ACCOUNT_KEY",
+		"ENCRYPTION_KEY",
+		"VAULT_TOKEN",
+	} {
+		if match, err := regexp.MatchString(pattern, uppercased); match && err == nil {
+			return RedactedPassword
+		}
+	}
+
+	for _, exception := range []string{
+		"RUDDERSTACK",
+		"APPLICATION_INSIGHTS",
+		"SENTRY",
+	} {
+		if strings.Contains(uppercased, exception) {
+			return value
+		}
+	}
+
+	if u, err := RedactedURL(value); err == nil {
+		return u
+	}
+
+	return value
+}
+
+func RedactedURL(value string) (string, error) {
+	// Value could be a list of URLs
+	chunks := util.SplitString(value)
+
+	for i, chunk := range chunks {
+		var hasTmpPrefix bool
+		const tmpPrefix = "http://"
+
+		if !strings.Contains(chunk, "://") {
+			chunk = tmpPrefix + chunk
+			hasTmpPrefix = true
+		}
+
+		u, err := url.Parse(chunk)
+		if err != nil {
+			return "", err
+		}
+
+		redacted := u.Redacted()
+		if hasTmpPrefix {
+			redacted = strings.Replace(redacted, tmpPrefix, "", 1)
+		}
+
+		chunks[i] = redacted
+	}
+
+	if strings.Contains(value, ",") {
+		return strings.Join(chunks, ","), nil
+	}
+
+	return strings.Join(chunks, " "), nil
+}
+
+func applyEnvVariableOverrides(file *ini.File) error {
+	appliedEnvOverrides = make([]string, 0)
+	for _, section := range file.Sections() {
+		for _, key := range section.Keys() {
+			envKey := EnvKey(section.Name(), key.Name())
+			envValue := os.Getenv(envKey)
+
+			if len(envValue) > 0 {
+				key.SetValue(envValue)
+				appliedEnvOverrides = append(appliedEnvOverrides, fmt.Sprintf("%s=%s", envKey, RedactedValue(envKey, envValue)))
+			}
+		}
+	}
+
+	return nil
+}
+
+func (cfg *Cfg) readGrafanaEnvironmentMetrics() error {
+	environmentMetricsSection := cfg.Raw.Section("metrics.environment_info")
+	keys := environmentMetricsSection.Keys()
+	cfg.MetricsGrafanaEnvironmentInfo = make(map[string]string, len(keys))
+
+	for _, key := range keys {
+		labelName := model.LabelName(key.Name())
+		labelValue := model.LabelValue(key.Value())
+
+		if !labelName.IsValid() {
+			return fmt.Errorf("invalid label name in [metrics.environment_info] configuration. name %q", labelName)
+		}
+
+		if !labelValue.IsValid() {
+			return fmt.Errorf("invalid label value in [metrics.environment_info] configuration. name %q value %q", labelName, labelValue)
+		}
+
+		cfg.MetricsGrafanaEnvironmentInfo[string(labelName)] = string(labelValue)
+	}
+
+	return nil
+}
+
+func (cfg *Cfg) readAnnotationSettings() error {
+	section := cfg.Raw.Section("annotations")
+	cfg.AnnotationCleanupJobBatchSize = section.Key("cleanupjob_batchsize").MustInt64(100)
+	cfg.AnnotationMaximumTagsLength = section.Key("tags_length").MustInt64(500)
+	switch {
+	case cfg.AnnotationMaximumTagsLength > 4096:
+		// ensure that the configuration does not exceed the respective column size
+		return fmt.Errorf("[annotations.tags_length] configuration exceeds the maximum allowed (4096)")
+	case cfg.AnnotationMaximumTagsLength > 500:
+		cfg.Logger.Info("[annotations.tags_length] has been increased from its default value; this may affect the performance", "tagLength", cfg.AnnotationMaximumTagsLength)
+	case cfg.AnnotationMaximumTagsLength < 500:
+		cfg.Logger.Warn("[annotations.tags_length] is too low; the minimum allowed (500) is enforced")
+		cfg.AnnotationMaximumTagsLength = 500
+	}
+
+	dashboardAnnotation := cfg.Raw.Section("annotations.dashboard")
+	apiIAnnotation := cfg.Raw.Section("annotations.api")
+	alertingSection := cfg.Raw.Section("alerting")
+
+	var newAnnotationCleanupSettings = func(section *ini.Section, maxAgeField string) AnnotationCleanupSettings {
+		maxAge, err := gtime.ParseDuration(section.Key(maxAgeField).MustString(""))
+		if err != nil {
+			maxAge = 0
+		}
+
+		return AnnotationCleanupSettings{
+			MaxAge:   maxAge,
+			MaxCount: section.Key("max_annotations_to_keep").MustInt64(0),
+		}
+	}
+
+	cfg.AlertingAnnotationCleanupSetting = newAnnotationCleanupSettings(alertingSection, "max_annotation_age")
+	cfg.DashboardAnnotationCleanupSettings = newAnnotationCleanupSettings(dashboardAnnotation, "max_age")
+	cfg.APIAnnotationCleanupSettings = newAnnotationCleanupSettings(apiIAnnotation, "max_age")
+
+	return nil
+}
+
+func (cfg *Cfg) readExpressionsSettings() {
+	expressions := cfg.Raw.Section("expressions")
+	cfg.ExpressionsEnabled = expressions.Key("enabled").MustBool(true)
+}
+
+type AnnotationCleanupSettings struct {
+	MaxAge   time.Duration
+	MaxCount int64
+}
+
+func EnvKey(sectionName string, keyName string) string {
+	sN := strings.ToUpper(strings.ReplaceAll(sectionName, ".", "_"))
+	sN = strings.ReplaceAll(sN, "-", "_")
+	kN := strings.ToUpper(strings.ReplaceAll(keyName, ".", "_"))
+	envKey := fmt.Sprintf("GF_%s_%s", sN, kN)
+	return envKey
+}
+
+func applyCommandLineDefaultProperties(props map[string]string, file *ini.File) {
+	appliedCommandLineProperties = make([]string, 0)
+	for _, section := range file.Sections() {
+		for _, key := range section.Keys() {
+			keyString := fmt.Sprintf("default.%s.%s", section.Name(), key.Name())
+			value, exists := props[keyString]
+			if exists {
+				key.SetValue(value)
+				appliedCommandLineProperties = append(appliedCommandLineProperties,
+					fmt.Sprintf("%s=%s", keyString, RedactedValue(keyString, value)))
+			}
+		}
+	}
+}
+
+func applyCommandLineProperties(props map[string]string, file *ini.File) {
+	for _, section := range file.Sections() {
+		sectionName := section.Name() + "."
+		if section.Name() == ini.DefaultSection {
+			sectionName = ""
+		}
+		for _, key := range section.Keys() {
+			keyString := sectionName + key.Name()
+			value, exists := props[keyString]
+			if exists {
+				appliedCommandLineProperties = append(appliedCommandLineProperties, fmt.Sprintf("%s=%s", keyString, value))
+				key.SetValue(value)
+			}
+		}
+	}
+}
+
+func (cfg *Cfg) getCommandLineProperties(args []string) map[string]string {
+	props := make(map[string]string)
+
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "cfg:") {
+			continue
+		}
+
+		trimmed := strings.TrimPrefix(arg, "cfg:")
+		parts := strings.Split(trimmed, "=")
+		if len(parts) != 2 {
+			cfg.Logger.Error("Invalid command line argument.", "argument", arg)
+			os.Exit(1)
+		}
+
+		props[parts[0]] = parts[1]
+	}
+	return props
+}
+
+func makeAbsolute(path string, root string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(root, path)
+}
+
+func (cfg *Cfg) loadSpecifiedConfigFile(configFile string, masterFile *ini.File) error {
+	if configFile == "" {
+		configFile = filepath.Join(cfg.HomePath, CustomInitPath)
+		// return without error if custom file does not exist
+		if !pathExists(configFile) {
+			return nil
+		}
+	}
+
+	userConfig, err := ini.Load(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to parse %q: %w", configFile, err)
+	}
+
+	userConfig.BlockMode = false
+
+	for _, section := range userConfig.Sections() {
+		for _, key := range section.Keys() {
+			if key.Value() == "" {
+				continue
+			}
+
+			defaultSec, err := masterFile.GetSection(section.Name())
+			if err != nil {
+				defaultSec, _ = masterFile.NewSection(section.Name())
+			}
+			defaultKey, err := defaultSec.GetKey(key.Name())
+			if err != nil {
+				defaultKey, _ = defaultSec.NewKey(key.Name(), key.Value())
+			}
+			defaultKey.SetValue(key.Value())
+		}
+	}
+
+	configFiles = append(configFiles, configFile)
+	return nil
+}
+
+func (cfg *Cfg) loadConfiguration(args CommandLineArgs) (*ini.File, error) {
+	// load config defaults
+	defaultConfigFile := path.Join(HomePath, "conf/defaults.ini")
+	configFiles = append(configFiles, defaultConfigFile)
+
+	// check if config file exists
+	if _, err := os.Stat(defaultConfigFile); os.IsNotExist(err) {
+		fmt.Println("Grafana-server Init Failed: Could not find config defaults, make sure homepath command line parameter is set or working directory is homepath")
+		os.Exit(1)
+	}
+
+	// load defaults
+	parsedFile, err := ini.Load(defaultConfigFile)
+	if err != nil {
+		fmt.Printf("Failed to parse defaults.ini, %v\n", err)
+		os.Exit(1)
+		return nil, err
+	}
+
+	parsedFile.BlockMode = false
+
+	// command line props
+	commandLineProps := cfg.getCommandLineProperties(args.Args)
+	// load default overrides
+	applyCommandLineDefaultProperties(commandLineProps, parsedFile)
+
+	// load specified config file
+	err = cfg.loadSpecifiedConfigFile(args.Config, parsedFile)
+	if err != nil {
+		err2 := cfg.initLogging(parsedFile)
+		if err2 != nil {
+			return nil, err2
+		}
+		cfg.Logger.Error(err.Error())
+		os.Exit(1)
+	}
+
+	// apply environment overrides
+	err = applyEnvVariableOverrides(parsedFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// apply command line overrides
+	applyCommandLineProperties(commandLineProps, parsedFile)
+
+	// evaluate config values containing environment variables
+	err = expandConfig(parsedFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// update data path and logging config
+	dataPath := valueAsString(parsedFile.Section("paths"), "data", "")
+
+	cfg.DataPath = makeAbsolute(dataPath, HomePath)
+	err = cfg.initLogging(parsedFile)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.Logger.Info(fmt.Sprintf("Starting %s", ApplicationName), "version", BuildVersion, "commit", BuildCommit, "branch", BuildBranch, "compiled", time.Unix(BuildStamp, 0))
+
+	return parsedFile, err
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	return false
+}
+
+func (cfg *Cfg) setHomePath(args CommandLineArgs) {
+	if args.HomePath != "" {
+		cfg.HomePath = args.HomePath
+		HomePath = cfg.HomePath
+		return
+	}
+
+	var err error
+	cfg.HomePath, err = filepath.Abs(".")
+	if err != nil {
+		panic(err)
+	}
+
+	HomePath = cfg.HomePath
+	// check if homepath is correct
+	if pathExists(filepath.Join(cfg.HomePath, "conf/defaults.ini")) {
+		return
+	}
+
+	// try down one path
+	if pathExists(filepath.Join(cfg.HomePath, "../conf/defaults.ini")) {
+		cfg.HomePath = filepath.Join(cfg.HomePath, "../")
+		HomePath = cfg.HomePath
+	}
+}
+
+var skipStaticRootValidation = false
+
+func NewCfg() *Cfg {
+	return &Cfg{
+		Target: []string{"all"},
+		Logger: log.New("settings"),
+		Raw:    ini.Empty(),
+		Azure:  &azsettings.AzureSettings{},
+
+		// Avoid nil pointer
+		IsFeatureToggleEnabled: func(_ string) bool {
+			return false
+		},
+	}
+}
+
+// Deprecated: Avoid using IsFeatureToggleEnabled from settings.  If you need to access
+// feature flags, read them from the FeatureToggle (or FeatureManager) interface
+func NewCfgWithFeatures(features func(string) bool) *Cfg {
+	cfg := NewCfg()
+	cfg.IsFeatureToggleEnabled = features
+	return cfg
+}
+
+func NewCfgFromArgs(args CommandLineArgs) (*Cfg, error) {
+	cfg := NewCfg()
+	if err := cfg.Load(args); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func (cfg *Cfg) validateStaticRootPath() error {
+	if skipStaticRootValidation {
+		return nil
+	}
+
+	if _, err := os.Stat(path.Join(StaticRootPath, "build")); err != nil {
+		cfg.Logger.Error("Failed to detect generated javascript files in public/build")
+	}
+
+	return nil
+}
+
+func (cfg *Cfg) Load(args CommandLineArgs) error {
+	cfg.setHomePath(args)
+
+	// Fix for missing IANA db on Windows
+	_, zoneInfoSet := os.LookupEnv(zoneInfo)
+	if runtime.GOOS == "windows" && !zoneInfoSet {
+		if err := os.Setenv(zoneInfo, filepath.Join(HomePath, "tools", "zoneinfo.zip")); err != nil {
+			cfg.Logger.Error("Can't set ZONEINFO environment variable", "err", err)
+		}
+	}
+
+	iniFile, err := cfg.loadConfiguration(args)
+	if err != nil {
+		return err
+	}
+
+	cfg.Raw = iniFile
+
+	// Temporarily keep global, to make refactor in steps
+	Raw = cfg.Raw
+
+	cfg.BuildVersion = BuildVersion
+	cfg.BuildCommit = BuildCommit
+	cfg.EnterpriseBuildCommit = EnterpriseBuildCommit
+	cfg.BuildStamp = BuildStamp
+	cfg.BuildBranch = BuildBranch
+	cfg.IsEnterprise = IsEnterprise
+	cfg.Packaging = Packaging
+
+	cfg.ErrTemplateName = "error"
+
+	Target := valueAsString(iniFile.Section(""), "target", "all")
+	if Target != "" {
+		cfg.Target = util.SplitString(Target)
+	}
+	Env = valueAsString(iniFile.Section(""), "app_mode", "development")
+	cfg.Env = Env
+	cfg.StackID = valueAsString(iniFile.Section("environment"), "stack_id", "")
+	cfg.Slug = valueAsString(iniFile.Section("environment"), "stack_slug", "")
+	//nolint:staticcheck
+	cfg.ForceMigration = iniFile.Section("").Key("force_migration").MustBool(false)
+	InstanceName = valueAsString(iniFile.Section(""), "instance_name", "unknown_instance_name")
+	plugins := valueAsString(iniFile.Section("paths"), "plugins", "")
+	cfg.PluginsPath = makeAbsolute(plugins, HomePath)
+	cfg.BundledPluginsPath = makeAbsolute("plugins-bundled", HomePath)
+	provisioning := valueAsString(iniFile.Section("paths"), "provisioning", "")
+	cfg.ProvisioningPath = makeAbsolute(provisioning, HomePath)
+
+	if err := cfg.readServerSettings(iniFile); err != nil {
+		return err
+	}
+
+	if err := readDataProxySettings(iniFile, cfg); err != nil {
+		return err
+	}
+
+	if err := readSecuritySettings(iniFile, cfg); err != nil {
+		return err
+	}
+
+	if err := readSnapshotsSettings(cfg, iniFile); err != nil {
+		return err
+	}
+
+	if err := readGRPCServerSettings(cfg, iniFile); err != nil {
+		return err
+	}
+
+	// read dashboard settings
+	dashboards := iniFile.Section("dashboards")
+	DashboardVersionsToKeep = dashboards.Key("versions_to_keep").MustInt(20)
+	MinRefreshInterval = valueAsString(dashboards, "min_refresh_interval", "5s")
+
+	cfg.DefaultHomeDashboardPath = dashboards.Key("default_home_dashboard_path").MustString("")
+
+	if err := readUserSettings(iniFile, cfg); err != nil {
+		return err
+	}
+	if err := readServiceAccountSettings(iniFile, cfg); err != nil {
+		return err
+	}
+	if err := readAuthSettings(iniFile, cfg); err != nil {
+		return err
+	}
+
+	readOAuth2ServerSettings(cfg)
+
+	readAccessControlSettings(iniFile, cfg)
+	if err := cfg.readRenderingSettings(iniFile); err != nil {
+		return err
+	}
+
+	cfg.TempDataLifetime = iniFile.Section("paths").Key("temp_data_lifetime").MustDuration(time.Second * 3600 * 24)
+	cfg.MetricsEndpointEnabled = iniFile.Section("metrics").Key("enabled").MustBool(true)
+	cfg.MetricsEndpointBasicAuthUsername = valueAsString(iniFile.Section("metrics"), "basic_auth_username", "")
+	cfg.MetricsEndpointBasicAuthPassword = valueAsString(iniFile.Section("metrics"), "basic_auth_password", "")
+	cfg.MetricsEndpointDisableTotalStats = iniFile.Section("metrics").Key("disable_total_stats").MustBool(false)
+	cfg.MetricsIncludeTeamLabel = iniFile.Section("metrics").Key("include_team_label").MustBool(false)
+	cfg.MetricsTotalStatsIntervalSeconds = iniFile.Section("metrics").Key("total_stats_collector_interval_seconds").MustInt(1800)
+
+	analytics := iniFile.Section("analytics")
+	cfg.CheckForGrafanaUpdates = analytics.Key("check_for_updates").MustBool(true)
+	cfg.CheckForPluginUpdates = analytics.Key("check_for_plugin_updates").MustBool(true)
+
+	cfg.GoogleAnalyticsID = analytics.Key("google_analytics_ua_id").String()
+	cfg.GoogleAnalytics4ID = analytics.Key("google_analytics_4_id").String()
+	cfg.GoogleAnalytics4SendManualPageViews = analytics.Key("google_analytics_4_send_manual_page_views").MustBool(false)
+	cfg.GoogleTagManagerID = analytics.Key("google_tag_manager_id").String()
+	cfg.RudderstackWriteKey = analytics.Key("rudderstack_write_key").String()
+	cfg.RudderstackDataPlaneURL = analytics.Key("rudderstack_data_plane_url").String()
+	cfg.RudderstackSDKURL = analytics.Key("rudderstack_sdk_url").String()
+	cfg.RudderstackConfigURL = analytics.Key("rudderstack_config_url").String()
+	cfg.RudderstackIntegrationsURL = analytics.Key("rudderstack_integrations_url").String()
+	cfg.IntercomSecret = analytics.Key("intercom_secret").String()
+
+	cfg.ReportingEnabled = analytics.Key("reporting_enabled").MustBool(true)
+	cfg.ReportingDistributor = analytics.Key("reporting_distributor").MustString("grafana-labs")
+
+	if len(cfg.ReportingDistributor) >= 100 {
+		cfg.ReportingDistributor = cfg.ReportingDistributor[:100]
+	}
+
+	cfg.ApplicationInsightsConnectionString = analytics.Key("application_insights_connection_string").String()
+	cfg.ApplicationInsightsEndpointUrl = analytics.Key("application_insights_endpoint_url").String()
+	cfg.FeedbackLinksEnabled = analytics.Key("feedback_links_enabled").MustBool(true)
+
+	if err := readAlertingSettings(iniFile); err != nil {
+		return err
+	}
+
+	explore := iniFile.Section("explore")
+	ExploreEnabled = explore.Key("enabled").MustBool(true)
+
+	help := iniFile.Section("help")
+	HelpEnabled = help.Key("enabled").MustBool(true)
+
+	profile := iniFile.Section("profile")
+	ProfileEnabled = profile.Key("enabled").MustBool(true)
+
+	news := iniFile.Section("news")
+	NewsFeedEnabled = news.Key("news_feed_enabled").MustBool(true)
+
+	queryHistory := iniFile.Section("query_history")
+	cfg.QueryHistoryEnabled = queryHistory.Key("enabled").MustBool(true)
+
+	panelsSection := iniFile.Section("panels")
+	cfg.DisableSanitizeHtml = panelsSection.Key("disable_sanitize_html").MustBool(false)
+
+	if err := cfg.readPluginSettings(iniFile); err != nil {
+		return err
+	}
+
+	// nolint:staticcheck
+	if err := cfg.readFeatureToggles(iniFile); err != nil {
+		return err
+	}
+
+	if err := cfg.ReadUnifiedAlertingSettings(iniFile); err != nil {
+		return err
+	}
+
+	// check old location for this option
+	if panelsSection.Key("enable_alpha").MustBool(false) {
+		cfg.PluginsEnableAlpha = true
+	}
+
+	cfg.readSAMLConfig()
+	cfg.readLDAPConfig()
+	cfg.handleAWSConfig()
+	cfg.readAzureSettings()
+	cfg.readSessionConfig()
+	cfg.readSmtpSettings()
+	if err := cfg.readAnnotationSettings(); err != nil {
+		return err
+	}
+
+	cfg.readQuotaSettings()
+
+	cfg.readExpressionsSettings()
+	if err := cfg.readGrafanaEnvironmentMetrics(); err != nil {
+		return err
+	}
+
+	cfg.readDataSourcesSettings()
+	cfg.readSqlDataSourceSettings()
+
+	cfg.Storage = readStorageSettings(iniFile)
+	cfg.Search = readSearchSettings(iniFile)
+
+	cfg.SecureSocksDSProxy, err = readSecureSocksDSProxySettings(iniFile)
+	if err != nil {
+		// if the proxy is misconfigured, disable it rather than crashing
+		cfg.SecureSocksDSProxy.Enabled = false
+		cfg.Logger.Error("secure_socks_datasource_proxy unable to start up", "err", err.Error())
+	}
+
+	if VerifyEmailEnabled && !cfg.Smtp.Enabled {
+		cfg.Logger.Warn("require_email_validation is enabled but smtp is disabled")
+	}
+
+	// check old key name
+	GrafanaComUrl = valueAsString(iniFile.Section("grafana_net"), "url", "")
+	if GrafanaComUrl == "" {
+		GrafanaComUrl = valueAsString(iniFile.Section("grafana_com"), "url", "https://grafana.com")
+	}
+	cfg.GrafanaComURL = GrafanaComUrl
+
+	cfg.GrafanaComAPIURL = valueAsString(iniFile.Section("grafana_com"), "api_url", GrafanaComUrl+"/api")
+
+	imageUploadingSection := iniFile.Section("external_image_storage")
+	cfg.ImageUploadProvider = valueAsString(imageUploadingSection, "provider", "")
+	ImageUploadProvider = cfg.ImageUploadProvider
+
+	enterprise := iniFile.Section("enterprise")
+	cfg.EnterpriseLicensePath = valueAsString(enterprise, "license_path", filepath.Join(cfg.DataPath, "license.jwt"))
+
+	cacheServer := iniFile.Section("remote_cache")
+	dbName := valueAsString(cacheServer, "type", "database")
+	connStr := valueAsString(cacheServer, "connstr", "")
+	prefix := valueAsString(cacheServer, "prefix", "")
+	encryption := cacheServer.Key("encryption").MustBool(false)
+
+	cfg.RemoteCacheOptions = &RemoteCacheOptions{
+		Name:       dbName,
+		ConnStr:    connStr,
+		Prefix:     prefix,
+		Encryption: encryption,
+	}
+
+	geomapSection := iniFile.Section("geomap")
+	basemapJSON := valueAsString(geomapSection, "default_baselayer_config", "")
+	if basemapJSON != "" {
+		layer := make(map[string]any)
+		err = json.Unmarshal([]byte(basemapJSON), &layer)
+		if err != nil {
+			cfg.Logger.Error("Error reading json from default_baselayer_config", "error", err)
+		} else {
+			cfg.GeomapDefaultBaseLayerConfig = layer
+		}
+	}
+	cfg.GeomapEnableCustomBaseLayers = geomapSection.Key("enable_custom_baselayers").MustBool(true)
+
+	cfg.readDateFormats()
+	cfg.readGrafanaJavascriptAgentConfig()
+
+	if err := cfg.readLiveSettings(iniFile); err != nil {
+		return err
+	}
+
+	cfg.LogConfigSources()
+
+	databaseSection := iniFile.Section("database")
+	cfg.DatabaseInstrumentQueries = databaseSection.Key("instrument_queries").MustBool(false)
+
+	logSection := iniFile.Section("log")
+	cfg.UserFacingDefaultError = logSection.Key("user_facing_default_error").MustString("please inspect Grafana server log for details")
+
+	cfg.readFeatureManagementConfig()
+
+	return nil
+}
+
+func valueAsString(section *ini.Section, keyName string, defaultValue string) string {
+	return section.Key(keyName).MustString(defaultValue)
+}
+
+type RemoteCacheOptions struct {
+	Name       string
+	ConnStr    string
+	Prefix     string
+	Encryption bool
+}
+
+func (cfg *Cfg) readSAMLConfig() {
+	samlSec := cfg.Raw.Section("auth.saml")
+	cfg.SAMLAuthEnabled = samlSec.Key("enabled").MustBool(false)
+	cfg.SAMLSkipOrgRoleSync = samlSec.Key("skip_org_role_sync").MustBool(false)
+	cfg.SAMLRoleValuesGrafanaAdmin = samlSec.Key("role_values_grafana_admin").MustString("")
+}
+
+func (cfg *Cfg) readLDAPConfig() {
+	ldapSec := cfg.Raw.Section("auth.ldap")
+	cfg.LDAPConfigFilePath = ldapSec.Key("config_file").String()
+	cfg.LDAPSyncCron = ldapSec.Key("sync_cron").String()
+	cfg.LDAPAuthEnabled = ldapSec.Key("enabled").MustBool(false)
+	cfg.LDAPSkipOrgRoleSync = ldapSec.Key("skip_org_role_sync").MustBool(false)
+	cfg.LDAPActiveSyncEnabled = ldapSec.Key("active_sync_enabled").MustBool(false)
+	cfg.LDAPAllowSignup = ldapSec.Key("allow_sign_up").MustBool(true)
+}
+
+func (cfg *Cfg) handleAWSConfig() {
+	awsPluginSec := cfg.Raw.Section("aws")
+	cfg.AWSAssumeRoleEnabled = awsPluginSec.Key("assume_role_enabled").MustBool(true)
+	allowedAuthProviders := awsPluginSec.Key("allowed_auth_providers").MustString("default,keys,credentials")
+	for _, authProvider := range strings.Split(allowedAuthProviders, ",") {
+		authProvider = strings.TrimSpace(authProvider)
+		if authProvider != "" {
+			cfg.AWSAllowedAuthProviders = append(cfg.AWSAllowedAuthProviders, authProvider)
+		}
+	}
+	cfg.AWSListMetricsPageLimit = awsPluginSec.Key("list_metrics_page_limit").MustInt(500)
+	// Also set environment variables that can be used by core plugins
+	err := os.Setenv(awsds.AssumeRoleEnabledEnvVarKeyName, strconv.FormatBool(cfg.AWSAssumeRoleEnabled))
+	if err != nil {
+		cfg.Logger.Error(fmt.Sprintf("could not set environment variable '%s'", awsds.AssumeRoleEnabledEnvVarKeyName), err)
+	}
+
+	err = os.Setenv(awsds.AllowedAuthProvidersEnvVarKeyName, allowedAuthProviders)
+	if err != nil {
+		cfg.Logger.Error(fmt.Sprintf("could not set environment variable '%s'", awsds.AllowedAuthProvidersEnvVarKeyName), err)
+	}
+
+	cfg.AWSExternalId = awsPluginSec.Key("external_id").Value()
+	err = os.Setenv(awsds.GrafanaAssumeRoleExternalIdKeyName, cfg.AWSExternalId)
+	if err != nil {
+		cfg.Logger.Error(fmt.Sprintf("could not set environment variable '%s'", awsds.GrafanaAssumeRoleExternalIdKeyName), err)
+	}
+}
+
+func (cfg *Cfg) readSessionConfig() {
+	sec, _ := cfg.Raw.GetSection("session")
+
+	if sec != nil {
+		cfg.Logger.Warn(
+			"[Removed] Session setting was removed in v6.2, use remote_cache option instead",
+		)
+	}
+}
+
+func (cfg *Cfg) initLogging(file *ini.File) error {
+	logModeStr := valueAsString(file.Section("log"), "mode", "console")
+	// split on comma
+	logModes := strings.Split(logModeStr, ",")
+	// also try space
+	if len(logModes) == 1 {
+		logModes = strings.Split(logModeStr, " ")
+	}
+	logsPath := valueAsString(file.Section("paths"), "logs", "")
+	cfg.LogsPath = makeAbsolute(logsPath, HomePath)
+	return log.ReadLoggingConfig(logModes, cfg.LogsPath, file)
+}
+
+func (cfg *Cfg) LogConfigSources() {
+	var text bytes.Buffer
+
+	for _, file := range configFiles {
+		cfg.Logger.Info("Config loaded from", "file", file)
+	}
+
+	if len(appliedCommandLineProperties) > 0 {
+		for _, prop := range appliedCommandLineProperties {
+			cfg.Logger.Info("Config overridden from command line", "arg", prop)
+		}
+	}
+
+	if len(appliedEnvOverrides) > 0 {
+		text.WriteString("\tEnvironment variables used:\n")
+		for _, prop := range appliedEnvOverrides {
+			cfg.Logger.Info("Config overridden from Environment variable", "var", prop)
+		}
+	}
+
+	cfg.Logger.Info("Target", "target", cfg.Target)
+	cfg.Logger.Info("Path Home", "path", HomePath)
+	cfg.Logger.Info("Path Data", "path", cfg.DataPath)
+	cfg.Logger.Info("Path Logs", "path", cfg.LogsPath)
+	cfg.Logger.Info("Path Plugins", "path", cfg.PluginsPath)
+	cfg.Logger.Info("Path Provisioning", "path", cfg.ProvisioningPath)
+	cfg.Logger.Info("App mode " + cfg.Env)
+}
+
+type DynamicSection struct {
+	section *ini.Section
+	Logger  log.Logger
+}
+
+// Key dynamically overrides keys with environment variables.
+// As a side effect, the value of the setting key will be updated if an environment variable is present.
+func (s *DynamicSection) Key(k string) *ini.Key {
+	envKey := EnvKey(s.section.Name(), k)
+	envValue := os.Getenv(envKey)
+	key := s.section.Key(k)
+
+	if len(envValue) == 0 {
+		return key
+	}
+
+	key.SetValue(envValue)
+	s.Logger.Info("Config overridden from Environment variable", "var", fmt.Sprintf("%s=%s", envKey, RedactedValue(envKey, envValue)))
+
+	return key
+}
+
+func (s *DynamicSection) KeysHash() map[string]string {
+	hash := s.section.KeysHash()
+	for k := range hash {
+		envKey := EnvKey(s.section.Name(), k)
+		envValue := os.Getenv(envKey)
+		if len(envValue) > 0 {
+			hash[k] = envValue
+		}
+	}
+	return hash
+}
+
+// SectionWithEnvOverrides dynamically overrides keys with environment variables.
+// As a side effect, the value of the setting key will be updated if an environment variable is present.
+func (cfg *Cfg) SectionWithEnvOverrides(s string) *DynamicSection {
+	return &DynamicSection{cfg.Raw.Section(s), cfg.Logger}
+}
+
+func readSecuritySettings(iniFile *ini.File, cfg *Cfg) error {
+	security := iniFile.Section("security")
+	SecretKey = valueAsString(security, "secret_key", "")
+	cfg.SecretKey = SecretKey
+	DisableGravatar = security.Key("disable_gravatar").MustBool(true)
+	cfg.DisableBruteForceLoginProtection = security.Key("disable_brute_force_login_protection").MustBool(false)
+
+	CookieSecure = security.Key("cookie_secure").MustBool(false)
+	cfg.CookieSecure = CookieSecure
+
+	samesiteString := valueAsString(security, "cookie_samesite", "lax")
+
+	if samesiteString == "disabled" {
+		CookieSameSiteDisabled = true
+		cfg.CookieSameSiteDisabled = CookieSameSiteDisabled
+	} else {
+		validSameSiteValues := map[string]http.SameSite{
+			"lax":    http.SameSiteLaxMode,
+			"strict": http.SameSiteStrictMode,
+			"none":   http.SameSiteNoneMode,
+		}
+
+		if samesite, ok := validSameSiteValues[samesiteString]; ok {
+			CookieSameSiteMode = samesite
+			cfg.CookieSameSiteMode = CookieSameSiteMode
+		} else {
+			CookieSameSiteMode = http.SameSiteLaxMode
+			cfg.CookieSameSiteMode = CookieSameSiteMode
+		}
+	}
+	cfg.AllowEmbedding = security.Key("allow_embedding").MustBool(false)
+
+	cfg.ContentTypeProtectionHeader = security.Key("x_content_type_options").MustBool(true)
+	cfg.XSSProtectionHeader = security.Key("x_xss_protection").MustBool(true)
+	cfg.StrictTransportSecurity = security.Key("strict_transport_security").MustBool(false)
+	cfg.StrictTransportSecurityMaxAge = security.Key("strict_transport_security_max_age_seconds").MustInt(86400)
+	cfg.StrictTransportSecurityPreload = security.Key("strict_transport_security_preload").MustBool(false)
+	cfg.StrictTransportSecuritySubDomains = security.Key("strict_transport_security_subdomains").MustBool(false)
+	cfg.AngularSupportEnabled = security.Key("angular_support_enabled").MustBool(true)
+	cfg.CSPEnabled = security.Key("content_security_policy").MustBool(false)
+	cfg.CSPTemplate = security.Key("content_security_policy_template").MustString("")
+	cfg.CSPReportOnlyEnabled = security.Key("content_security_policy_report_only").MustBool(false)
+	cfg.CSPReportOnlyTemplate = security.Key("content_security_policy_report_only_template").MustString("")
+
+	disableFrontendSandboxForPlugins := security.Key("disable_frontend_sandbox_for_plugins").MustString("")
+	for _, plug := range strings.Split(disableFrontendSandboxForPlugins, ",") {
+		plug = strings.TrimSpace(plug)
+		cfg.DisableFrontendSandboxForPlugins = append(cfg.DisableFrontendSandboxForPlugins, plug)
+	}
+
+	if cfg.CSPEnabled && cfg.CSPTemplate == "" {
+		return fmt.Errorf("enabling content_security_policy requires a content_security_policy_template configuration")
+	}
+
+	if cfg.CSPReportOnlyEnabled && cfg.CSPReportOnlyTemplate == "" {
+		return fmt.Errorf("enabling content_security_policy_report_only requires a content_security_policy_report_only_template configuration")
+	}
+
+	// read data source proxy whitelist
+	DataProxyWhiteList = make(map[string]bool)
+	securityStr := valueAsString(security, "data_source_proxy_whitelist", "")
+
+	for _, hostAndIP := range util.SplitString(securityStr) {
+		DataProxyWhiteList[hostAndIP] = true
+	}
+
+	// admin
+	cfg.DisableInitAdminCreation = security.Key("disable_initial_admin_creation").MustBool(false)
+	cfg.AdminUser = valueAsString(security, "admin_user", "")
+	cfg.AdminPassword = valueAsString(security, "admin_password", "")
+	cfg.AdminEmail = valueAsString(security, "admin_email", fmt.Sprintf("%s@localhost", cfg.AdminUser))
+
+	return nil
+}
+func readAuthAzureADSettings(cfg *Cfg) {
+	sec := cfg.SectionWithEnvOverrides("auth.azuread")
+	cfg.AzureADEnabled = sec.Key("enabled").MustBool(false)
+	cfg.AzureADSkipOrgRoleSync = sec.Key("skip_org_role_sync").MustBool(false)
+}
+
+func readAuthGrafanaComSettings(cfg *Cfg) {
+	sec := cfg.SectionWithEnvOverrides("auth.grafana_com")
+	cfg.GrafanaComAuthEnabled = sec.Key("enabled").MustBool(false)
+	cfg.GrafanaComSkipOrgRoleSync = sec.Key("skip_org_role_sync").MustBool(false)
+}
+
+func readAuthGrafanaNetSettings(cfg *Cfg) {
+	sec := cfg.SectionWithEnvOverrides("auth.grafananet")
+	cfg.GrafanaNetAuthEnabled = sec.Key("enabled").MustBool(false)
+}
+
+func readAuthGithubSettings(cfg *Cfg) {
+	sec := cfg.SectionWithEnvOverrides("auth.github")
+	cfg.GitHubAuthEnabled = sec.Key("enabled").MustBool(false)
+	cfg.GitHubSkipOrgRoleSync = sec.Key("skip_org_role_sync").MustBool(false)
+}
+
+func readAuthGoogleSettings(cfg *Cfg) {
+	sec := cfg.SectionWithEnvOverrides("auth.google")
+	cfg.GoogleAuthEnabled = sec.Key("enabled").MustBool(false)
+	cfg.GoogleSkipOrgRoleSync = sec.Key("skip_org_role_sync").MustBool(true)
+}
+
+func readAuthGitlabSettings(cfg *Cfg) {
+	sec := cfg.SectionWithEnvOverrides("auth.gitlab")
+	cfg.GitLabAuthEnabled = sec.Key("enabled").MustBool(false)
+	cfg.GitLabSkipOrgRoleSync = sec.Key("skip_org_role_sync").MustBool(false)
+}
+
+func readGenericOAuthSettings(cfg *Cfg) {
+	sec := cfg.SectionWithEnvOverrides("auth.generic_oauth")
+	cfg.GenericOAuthAuthEnabled = sec.Key("enabled").MustBool(false)
+	cfg.GenericOAuthSkipOrgRoleSync = sec.Key("skip_org_role_sync").MustBool(false)
+}
+
+func readAuthOktaSettings(cfg *Cfg) {
+	sec := cfg.SectionWithEnvOverrides("auth.okta")
+	cfg.OktaAuthEnabled = sec.Key("enabled").MustBool(false)
+	cfg.OktaSkipOrgRoleSync = sec.Key("skip_org_role_sync").MustBool(false)
+}
+
+func readAuthSettings(iniFile *ini.File, cfg *Cfg) (err error) {
+	auth := iniFile.Section("auth")
+
+	cfg.LoginCookieName = valueAsString(auth, "login_cookie_name", "grafana_session")
+	const defaultMaxInactiveLifetime = "7d"
+	maxInactiveDurationVal := valueAsString(auth, "login_maximum_inactive_lifetime_duration", defaultMaxInactiveLifetime)
+	cfg.LoginMaxInactiveLifetime, err = gtime.ParseDuration(maxInactiveDurationVal)
+	if err != nil {
+		return err
+	}
+
+	cfg.OAuthAllowInsecureEmailLookup = auth.Key("oauth_allow_insecure_email_lookup").MustBool(false)
+
+	const defaultMaxLifetime = "30d"
+	maxLifetimeDurationVal := valueAsString(auth, "login_maximum_lifetime_duration", defaultMaxLifetime)
+	cfg.LoginMaxLifetime, err = gtime.ParseDuration(maxLifetimeDurationVal)
+	if err != nil {
+		return err
+	}
+
+	cfg.ApiKeyMaxSecondsToLive = auth.Key("api_key_max_seconds_to_live").MustInt64(-1)
+
+	cfg.TokenRotationIntervalMinutes = auth.Key("token_rotation_interval_minutes").MustInt(10)
+	if cfg.TokenRotationIntervalMinutes < 2 {
+		cfg.TokenRotationIntervalMinutes = 2
+	}
+
+	// Do not use
+	cfg.AuthConfigUIAdminAccess = auth.Key("config_ui_admin_access").MustBool(false)
+
+	cfg.DisableLoginForm = auth.Key("disable_login_form").MustBool(false)
+	DisableSignoutMenu = auth.Key("disable_signout_menu").MustBool(false)
+
+	// Deprecated
+	cfg.OAuthAutoLogin = auth.Key("oauth_auto_login").MustBool(false)
+	if cfg.OAuthAutoLogin {
+		cfg.Logger.Warn("[Deprecated] The oauth_auto_login configuration setting is deprecated. Please use auto_login inside auth provider section instead.")
+	}
+
+	cfg.OAuthCookieMaxAge = auth.Key("oauth_state_cookie_max_age").MustInt(600)
+	cfg.SignoutRedirectUrl = valueAsString(auth, "signout_redirect_url", "")
+	// Deprecated
+	cfg.OAuthSkipOrgRoleUpdateSync = auth.Key("oauth_skip_org_role_update_sync").MustBool(false)
+	if cfg.OAuthSkipOrgRoleUpdateSync {
+		cfg.Logger.Warn("[Deprecated] The oauth_skip_org_role_update_sync configuration setting is deprecated. Please use skip_org_role_sync inside the auth provider section instead.")
+	}
+
+	cfg.DisableLogin = auth.Key("disable_login").MustBool(false)
+
+	// SigV4
+	SigV4AuthEnabled = auth.Key("sigv4_auth_enabled").MustBool(false)
+	cfg.SigV4AuthEnabled = SigV4AuthEnabled
+	cfg.SigV4VerboseLogging = auth.Key("sigv4_verbose_logging").MustBool(false)
+
+	// Azure Auth
+	AzureAuthEnabled = auth.Key("azure_auth_enabled").MustBool(false)
+	cfg.AzureAuthEnabled = AzureAuthEnabled
+
+	// ID response header
+	cfg.IDResponseHeaderEnabled = auth.Key("id_response_header_enabled").MustBool(false)
+	cfg.IDResponseHeaderPrefix = auth.Key("id_response_header_prefix").MustString("X-Grafana-")
+
+	idHeaderNamespaces := util.SplitString(auth.Key("id_response_header_namespaces").MustString(""))
+	cfg.IDResponseHeaderNamespaces = make(map[string]struct{}, len(idHeaderNamespaces))
+	for _, namespace := range idHeaderNamespaces {
+		cfg.IDResponseHeaderNamespaces[namespace] = struct{}{}
+	}
+
+	readAuthAzureADSettings(cfg)
+
+	// Google Auth
+	readAuthGoogleSettings(cfg)
+
+	// GitLab Auth
+	readAuthGitlabSettings(cfg)
+
+	// Generic OAuth
+	readGenericOAuthSettings(cfg)
+
+	// Okta Auth
+	readAuthOktaSettings(cfg)
+
+	// GrafanaCom
+	readAuthGrafanaComSettings(cfg)
+	readAuthGrafanaNetSettings(cfg)
+
+	// Github
+	readAuthGithubSettings(cfg)
+
+	// anonymous access
+	anonSection := iniFile.Section("auth.anonymous")
+	cfg.AnonymousEnabled = anonSection.Key("enabled").MustBool(false)
+	cfg.AnonymousOrgName = valueAsString(anonSection, "org_name", "")
+	cfg.AnonymousOrgRole = valueAsString(anonSection, "org_role", "")
+	cfg.AnonymousHideVersion = anonSection.Key("hide_version").MustBool(false)
+	cfg.AnonymousDeviceLimit = anonSection.Key("device_limit").MustInt64(0)
+
+	// basic auth
+	authBasic := iniFile.Section("auth.basic")
+	cfg.BasicAuthEnabled = authBasic.Key("enabled").MustBool(true)
+
+	// JWT auth
+	authJWT := iniFile.Section("auth.jwt")
+	cfg.JWTAuthEnabled = authJWT.Key("enabled").MustBool(false)
+	cfg.JWTAuthHeaderName = valueAsString(authJWT, "header_name", "")
+	cfg.JWTAuthURLLogin = authJWT.Key("url_login").MustBool(false)
+	cfg.JWTAuthEmailClaim = valueAsString(authJWT, "email_claim", "")
+	cfg.JWTAuthUsernameClaim = valueAsString(authJWT, "username_claim", "")
+	cfg.JWTAuthExpectClaims = valueAsString(authJWT, "expect_claims", "{}")
+	cfg.JWTAuthJWKSetURL = valueAsString(authJWT, "jwk_set_url", "")
+	cfg.JWTAuthCacheTTL = authJWT.Key("cache_ttl").MustDuration(time.Minute * 60)
+	cfg.JWTAuthKeyFile = valueAsString(authJWT, "key_file", "")
+	cfg.JWTAuthKeyID = authJWT.Key("key_id").MustString("")
+	cfg.JWTAuthJWKSetFile = valueAsString(authJWT, "jwk_set_file", "")
+	cfg.JWTAuthAutoSignUp = authJWT.Key("auto_sign_up").MustBool(false)
+	cfg.JWTAuthRoleAttributePath = valueAsString(authJWT, "role_attribute_path", "")
+	cfg.JWTAuthRoleAttributeStrict = authJWT.Key("role_attribute_strict").MustBool(false)
+	cfg.JWTAuthAllowAssignGrafanaAdmin = authJWT.Key("allow_assign_grafana_admin").MustBool(false)
+	cfg.JWTAuthSkipOrgRoleSync = authJWT.Key("skip_org_role_sync").MustBool(false)
+
+	// Extended JWT auth
+	authExtendedJWT := cfg.SectionWithEnvOverrides("auth.extended_jwt")
+	cfg.ExtendedJWTAuthEnabled = authExtendedJWT.Key("enabled").MustBool(false)
+	cfg.ExtendedJWTExpectAudience = authExtendedJWT.Key("expect_audience").MustString("")
+	cfg.ExtendedJWTExpectIssuer = authExtendedJWT.Key("expect_issuer").MustString("")
+
+	// Auth Proxy
+	authProxy := iniFile.Section("auth.proxy")
+	cfg.AuthProxyEnabled = authProxy.Key("enabled").MustBool(false)
+
+	cfg.AuthProxyHeaderName = valueAsString(authProxy, "header_name", "")
+	cfg.AuthProxyHeaderProperty = valueAsString(authProxy, "header_property", "")
+	cfg.AuthProxyAutoSignUp = authProxy.Key("auto_sign_up").MustBool(true)
+	cfg.AuthProxyEnableLoginToken = authProxy.Key("enable_login_token").MustBool(false)
+
+	cfg.AuthProxySyncTTL = authProxy.Key("sync_ttl").MustInt()
+
+	cfg.AuthProxyWhitelist = valueAsString(authProxy, "whitelist", "")
+
+	cfg.AuthProxyHeaders = make(map[string]string)
+	headers := valueAsString(authProxy, "headers", "")
+
+	for _, propertyAndHeader := range util.SplitString(headers) {
+		split := strings.SplitN(propertyAndHeader, ":", 2)
+		if len(split) == 2 {
+			cfg.AuthProxyHeaders[split[0]] = split[1]
+		}
+	}
+
+	cfg.AuthProxyHeadersEncoded = authProxy.Key("headers_encoded").MustBool(false)
+
+	return nil
+}
+
+func readAccessControlSettings(iniFile *ini.File, cfg *Cfg) {
+	rbac := iniFile.Section("rbac")
+	cfg.RBACPermissionCache = rbac.Key("permission_cache").MustBool(true)
+	cfg.RBACPermissionValidationEnabled = rbac.Key("permission_validation_enabled").MustBool(false)
+	cfg.RBACResetBasicRoles = rbac.Key("reset_basic_roles").MustBool(false)
+	cfg.RBACSingleOrganization = rbac.Key("single_organization").MustBool(false)
+}
+
+func readOAuth2ServerSettings(cfg *Cfg) {
+	oauth2Srv := cfg.SectionWithEnvOverrides("oauth2_server")
+	cfg.OAuth2ServerEnabled = oauth2Srv.Key("enabled").MustBool(false)
+	cfg.OAuth2ServerGeneratedKeyTypeForClient = strings.ToUpper(oauth2Srv.Key("generated_key_type_for_client").In("ECDSA", []string{"RSA", "ECDSA"}))
+	cfg.OAuth2ServerAccessTokenLifespan = oauth2Srv.Key("access_token_lifespan").MustDuration(time.Minute * 3)
+}
+
+func readUserSettings(iniFile *ini.File, cfg *Cfg) error {
+	users := iniFile.Section("users")
+	AllowUserSignUp = users.Key("allow_sign_up").MustBool(true)
+	AllowUserOrgCreate = users.Key("allow_org_create").MustBool(true)
+	cfg.AutoAssignOrg = users.Key("auto_assign_org").MustBool(true)
+	cfg.AutoAssignOrgId = users.Key("auto_assign_org_id").MustInt(1)
+	cfg.AutoAssignOrgRole = users.Key("auto_assign_org_role").In(
+		string(roletype.RoleViewer), []string{
+			string(roletype.RoleNone),
+			string(roletype.RoleViewer),
+			string(roletype.RoleEditor),
+			string(roletype.RoleAdmin)})
+	VerifyEmailEnabled = users.Key("verify_email_enabled").MustBool(false)
+
+	cfg.CaseInsensitiveLogin = users.Key("case_insensitive_login").MustBool(true)
+
+	LoginHint = valueAsString(users, "login_hint", "")
+	PasswordHint = valueAsString(users, "password_hint", "")
+	cfg.DefaultTheme = valueAsString(users, "default_theme", "")
+	cfg.DefaultLanguage = valueAsString(users, "default_language", "")
+	cfg.HomePage = valueAsString(users, "home_page", "")
+	ExternalUserMngLinkUrl = valueAsString(users, "external_manage_link_url", "")
+	ExternalUserMngLinkName = valueAsString(users, "external_manage_link_name", "")
+	ExternalUserMngInfo = valueAsString(users, "external_manage_info", "")
+
+	cfg.ViewersCanEdit = users.Key("viewers_can_edit").MustBool(false)
+	cfg.EditorsCanAdmin = users.Key("editors_can_admin").MustBool(false)
+
+	userInviteMaxLifetimeVal := valueAsString(users, "user_invite_max_lifetime_duration", "24h")
+	userInviteMaxLifetimeDuration, err := gtime.ParseDuration(userInviteMaxLifetimeVal)
+	if err != nil {
+		return err
+	}
+
+	cfg.UserInviteMaxLifetime = userInviteMaxLifetimeDuration
+	if cfg.UserInviteMaxLifetime < time.Minute*15 {
+		return errors.New("the minimum supported value for the `user_invite_max_lifetime_duration` configuration is 15m (15 minutes)")
+	}
+
+	cfg.HiddenUsers = make(map[string]struct{})
+	hiddenUsers := users.Key("hidden_users").MustString("")
+	for _, user := range strings.Split(hiddenUsers, ",") {
+		user = strings.TrimSpace(user)
+		if user != "" {
+			cfg.HiddenUsers[user] = struct{}{}
+		}
+	}
+
+	return nil
+}
+
+func readServiceAccountSettings(iniFile *ini.File, cfg *Cfg) error {
+	serviceAccount := iniFile.Section("service_accounts")
+	cfg.SATokenExpirationDayLimit = serviceAccount.Key("token_expiration_day_limit").MustInt(-1)
+	return nil
+}
+
+func (cfg *Cfg) readRenderingSettings(iniFile *ini.File) error {
+	renderSec := iniFile.Section("rendering")
+	cfg.RendererUrl = valueAsString(renderSec, "server_url", "")
+	cfg.RendererCallbackUrl = valueAsString(renderSec, "callback_url", "")
+	cfg.RendererAuthToken = valueAsString(renderSec, "renderer_token", "-")
+
+	if cfg.RendererCallbackUrl == "" {
+		cfg.RendererCallbackUrl = AppUrl
+	} else {
+		if cfg.RendererCallbackUrl[len(cfg.RendererCallbackUrl)-1] != '/' {
+			cfg.RendererCallbackUrl += "/"
+		}
+		_, err := url.Parse(cfg.RendererCallbackUrl)
+		if err != nil {
+			// XXX: Should return an error?
+			cfg.Logger.Error("Invalid callback_url.", "url", cfg.RendererCallbackUrl, "error", err)
+			os.Exit(1)
+		}
+	}
+
+	cfg.RendererConcurrentRequestLimit = renderSec.Key("concurrent_render_request_limit").MustInt(30)
+	cfg.RendererRenderKeyLifeTime = renderSec.Key("render_key_lifetime").MustDuration(5 * time.Minute)
+	cfg.ImagesDir = filepath.Join(cfg.DataPath, "png")
+	cfg.CSVsDir = filepath.Join(cfg.DataPath, "csv")
+
+	return nil
+}
+
+func readAlertingSettings(iniFile *ini.File) error {
+	alerting := iniFile.Section("alerting")
+	enabled, err := alerting.Key("enabled").Bool()
+	AlertingEnabled = nil
+	if err == nil {
+		AlertingEnabled = &enabled
+	}
+	ExecuteAlerts = alerting.Key("execute_alerts").MustBool(true)
+	AlertingRenderLimit = alerting.Key("concurrent_render_limit").MustInt(5)
+
+	AlertingErrorOrTimeout = valueAsString(alerting, "error_or_timeout", "alerting")
+	AlertingNoDataOrNullValues = valueAsString(alerting, "nodata_or_nullvalues", "no_data")
+
+	evaluationTimeoutSeconds := alerting.Key("evaluation_timeout_seconds").MustInt64(30)
+	AlertingEvaluationTimeout = time.Second * time.Duration(evaluationTimeoutSeconds)
+	notificationTimeoutSeconds := alerting.Key("notification_timeout_seconds").MustInt64(30)
+	AlertingNotificationTimeout = time.Second * time.Duration(notificationTimeoutSeconds)
+	AlertingMaxAttempts = alerting.Key("max_attempts").MustInt(3)
+	AlertingMinInterval = alerting.Key("min_interval_seconds").MustInt64(1)
+
+	return nil
+}
+
+func readGRPCServerSettings(cfg *Cfg, iniFile *ini.File) error {
+	server := iniFile.Section("grpc_server")
+	errPrefix := "grpc_server:"
+	useTLS := server.Key("use_tls").MustBool(false)
+	certFile := server.Key("cert_file").String()
+	keyFile := server.Key("cert_key").String()
+	if useTLS {
+		serverCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return fmt.Errorf("%s error loading X509 key pair: %w", errPrefix, err)
+		}
+		cfg.GRPCServerTLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{serverCert},
+			ClientAuth:   tls.NoClientCert,
+		}
+	}
+
+	cfg.GRPCServerNetwork = valueAsString(server, "network", "tcp")
+	cfg.GRPCServerAddress = valueAsString(server, "address", "")
+	switch cfg.GRPCServerNetwork {
+	case "unix":
+		if cfg.GRPCServerAddress != "" {
+			// Explicitly provided path for unix domain socket.
+			if stat, err := os.Stat(cfg.GRPCServerAddress); os.IsNotExist(err) {
+				// File does not exist - nice, nothing to do.
+			} else if err != nil {
+				return fmt.Errorf("%s error getting stat for a file: %s", errPrefix, cfg.GRPCServerAddress)
+			} else {
+				if stat.Mode()&fs.ModeSocket == 0 {
+					return fmt.Errorf("%s file %s already exists and is not a unix domain socket", errPrefix, cfg.GRPCServerAddress)
+				}
+				// Unix domain socket file, should be safe to remove.
+				err := os.Remove(cfg.GRPCServerAddress)
+				if err != nil {
+					return fmt.Errorf("%s can't remove unix socket file: %s", errPrefix, cfg.GRPCServerAddress)
+				}
+			}
+		} else {
+			// Use temporary file path for a unix domain socket.
+			tf, err := os.CreateTemp("", "gf_grpc_server_api")
+			if err != nil {
+				return fmt.Errorf("%s error creating tmp file: %v", errPrefix, err)
+			}
+			unixPath := tf.Name()
+			if err := tf.Close(); err != nil {
+				return fmt.Errorf("%s error closing tmp file: %v", errPrefix, err)
+			}
+			if err := os.Remove(unixPath); err != nil {
+				return fmt.Errorf("%s error removing tmp file: %v", errPrefix, err)
+			}
+			cfg.GRPCServerAddress = unixPath
+		}
+	case "tcp":
+		if cfg.GRPCServerAddress == "" {
+			cfg.GRPCServerAddress = "127.0.0.1:10000"
+		}
+	default:
+		return fmt.Errorf("%s unsupported network %s", errPrefix, cfg.GRPCServerNetwork)
+	}
+	return nil
+}
+
+// IsLegacyAlertingEnabled returns whether the legacy alerting is enabled or not.
+// It's safe to be used only after readAlertingSettings() and ReadUnifiedAlertingSettings() are executed.
+func IsLegacyAlertingEnabled() bool {
+	return AlertingEnabled != nil && *AlertingEnabled
+}
+
+func readSnapshotsSettings(cfg *Cfg, iniFile *ini.File) error {
+	snapshots := iniFile.Section("snapshots")
+
+	cfg.SnapshotEnabled = snapshots.Key("enabled").MustBool(true)
+
+	cfg.ExternalSnapshotUrl = valueAsString(snapshots, "external_snapshot_url", "")
+	cfg.ExternalSnapshotName = valueAsString(snapshots, "external_snapshot_name", "")
+
+	cfg.ExternalEnabled = snapshots.Key("external_enabled").MustBool(true)
+	cfg.SnapShotRemoveExpired = snapshots.Key("snapshot_remove_expired").MustBool(true)
+	cfg.SnapshotPublicMode = snapshots.Key("public_mode").MustBool(false)
+
+	return nil
+}
+
+func (cfg *Cfg) readServerSettings(iniFile *ini.File) error {
+	server := iniFile.Section("server")
+	var err error
+	AppUrl, AppSubUrl, err = cfg.parseAppUrlAndSubUrl(server)
+	if err != nil {
+		return err
+	}
+	ServeFromSubPath = server.Key("serve_from_sub_path").MustBool(false)
+
+	cfg.AppURL = AppUrl
+	cfg.AppSubURL = AppSubUrl
+	cfg.ServeFromSubPath = ServeFromSubPath
+	cfg.Protocol = HTTPScheme
+
+	protocolStr := valueAsString(server, "protocol", "http")
+
+	if protocolStr == "https" {
+		cfg.Protocol = HTTPSScheme
+		cfg.CertFile = server.Key("cert_file").String()
+		cfg.KeyFile = server.Key("cert_key").String()
+	}
+	if protocolStr == "h2" {
+		cfg.Protocol = HTTP2Scheme
+		cfg.CertFile = server.Key("cert_file").String()
+		cfg.KeyFile = server.Key("cert_key").String()
+	}
+	if protocolStr == "socket" {
+		cfg.Protocol = SocketScheme
+		cfg.SocketGid = server.Key("socket_gid").MustInt(-1)
+		cfg.SocketMode = server.Key("socket_mode").MustInt(0660)
+		cfg.SocketPath = server.Key("socket").String()
+	}
+
+	cfg.MinTLSVersion = valueAsString(server, "min_tls_version", "TLS1.2")
+	if cfg.MinTLSVersion == "TLS1.0" || cfg.MinTLSVersion == "TLS1.1" {
+		return fmt.Errorf("TLS version not configured correctly:%v, allowed values are TLS1.2 and TLS1.3", cfg.MinTLSVersion)
+	}
+
+	cfg.Domain = valueAsString(server, "domain", "localhost")
+	cfg.HTTPAddr = valueAsString(server, "http_addr", DefaultHTTPAddr)
+	cfg.HTTPPort = valueAsString(server, "http_port", "3000")
+	cfg.RouterLogging = server.Key("router_logging").MustBool(false)
+
+	cfg.EnableGzip = server.Key("enable_gzip").MustBool(false)
+	cfg.EnforceDomain = server.Key("enforce_domain").MustBool(false)
+	staticRoot := valueAsString(server, "static_root_path", "")
+	StaticRootPath = makeAbsolute(staticRoot, HomePath)
+	cfg.StaticRootPath = StaticRootPath
+
+	if err := cfg.validateStaticRootPath(); err != nil {
+		return err
+	}
+
+	cdnURL := valueAsString(server, "cdn_url", "")
+	if cdnURL != "" {
+		cfg.CDNRootURL, err = url.Parse(cdnURL)
+		if err != nil {
+			return err
+		}
+	}
+
+	cfg.ReadTimeout = server.Key("read_timeout").MustDuration(0)
+
+	headersSection := cfg.Raw.Section("server.custom_response_headers")
+	keys := headersSection.Keys()
+	cfg.CustomResponseHeaders = make(map[string]string, len(keys))
+
+	for _, key := range keys {
+		cfg.CustomResponseHeaders[key.Name()] = key.Value()
+	}
+
+	return nil
+}
+
+// GetContentDeliveryURL returns full content delivery URL with /<edition>/<version> added to URL
+func (cfg *Cfg) GetContentDeliveryURL(prefix string) (string, error) {
+	if cfg.CDNRootURL == nil {
+		return "", nil
+	}
+	if cfg.BuildVersion == "" {
+		return "", errors.New("BuildVersion is not set")
+	}
+	url := *cfg.CDNRootURL
+
+	url.Path = path.Join(url.Path, prefix, cfg.BuildVersion)
+	return url.String() + "/", nil
+}
+
+func (cfg *Cfg) readDataSourcesSettings() {
+	datasources := cfg.Raw.Section("datasources")
+	cfg.DataSourceLimit = datasources.Key("datasource_limit").MustInt(5000)
+}
+
+func (cfg *Cfg) readSqlDataSourceSettings() {
+	sqlDatasources := cfg.Raw.Section("sql_datasources")
+	cfg.SqlDatasourceMaxOpenConnsDefault = sqlDatasources.Key("max_open_conns_default").MustInt(100)
+	cfg.SqlDatasourceMaxIdleConnsDefault = sqlDatasources.Key("max_idle_conns_default").MustInt(100)
+	cfg.SqlDatasourceMaxConnLifetimeDefault = sqlDatasources.Key("max_conn_lifetime_default").MustInt(14400)
+}
+
+func GetAllowedOriginGlobs(originPatterns []string) ([]glob.Glob, error) {
+	allowedOrigins := originPatterns
+	originGlobs := make([]glob.Glob, 0, len(allowedOrigins))
+	for _, originPattern := range allowedOrigins {
+		g, err := glob.Compile(originPattern)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing origin pattern: %v", err)
+		}
+		originGlobs = append(originGlobs, g)
+	}
+	return originGlobs, nil
+}
+
+func (cfg *Cfg) readLiveSettings(iniFile *ini.File) error {
+	section := iniFile.Section("live")
+	cfg.LiveMaxConnections = section.Key("max_connections").MustInt(100)
+	if cfg.LiveMaxConnections < -1 {
+		return fmt.Errorf("unexpected value %d for [live] max_connections", cfg.LiveMaxConnections)
+	}
+	cfg.LiveHAEngine = section.Key("ha_engine").MustString("")
+	switch cfg.LiveHAEngine {
+	case "", "redis":
+	default:
+		return fmt.Errorf("unsupported live HA engine type: %s", cfg.LiveHAEngine)
+	}
+	cfg.LiveHAEngineAddress = section.Key("ha_engine_address").MustString("127.0.0.1:6379")
+	cfg.LiveHAEnginePassword = section.Key("ha_engine_password").MustString("")
+
+	var originPatterns []string
+	allowedOrigins := section.Key("allowed_origins").MustString("")
+	for _, originPattern := range strings.Split(allowedOrigins, ",") {
+		originPattern = strings.TrimSpace(originPattern)
+		if originPattern == "" {
+			continue
+		}
+		originPatterns = append(originPatterns, originPattern)
+	}
+	_, err := GetAllowedOriginGlobs(originPatterns)
+	if err != nil {
+		return err
+	}
+	cfg.LiveAllowedOrigins = originPatterns
+	return nil
+}

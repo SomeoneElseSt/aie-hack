@@ -1,0 +1,1 @@
+{"Incomplete double-checked locking - missing second check after acquiring lock. Multiple goroutines can redundantly load assets if cache is initially nil.": 0.8057081699371338}

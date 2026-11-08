@@ -1,0 +1,1814 @@
+===== FILE common/src/main/java/org/keycloak/common/Profile.java (after PR) =====
+/*
+ * Copyright 2016 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.common;
+
+import org.jboss.logging.Logger;
+import org.keycloak.common.Profile.Feature.Type;
+import org.keycloak.common.profile.ProfileConfigResolver;
+import org.keycloak.common.profile.ProfileConfigResolver.FeatureConfig;
+import org.keycloak.common.profile.ProfileException;
+import org.keycloak.common.util.KerberosJdkProvider;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+/**
+ * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
+ * @version $Revision: 1 $
+ */
+public class Profile {
+
+    private static volatile Map<String, TreeSet<Feature>> FEATURES;
+
+    public enum Feature {
+        AUTHORIZATION("Authorization Service", Type.DEFAULT),
+
+        ACCOUNT_API("Account Management REST API", Type.DEFAULT),
+
+        ACCOUNT_V3("Account Console version 3", Type.DEFAULT, 3, Feature.ACCOUNT_API),
+
+        ADMIN_FINE_GRAINED_AUTHZ("Fine-Grained Admin Permissions", Type.PREVIEW, 1),
+
+        ADMIN_FINE_GRAINED_AUTHZ_V2("Fine-Grained Admin Permissions version 2", Type.EXPERIMENTAL, 2, Feature.AUTHORIZATION),
+
+        ADMIN_API("Admin API", Type.DEFAULT),
+
+        ADMIN_V2("New Admin Console", Type.DEFAULT, 2, Feature.ADMIN_API),
+
+        LOGIN_V2("New Login Theme", Type.DEFAULT, 2),
+
+        LOGIN_V1("Legacy Login Theme", Type.DEPRECATED, 1),
+
+        QUICK_THEME("WYSIWYG theme configuration tool", Type.EXPERIMENTAL, 1),
+
+        DOCKER("Docker Registry protocol", Type.DISABLED_BY_DEFAULT),
+
+        IMPERSONATION("Ability for admins to impersonate users", Type.DEFAULT),
+
+        SCRIPTS("Write custom authenticators using JavaScript", Type.PREVIEW),
+
+        TOKEN_EXCHANGE("Token Exchange Service", Type.PREVIEW, 1),
+        TOKEN_EXCHANGE_STANDARD_V2("Standard Token Exchange version 2", Type.EXPERIMENTAL, 2, Feature.ADMIN_FINE_GRAINED_AUTHZ), // TODO: Switch v2 token exchanges to depend admin-fine-grained-authz-v2
+        TOKEN_EXCHANGE_FEDERATED_V2("Federated Token Exchange for external-internal and internal-external token exchange", Type.EXPERIMENTAL, 2, Feature.ADMIN_FINE_GRAINED_AUTHZ),
+        TOKEN_EXCHANGE_SUBJECT_IMPERSONATION_V2("Subject impersonation Token Exchange", Type.EXPERIMENTAL, 2, Feature.ADMIN_FINE_GRAINED_AUTHZ),
+
+        WEB_AUTHN("W3C Web Authentication (WebAuthn)", Type.DEFAULT),
+
+        CLIENT_POLICIES("Client configuration policies", Type.DEFAULT),
+
+        CIBA("OpenID Connect Client Initiated Backchannel Authentication (CIBA)", Type.DEFAULT),
+
+        PAR("OAuth 2.0 Pushed Authorization Requests (PAR)", Type.DEFAULT),
+
+        DYNAMIC_SCOPES("Dynamic OAuth 2.0 scopes", Type.EXPERIMENTAL),
+
+        CLIENT_SECRET_ROTATION("Client Secret Rotation", Type.PREVIEW),
+
+        STEP_UP_AUTHENTICATION("Step-up Authentication", Type.DEFAULT),
+
+        // Check if kerberos is available in underlying JVM and auto-detect if feature should be enabled or disabled by default based on that
+        KERBEROS("Kerberos", Type.DEFAULT, 1, () -> KerberosJdkProvider.getProvider().isKerberosAvailable()),
+
+        RECOVERY_CODES("Recovery codes", Type.PREVIEW),
+
+        UPDATE_EMAIL("Update Email Action", Type.PREVIEW),
+
+        FIPS("FIPS 140-2 mode", Type.DISABLED_BY_DEFAULT),
+
+        DPOP("OAuth 2.0 Demonstrating Proof-of-Possession at the Application Layer", Type.PREVIEW),
+
+        DEVICE_FLOW("OAuth 2.0 Device Authorization Grant", Type.DEFAULT),
+
+        TRANSIENT_USERS("Transient users for brokering", Type.EXPERIMENTAL),
+
+        MULTI_SITE("Multi-site support", Type.DISABLED_BY_DEFAULT),
+
+        CLUSTERLESS("Store all session data, work cache and login failure data in an external Infinispan cluster.", Type.EXPERIMENTAL),
+
+        CLIENT_TYPES("Client Types", Type.EXPERIMENTAL),
+
+        HOSTNAME_V2("Hostname Options V2", Type.DEFAULT, 2),
+
+        PERSISTENT_USER_SESSIONS("Persistent online user sessions across restarts and upgrades", Type.DEFAULT),
+
+        OID4VC_VCI("Support for the OID4VCI protocol as part of OID4VC.", Type.EXPERIMENTAL),
+
+        OPENTELEMETRY("OpenTelemetry Tracing", Type.DEFAULT),
+
+        DECLARATIVE_UI("declarative ui spi", Type.EXPERIMENTAL),
+
+        ORGANIZATION("Organization support within realms", Type.DEFAULT),
+
+        PASSKEYS("Passkeys", Type.PREVIEW),
+
+        CACHE_EMBEDDED_REMOTE_STORE("Support for remote-store in embedded Infinispan caches", Type.EXPERIMENTAL),
+
+        USER_EVENT_METRICS("Collect metrics based on user events", Type.PREVIEW),
+
+        IPA_TUURA_FEDERATION("IPA-Tuura user federation provider", Type.EXPERIMENTAL),
+
+        ROLLING_UPDATES("Rolling Updates", Type.PREVIEW),
+        ;
+
+        private final Type type;
+        private final String label;
+        private final String unversionedKey;
+        private final String key;
+        private final BooleanSupplier isAvailable;
+
+        private Set<Feature> dependencies;
+        private int version;
+
+        Feature(String label, Type type, Feature... dependencies) {
+            this(label, type, 1, null, dependencies);
+        }
+
+        Feature(String label, Type type, int version, Feature... dependencies) {
+            this(label, type, version, null, dependencies);
+        }
+
+        Feature(String label, Type type, int version, BooleanSupplier isAvailable, Feature... dependencies) {
+            this.label = label;
+            this.type = type;
+            this.version = version;
+            this.isAvailable = isAvailable;
+            this.key = name().toLowerCase().replaceAll("_", "-");
+            if (this.name().endsWith("_V" + version)) {
+                unversionedKey = key.substring(0, key.length() - (String.valueOf(version).length() + 2));
+            } else {
+                this.unversionedKey = key;
+                if (this.version > 1) {
+                    throw new IllegalStateException("It is expected that the enum name ends with the version");
+                }
+            }
+            this.dependencies = Arrays.stream(dependencies).collect(Collectors.toSet());
+        }
+
+        /**
+         * Get the key that uniquely identifies this feature
+         * <p>
+         * {@link #getVersionedKey()} should instead be shown to users where possible.
+         */
+        public String getKey() {
+            return key;
+        }
+
+        /**
+         * Return the key without any versioning.  All features of the same type
+         * will share this key.
+         */
+        public String getUnversionedKey() {
+            return unversionedKey;
+        }
+
+        /**
+         * Return the key in the form key:v{version}
+         */
+        public String getVersionedKey() {
+            return getUnversionedKey() + ":v" + version;
+        }
+
+        public String getLabel() {
+            return label;
+        }
+
+        public Type getType() {
+            return type;
+        }
+
+        public Set<Feature> getDependencies() {
+            return dependencies;
+        }
+
+        public int getVersion() {
+            return version;
+        }
+
+        public boolean isAvailable() {
+            return isAvailable == null || isAvailable.getAsBoolean();
+        }
+
+        public enum Type {
+            // in priority order
+            DEFAULT("Default"),
+            DISABLED_BY_DEFAULT("Disabled by default"),
+            DEPRECATED("Deprecated"),
+            PREVIEW("Preview"),
+            PREVIEW_DISABLED_BY_DEFAULT("Preview disabled by default"), // Preview features, which are not automatically enabled even with enabled preview profile (Needs to be enabled explicitly)
+            EXPERIMENTAL("Experimental");
+
+            private final String label;
+
+            Type(String label) {
+                this.label = label;
+            }
+
+            public String getLabel() {
+                return label;
+            }
+        }
+    }
+
+    private static final Set<String> ESSENTIAL_FEATURES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(Feature.HOSTNAME_V2.getUnversionedKey())));
+
+    private static final Logger logger = Logger.getLogger(Profile.class);
+
+    private static volatile Profile CURRENT;
+
+    private final ProfileName profileName;
+
+    private final Map<Feature, Boolean> features;
+
+    public static Profile defaults() {
+        return configure();
+    }
+
+    public static Profile configure(ProfileConfigResolver... resolvers) {
+        ProfileName profile = Arrays.stream(resolvers).map(ProfileConfigResolver::getProfileName).filter(Objects::nonNull).findFirst().orElse(ProfileName.DEFAULT);
+
+        Map<Feature, Boolean> features = new LinkedHashMap<>();
+
+        for (Map.Entry<String, TreeSet<Feature>> entry : getOrderedFeatures().entrySet()) {
+
+            // first check by unversioned key - if enabled, choose the highest priority feature
+            String unversionedFeature = entry.getKey();
+            ProfileConfigResolver.FeatureConfig unversionedConfig = getFeatureConfig(unversionedFeature, resolvers);
+            Feature enabledFeature = null;
+            if (unversionedConfig == FeatureConfig.ENABLED) {
+                enabledFeature = entry.getValue().iterator().next();
+                if (!enabledFeature.isAvailable()) {
+                    throw new ProfileException(String.format("Feature %s cannot be enabled as it is not available.", unversionedFeature));
+                }
+            } else if (unversionedConfig == FeatureConfig.DISABLED && ESSENTIAL_FEATURES.contains(unversionedFeature)) {
+                throw new ProfileException(String.format("Feature %s cannot be disabled.", unversionedFeature));
+            }
+
+            // now check each feature version to ensure consistency and select any features enabled by default
+            boolean isExplicitlyEnabledFeature = false;
+            for (Feature f : entry.getValue()) {
+                ProfileConfigResolver.FeatureConfig configuration = getFeatureConfig(f.getVersionedKey(), resolvers);
+
+                if (configuration != FeatureConfig.UNCONFIGURED && unversionedConfig != FeatureConfig.UNCONFIGURED) {
+                    throw new ProfileException("Versioned feature " + f.getVersionedKey() + " is not expected as " + unversionedFeature + " is already " + unversionedConfig.name().toLowerCase());
+                }
+
+                switch (configuration) {
+                case ENABLED:
+                    if (isExplicitlyEnabledFeature) {
+                        throw new ProfileException(
+                                String.format("Multiple versions of the same feature %s, %s should not be enabled.",
+                                        enabledFeature.getVersionedKey(), f.getVersionedKey()));
+                    }
+                    // even if something else was enabled by default, explicitly enabling a lower priority feature takes precedence
+                    if (!f.isAvailable()) {
+                        throw new ProfileException(String.format("Feature %s cannot be enabled as it is not available.", f.getVersionedKey()));
+                    }
+                    enabledFeature = f;
+                    isExplicitlyEnabledFeature = true;
+                    break;
+                case DISABLED:
+                    throw new ProfileException("Feature " + f.getVersionedKey() + " should not be disabled using a versioned key.");
+                default:
+                    if (unversionedConfig == FeatureConfig.UNCONFIGURED && enabledFeature == null
+                            && isEnabledByDefault(profile, f) && f.isAvailable()) {
+                        enabledFeature = f;
+                    }
+                    break;
+                }
+            }
+            for (Feature f : entry.getValue()) {
+                features.put(f, f == enabledFeature);
+            }
+        }
+
+        verifyConfig(features);
+
+        CURRENT = new Profile(profile, features);
+        return CURRENT;
+    }
+
+    private static boolean isEnabledByDefault(ProfileName profile, Feature f) {
+        switch (f.getType()) {
+        case DEFAULT:
+            return true;
+        case PREVIEW:
+            return profile.equals(ProfileName.PREVIEW);
+        default:
+            return false;
+        }
+    }
+
+    private static ProfileConfigResolver.FeatureConfig getFeatureConfig(String feature,
+            ProfileConfigResolver... resolvers) {
+        ProfileConfigResolver.FeatureConfig configuration = Arrays.stream(resolvers).map(r -> r.getFeatureConfig(feature))
+                .filter(r -> !r.equals(ProfileConfigResolver.FeatureConfig.UNCONFIGURED))
+                .findFirst()
+                .orElse(ProfileConfigResolver.FeatureConfig.UNCONFIGURED);
+        return configuration;
+    }
+
+    /**
+     * Compute a map of unversioned feature keys to ordered sets (highest first) of features.  The priority order for features is:
+     * <p>
+     * <ul>
+     * <li>The highest default supported version
+     * <li>The highest non-default supported version
+     * <li>The highest deprecated version
+     * <li>The highest preview version
+     * <li>The highest experimental version
+     * <ul>
+     * <p>
+     * Note the {@link Type} enum is ordered based upon priority.
+     */
+    private static Map<String, TreeSet<Feature>> getOrderedFeatures() {
+        if (FEATURES == null) {
+            // "natural" ordering low to high between two features (type has precedence and then reversed version is used)
+            Comparator<Feature> comparator = Comparator.comparing(Feature::getType).thenComparing(Comparator.comparingInt(Feature::getVersion).reversed());
+            // aggregate the features by unversioned key
+            HashMap<String, TreeSet<Feature>> features = new HashMap<>();
+            Stream.of(Feature.values()).forEach(f -> features.compute(f.getUnversionedKey(), (k, v) -> {
+                if (v == null) {
+                    v = new TreeSet<>(comparator);
+                }
+                v.add(f);
+                return v;
+            }));
+            FEATURES = features;
+        }
+        return FEATURES;
+    }
+
+    public static Set<String> getAllUnversionedFeatureNames() {
+        return Collections.unmodifiableSet(getOrderedFeatures().keySet());
+    }
+
+    public static Set<String> getDisableableUnversionedFeatureNames() {
+        return getOrderedFeatures().keySet().stream().filter(f -> !ESSENTIAL_FEATURES.contains(f)).collect(Collectors.toSet());
+    }
+
+    /**
+     * Get all of the feature versions for the given feature. They will be ordered by priority.
+     * <p>
+     * If the feature does not exist an empty collection will be returned.
+     */
+    public static Set<Feature> getFeatureVersions(String feature) {
+        TreeSet<Feature> versions = getOrderedFeatures().get(feature);
+        if (versions == null) {
+            return Collections.emptySet();
+        }
+        return Collections.unmodifiableSet(versions);
+    }
+
+    public static Profile init(ProfileName profileName, Map<Feature, Boolean> features) {
+        CURRENT = new Profile(profileName, features);
+        return CURRENT;
+    }
+
+    private Profile(ProfileName profileName, Map<Feature, Boolean> features) {
+        this.profileName = profileName;
+        this.features = Collections.unmodifiableMap(features);
+
+        logUnsupportedFeatures();
+    }
+
+    public static Profile getInstance() {
+        return CURRENT;
+    }
+
+    public static void reset() {
+        CURRENT = null;
+    }
+
+    public static boolean isFeatureEnabled(Feature feature) {
+        return getInstance().features.get(feature);
+    }
+
+    public ProfileName getName() {
+        return profileName;
+    }
+
+    public Set<Feature> getAllFeatures() {
+        return features.keySet();
+    }
+
+    public Set<Feature> getDisabledFeatures() {
+        return features.entrySet().stream().filter(e -> !e.getValue()).map(Map.Entry::getKey).collect(Collectors.toSet());
+    }
+
+    /**
+     * @return all features of type "preview" or "preview_disabled_by_default"
+     */
+    public Set<Feature> getPreviewFeatures() {
+        return Stream.concat(getFeatures(Feature.Type.PREVIEW).stream(), getFeatures(Feature.Type.PREVIEW_DISABLED_BY_DEFAULT).stream())
+                .collect(Collectors.toSet());
+    }
+
+    public Set<Feature> getExperimentalFeatures() {
+        return getFeatures(Feature.Type.EXPERIMENTAL);
+    }
+
+    public Set<Feature> getDeprecatedFeatures() {
+        return getFeatures(Feature.Type.DEPRECATED);
+    }
+
+    public Set<Feature> getFeatures(Feature.Type type) {
+        return features.keySet().stream().filter(f -> f.getType().equals(type)).collect(Collectors.toSet());
+    }
+
+    public Map<Feature, Boolean> getFeatures() {
+        return features;
+    }
+
+    public enum ProfileName {
+        DEFAULT,
+        PREVIEW
+    }
+
+    private static void verifyConfig(Map<Feature, Boolean> features) {
+        for (Feature f : features.keySet()) {
+            if (features.get(f) && f.getDependencies() != null) {
+                for (Feature d : f.getDependencies()) {
+                    if (!features.get(d)) {
+                        throw new ProfileException("Feature " + f.getKey() + " depends on disabled feature " + d.getKey());
+                    }
+                }
+            }
+        }
+    }
+
+    private void logUnsupportedFeatures() {
+        logUnsupportedFeatures(Feature.Type.PREVIEW, getPreviewFeatures(), Logger.Level.INFO);
+        logUnsupportedFeatures(Feature.Type.EXPERIMENTAL, getExperimentalFeatures(), Logger.Level.WARN);
+        logUnsupportedFeatures(Feature.Type.DEPRECATED, getDeprecatedFeatures(), Logger.Level.WARN);
+    }
+
+    private void logUnsupportedFeatures(Feature.Type type, Set<Feature> checkedFeatures, Logger.Level level) {
+        Set<Feature.Type> checkedFeatureTypes = checkedFeatures.stream()
+                .map(Feature::getType)
+                .collect(Collectors.toSet());
+
+        String enabledFeaturesOfType = features.entrySet().stream()
+                .filter(e -> e.getValue() && checkedFeatureTypes.contains(e.getKey().getType()))
+                .map(e -> e.getKey().getVersionedKey()).sorted().collect(Collectors.joining(", "));
+
+        if (!enabledFeaturesOfType.isEmpty()) {
+            logger.logv(level, "{0} features enabled: {1}", type.getLabel(), enabledFeaturesOfType);
+        }
+    }
+
+}
+
+
+===== FILE docs/guides/operator/advanced-configuration.adoc (after PR) =====
+<#import "/templates/guide.adoc" as tmpl>
+<#import "/templates/kc.adoc" as kc>
+<#import "/templates/options.adoc" as opts>
+<#import "/templates/links.adoc" as links>
+<#import "/templates/profile.adoc" as profile>
+
+<@tmpl.guide
+title="Advanced configuration"
+summary="How to tune advanced aspects of the Keycloak CR">
+
+== Advanced configuration
+This {section} describes how to use Custom Resources (CRs) for advanced configuration of your {project_name} deployment.
+
+=== Server configuration details
+
+Many server options are exposed as first-class citizen fields in the Keycloak CR. The structure of the CR is based on the configuration structure of {project_name}. For example, to configure the `https-port` of the server, follow a
+similar pattern in the CR and use the `httpsPort` field. The following example is a complex server configuration; however, it illustrates the relationship between server options and the Keycloak CR:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  db:
+    vendor: postgres
+    usernameSecret:
+      name: usernameSecret
+      key: usernameSecretKey
+    passwordSecret:
+      name: passwordSecret
+      key: passwordSecretKey
+    host: host
+    database: database
+    port: 123
+    schema: schema
+    poolInitialSize: 1
+    poolMinSize: 2
+    poolMaxSize: 3
+  http:
+    httpEnabled: true
+    httpPort: 8180
+    httpsPort: 8543
+    tlsSecret: my-tls-secret
+  hostname:
+    hostname: https://my-hostname.tld
+    admin: https://my-hostname.tld/admin
+    strict: false
+    backchannelDynamic: true
+  features:
+    enabled:
+      - docker
+      - authorization
+    disabled:
+      - admin
+      - step-up-authentication
+  transaction:
+    xaEnabled: false
+----
+
+For a list of options, see the Keycloak CRD. For details on configuring options, see <@links.server id="all-config"/>.
+
+==== Additional options
+
+Some expert server options are unavailable as dedicated fields in the Keycloak CR. The following are examples of omitted fields:
+
+* Fields that require deep understanding of the underlying {project_name} implementation
+* Fields that are not relevant to
+<@profile.ifCommunity>
+a Kubernetes
+</@profile.ifCommunity>
+<@profile.ifProduct>
+an OpenShift
+</@profile.ifProduct>
+environment
+* Fields for provider configuration because they are dynamic based on the used provider implementation
+
+The `additionalOptions` field of the Keycloak CR enables {project_name} to accept any available configuration in the form of key-value pairs.
+You can use this field to include any option that is omitted in the Keycloak CR.
+For details on configuring options, see <@links.server id="all-config"/>.
+
+The values can be expressed as plain text strings or Secret object references as shown in this example:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  ...
+  additionalOptions:
+    - name: spi-connections-http-client-default-connection-pool-size
+      secret: # Secret reference
+        name: http-client-secret # name of the Secret
+        key: poolSize # name of the Key in the Secret
+    - name: spi-email-template-mycustomprovider-enabled
+      value: true # plain text value
+----
+NOTE:  The name format of options defined in this way is identical to the key format of options specified in the configuration file.
+       For details on various configuration formats, see <@links.server id="configuration"/>.
+
+=== Secret References
+
+Secret References are used by some dedicated options in the Keycloak CR, such as `tlsSecret`, or as a value in `additionalOptions`.
+
+Similarly ConfigMap References are used by options such as the `configMapFile`.
+
+When specifying a Secret or ConfigMap Reference, make sure that a Secret or ConfigMap containing the referenced keys is present in the same namespace as the CR referencing it.
+
+The operator will poll approximately every minute for changes to referenced Secrets or ConfigMaps. When a meaningful change is detected, the Operator performs a rolling restart of the {project_name} Deployment to pick up the changes.
+
+=== Unsupported features
+
+The `unsupported` field of the CR contains highly experimental configuration options that are not completely tested and are Tech Preview.
+
+==== Pod Template
+
+The Pod Template is a raw API representation that is used for the Deployment Template.
+This field is a temporary workaround in case no supported field exists at the top level of the CR for your use case.
+
+The Operator merges the fields of the provided template with the values generated by the Operator for the specific Deployment.
+With this feature, you have access to a high level of customizations. However, no guarantee exists that the Deployment will work as expected.
+
+The following example illustrates injecting labels, annotations, volumes, and volume mounts:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  ...
+  unsupported:
+    podTemplate:
+      metadata:
+        labels:
+          my-label: "keycloak"
+      spec:
+        containers:
+          - volumeMounts:
+              - name: test-volume
+                mountPath: /mnt/test
+        volumes:
+          - name: test-volume
+            secret:
+              secretName: keycloak-additional-secret
+----
+
+=== Disabling required options
+
+{project_name} and the {project_name} Operator provide the best production-ready experience with security in mind.
+However, during the development phase, you can disable key security features.
+
+Specifically, you can disable the hostname and TLS as shown in the following example:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  ...
+  http:
+    httpEnabled: true
+  hostname:
+    strict: false
+----
+
+=== Resource requirements
+
+The Keycloak CR allows specifying the `resources` options for managing compute resources for the {project_name} container.
+It provides the ability to request and limit resources independently for the main Keycloak deployment via the Keycloak CR, and for the realm import Job via the Realm Import CR.
+
+When no values are specified, the default `requests` memory is set to `1700MiB`, and the `limits` memory is set to `2GiB`.
+These values were chosen based on a deeper analysis of {project_name} memory management.
+
+If no values are specified in the Realm Import CR, it falls back to the values specified in the Keycloak CR, or to the defaults as defined above.
+
+You can specify your custom values based on your requirements as follows:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  ...
+  resources:
+    requests:
+      cpu: 1200m
+      memory: 896Mi
+    limits:
+      cpu: 6
+      memory: 3Gi
+----
+
+Moreover, the {project_name} container manages the heap size more effectively by providing relative values for the heap size.
+It is achieved by providing certain JVM options.
+
+For more details, see <@links.server id="containers" />.
+
+=== Scheduling
+
+You may control several aspects of the server Pod scheduling via the Keycloak CR. The scheduling stanza exposes optional standard Kubernetes affinity, tolerations, topology spread constraints, and the priority class name to fine tune the scheduling and placement of your server Pods.
+
+An example utilizing all scheduling fields:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  scheduling:
+    priorityClassName: custom-high
+    affinity:
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app: keycloak
+                app.kubernetes.io/managed-by: keycloak-operator
+                app.kubernetes.io/component: server
+                topologyKey: topology.kubernetes.io/zone
+              weight: 10
+    tolerations:
+    - key: "some-taint"
+      operator: "Exists"
+      effect: "NoSchedule"
+    topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      ...
+  ...
+----
+
+Please see https://kubernetes.io/docs/concepts/scheduling-eviction[the kubernetes docs] for more on scheduling concepts.
+
+If you do not specify a custom affinity, your Pods will have an affinity for the same zone and an anti-affinity for the same node to improve availability. Scheduling to the same zone if possible helps prevent stretch clusters where cross zone cache cluster traffic may have too high of a latency.
+
+=== Management Interface
+
+To change the port of the management interface, use the first-class citizen field `httpManagement.port` in the Keycloak CR.
+To change the properties of the management interface, you can do it by providing `additionalOptions` field.
+
+You can specify the `port` and the `additionalOptions` as follows:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  httpManagement:
+    port: 9001
+  additionalOptions:
+    - name: http-management-relative-path
+      value: /management
+----
+
+NOTE: If you are using a custom image, the Operator is *unaware* of any configuration options that might've been specified there.
+For instance, it may cause that the management interface uses the `https` schema, but the Operator accesses it via `http` when the TLS settings is specified in the custom image.
+To ensure proper TLS configuration, use the `tlsSecret` and `truststores` fields in the Keycloak CR so that the Operator can reflect that.
+
+For more details, see <@links.server id="management-interface" />.
+
+=== Truststores
+
+If you need to provide trusted certificates, the Keycloak CR provides a top level feature for configuring the server's truststore as discussed in <@links.server id="keycloak-truststore"/>.
+
+Use the truststores stanza of the Keycloak spec to specify Secrets containing PEM encoded files, or PKCS12 files with extension `.p12`, `.pfx`, or `.pkcs12`, for example:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  ...
+  truststores:
+    my-truststore:
+      secret:
+        name: my-secret
+----
+
+Where the contents of my-secret could be a PEM file, for example:
+
+[source,yaml]
+------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-secret
+stringData:
+  cert.pem: |
+    -----BEGIN CERTIFICATE-----
+    ...
+------
+
+When running on a Kubernetes or OpenShift environment well-known locations of trusted certificates are included automatically.
+This includes `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` and the `/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt` when present.
+
+=== Admin Bootstrapping
+
+When you create a new instance the Keycloak CR spec.bootstrapAdmin stanza may be used to configure the bootstrap user and/or service account. If you do not specify anything for the spec.bootstrapAdmin, the operator will create a Secret named "metadata.name"-initial-admin with a username temp-admin and a generated password. If you specify a Secret name for bootstrap admin user, then the Secret will need to contain `username` and `password` key value pairs. If you specify a Secret name for bootstrap admin service account, then the Secret will need to contain `client-id` and `client-secret` key value pairs.
+
+If a master realm has already been created for you cluster, then the spec.boostrapAdmin is effectively ignored. If you need to create a recovery admin account, then you'll need to run the CLI command against a Pod directly.
+
+For more information on how to bootstrap a temporary admin user or service account and recover lost admin access, refer to the <@links.server id="bootstrap-admin-recovery"/> guide.
+
+=== Tracing (OpenTelemetry)
+
+Tracing allows for detailed monitoring of each request's lifecycle, which helps quickly identify and diagnose issues, leading to more efficient debugging and maintenance.
+
+You can change tracing configuration via Keycloak CR fields as follows:
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  tracing:
+    enabled: true                             # default 'false'
+    endpoint: http://my-tracing:4317          # default 'http://localhost:4317'
+    samplerType: parentbased_traceidratio     # default 'traceidratio'
+    samplerRatio: 0.01                        # default '1'
+    resourceAttributes:
+      some.attribute: something
+  additionalOptions:
+    - name: tracing-jdbc-enabled
+      value: false                            # default 'true'
+----
+
+These fields should reflect 1:1 association with `tracing-*` options that contain more information.
+
+NOTE: The `tracing-jdbc-enabled` is not promoted as a first-class citizen as it might not be well managed in the future, so it needs to be set via the `additionalOptions` field.
+
+For more details about tracing, see <@links.observability id="tracing" />.
+
+=== Network Policies (Preview)
+
+NetworkPolicies allow you to specify rules for traffic flow within your cluster, and also between Pods and the outside world.
+Your cluster must use a network plugin that supports NetworkPolicy enforcement.
+
+The operator can automatically create a NetworkPolicy to deny access to the clustering port of your {project_name} Pods.
+The HTTP(S) endpoint is open to traffic from any namespace and the outside world.
+To enable the NetworkPolicy, set `spec.networkPolicy.enabled` in your Keycloak CR, as shown in the example below.
+
+.Keycloak CR with Network Policies enabled
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  networkPolicy:
+    enabled: true
+----
+
+The above example allows traffic from all sources.
+The Keycloak CR can be extended to include a list of rules for each of the endpoints exposed by {project_name}.
+These rules specify from where (the source) the traffic is allowed and it's possible to communicate with the {project_name} Pods.
+
+.Extended Network Policy configuration
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  networkPolicy:
+    enabled: true
+    http: <list of rules> #<1>
+    https: <list of rules> #<2>
+    management: <list of rules> #<3>
+----
+<1> It defines the rules for HTTP endpoint (port 8080 by default).
+Due to security reasons, the HTTP endpoint is disabled by default.
+<2> It defines the access rules for HTTPS endpoint (port 8443 by default.
+<3> It defines the access rules for management endpoint (port 9000 by default).
+The management endpoint is used by the Kubernetes Probes and to expose the {project_name} metrics.
+
+The rule syntax is the same as the one used by the Kubernetes Network Policy.
+It makes it easy to migrate your existing rules into your Keycloak CP.
+For more information, check the https://kubernetes.io/docs/concepts/services-networking/network-policies/#behavior-of-to-and-from-selectors[rule syntax].
+
+==== Example with OpenShift
+
+For a concrete example, let's imagine we have a {project_name} deployment running in a OpenShift cluster.
+Users have to access {project_name} to login, so {project_name} must be accessible from the Internet.
+
+To make this example more interesting, let's assume the {project_name} is monitored too.
+The monitoring is enabled as described in the OpenShift documentation page:
+https://docs.openshift.com/container-platform/4.12/observability/monitoring/enabling-monitoring-for-user-defined-projects.html[enabling Monitoring for user defined projects].
+
+Based on those requirements, the Keycloak CR would be like this (most parts are omitted, like DB connection and security):
+
+.Keycloak CR
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  ingress:
+    enabled: true #<1>
+  networkPolicy:
+    enabled: true
+    https:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-ingress #<2>
+    management:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-user-workload-monitoring #<3>
+----
+<1> Enables Ingress for outside access.
+<2> The default OpenShift Ingress class pods are running in `openshift-ingress` namespace.
+We allow traffic from these pods to access the {project_name} HTTPS endpoint.
+The traffic from outside the OpenShift cluster goes through these pods.
+<3> Prometheus pods are running in `openshift-user-workload-monitoring`.
+They need to access {project_name} to scrape the available metrics.
+
+Check the https://kubernetes.io/docs/concepts/services-networking/network-policies/[Kubernetes Network Policies documentation] for more information about NetworkPolicies.
+
+=== Managing Keycloak Operator Updates (Preview)
+
+The Keycloak Operator offers updates strategies to control how the Operator handles changes to the Keycloak CR.
+
+[CAUTION]
+====
+While on preview stage, the feature `rolling-updates` must be enabled.
+Otherwise, the {project_name} Operator will fail.
+====
+
+**Supported Updates Types:**
+
+Rolling Updates:: Update the StatefulSet in a rolling fashion, minimizing downtime (requires multiple replicas).
+Recreate Updates:: Scale down the StatefulSet before applying updates, causing temporary downtime.
+
+==== Configuring the Update Strategy
+
+The update strategy is specified within the `spec` section of the Keycloak CR YAML definition.
+
+[NOTE]
+====
+During this preview stage, the update strategy defaults to mimicking Keycloak 26.1 or older behavior:
+When the Keycloak CR's image field changes, the Operator scales down the StatefulSet before applying the new image, resulting in downtime.
+Any configuration change will be a rolling update.
+====
+
+[source,yaml]
+----
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+spec:
+  features:
+    enabled:
+      - rolling-updates # <1>
+  update:
+    strategy: Recreate|<not set> # <2>
+----
+<1> Enable preview feature `rolling-updates`.
+<2> Set the desired update strategy here (Recreate in this example).
+
+[%autowidth]
+.Possible field values
+|===
+|Value |Downtime? |Description
+
+|`<not set>` (default)
+|On image name or tag change
+|Mimics Keycloak 26.1 or older behavior.
+When the image field changes, the StatefulSet is scaled down before applying the new image.
+
+|`Recreate`
+|On any configuration or image change
+|The StatefulSet is scaled down before applying the new configuration or image.
+
+|===
+
+</@tmpl.guide>
+
+
+===== FILE docs/guides/server/update-compatibility.adoc (after PR) =====
+<#import "/templates/guide.adoc" as tmpl>
+<#import "/templates/kc.adoc" as kc>
+<#import "/templates/links.adoc" as links>
+
+<@tmpl.guide
+title="Update Compatibility Tool"
+summary="Learn how to use this tool before upgrade {project_name}"
+preview="true"
+previewDiscussionLink="https://github.com/keycloak/keycloak/discussions/36785"
+>
+
+[CAUTION]
+====
+While on preview stage, the feature `rolling-updates` must be enabled.
+Otherwise, the commands will fail.
+====
+
+The goal of this tool is to assist with modifying a {project_name} deployment, whether upgrading to a new version, enabling/disabling features, or changing configuration.
+The outcome will indicate whether a rolling upgrade is possible or if a recreate upgrade is required.
+
+This has been designed to be fully scriptable, so an update procedure can adapt to a rolling or recreate strategy depending on the configuration or version change.
+It is also GitOps friendly as it allows storing the metadata of a currently running configuration in a file. This file can be used in a CI/CD run with the new configuration to determine if a rolling upgrade is possible or if a recreate upgrade is needed.
+
+[NOTE]
+====
+.Rolling Upgrade
+In the context of this guide, a rolling upgrade is an upgrade that can be performed with zero downtime for your deployment.
+Your {project_name} nodes must be updated one by one; in other words, shut down one of your old deployment nodes and start a new deployment node.
+Wait until the new node's start-up probe returns success before proceeding to the next {project_name} node. See {section} <@links.observability id="health"/> for details on how to enable and use the start-up probe.
+====
+
+[NOTE]
+====
+.Recreate Upgrade
+A recreate upgrade is not compatible with zero-downtime and requires downtime to be applied.
+Shut down all nodes of the cluster running the old version before starting the nodes with the new version.
+====
+
+The update compatibility tool involves two steps:
+
+1. Generating the required metadata.
+2. Checking the metadata to determine the possible upgrade type.
+
+[WARNING]
+====
+This command is under development. At the moment, it takes into consideration only the version of {project_name} and the embedded Infinispan to determine if a rolling update is possible.
+If those are unchanged, it reports that a rolling update is possible.
+
+The current version does not yet verify configuration changes and assumes all configuration changes are eligible for a rolling update.
+The same applies to changes to custom extensions and themes.
+
+A good use case when to use this is, for example, when you want to do a rolling update when you change the {project_name} theme or your custom extensions, and only want run recreate update when the version of {project_name} changes which does not yet allow a rolling update.
+
+While consumers of these commands should be aware of the limitations that exist today, they should not rely on the internal behavior or the structure of the metadata file as this is about to be enhanced in future versions.
+Instead, they should rely only on the exit code of the `check` command to benefit from future enhancements on the internal logic to determine when a rolling update is possible.
+====
+
+== Generating the Metadata
+
+To generate the metadata, execute the following command using the same {project_name} version and configuration options:
+
+.Generate and save the metadata from the current deployment.
+<@kc.updatecompatibility parameters="metadata --file=/path/to/file.json"/>
+
+This command accepts all options used by the `start` command.
+The metadata, in JSON format, is displayed in the console for debugging purposes.
+The `--file` parameter allows you to save the metadata to a file.
+This file is then used by the subsequent `check` command.
+
+[WARNING]
+====
+Ensure that all configuration options, whether set via environment variables or CLI arguments, are included when running the above command.
+
+Omitting any configuration options will result in incomplete metadata.
+====
+
+== Checking the Metadata
+
+This command checks the metadata generated by the previous command and compares it with the current configuration and {project_name} version.
+If you are upgrading to a new {project_name} version, this command must be executed with the new version.
+
+.Check the metadata from a previous deployment.
+<@kc.updatecompatibility parameters="check --file=/path/to/file.json"/>
+
+[WARNING]
+====
+* Ensure that all configuration options, whether set via environment variables or CLI arguments, are included when running this command.
+
+* Verify that the correct {project_name} version is used.
+
+Failure to meet these requirements will result in an incorrect outcome.
+====
+
+The command will print the result to the console.
+For example, if a rolling upgrade is possible, it will display:
+
+.Rolling Upgrade possible message
+[source,bash]
+----
+[OK] Rolling Upgrade is available.
+----
+
+Otherwise, the command will indicate that a rolling upgrade is not possible and, optionally, provide details about the incompatibility:
+
+.Rolling Upgrade not possible message
+[source,bash]
+----
+[Versions] Rolling Upgrade is not available. 'infinispan' is incompatible: Old=15.0.0.Final, New=15.0.11.Final #<1>
+----
+<1> In this example, the Infinispan version `15.0.0.Final` is not compatible with version `15.0.11.Final` and a rolling upgrade is not possible.
+
+*Command exit code*
+
+To aid in the development of your automation and/or DevOps pipelines, the command's exit code can be used to determine the upgrade type:
+
+|===
+|Exit Code |Description
+
+m|0
+|Rolling Upgrade is possible.
+
+m|1
+|Unexpected error occurred (e.g., the metadata file is missing or corrupted).
+
+m|2
+|Invalid CLI option.
+
+m|3
+|Rolling Upgrade is not possible.
+The deployment must be shut down before applying the new configuration.
+
+m|4
+|Rolling Upgrade is not possible.
+The feature `rolling-updates` is disabled.
+|===
+
+</@tmpl.guide>
+
+
+===== FILE docs/guides/templates/kc.adoc (after PR) =====
+<#macro build rootParameters="" parameters="">
+[source,bash]
+----
+bin/kc.[sh|bat]<#if rootParameters?has_content> ${rootParameters}</#if> build<#if parameters?has_content> ${parameters}</#if>
+----
+</#macro>
+
+<#macro start rootParameters="" parameters="">
+[source,bash]
+----
+bin/kc.[sh|bat]<#if rootParameters?has_content> ${rootParameters}</#if> start<#if parameters?has_content> ${parameters}</#if>
+----
+</#macro>
+
+<#macro startdev parameters>
+[source,bash]
+----
+bin/kc.[sh|bat] start-dev ${parameters}
+----
+</#macro>
+
+<#macro admin parameters>
+[source,bash]
+----
+bin/kcadm.[sh|bat] ${parameters}
+----
+</#macro>
+
+<#macro export parameters>
+[source,bash]
+----
+bin/kc.[sh|bat] export ${parameters}
+----
+</#macro>
+
+<#macro import parameters>
+[source,bash]
+----
+bin/kc.[sh|bat] import ${parameters}
+----
+</#macro>
+
+<#macro bootstrapadmin parameters>
+[source,bash]
+----
+bin/kc.[sh|bat] bootstrap-admin ${parameters}
+----
+</#macro>
+
+<#macro updatecompatibility parameters>
+[source,bash]
+----
+bin/kc.[sh|bat] update-compatibility ${parameters} --features=rolling-updates
+----
+</#macro>
+
+
+===== FILE operator/scripts/Dockerfile-custom-image (after PR) =====
+ARG IMAGE=keycloak
+ARG VERSION=latest
+FROM $IMAGE:$VERSION
+
+RUN /opt/keycloak/bin/kc.sh build --db=postgres --health-enabled=true --features=rolling-updates
+
+
+===== FILE operator/src/test/java/org/keycloak/operator/testsuite/integration/UpgradeTest.java (after PR) =====
+/*
+ * Copyright 2025 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.operator.testsuite.integration;
+
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
+
+import io.quarkus.test.junit.QuarkusTest;
+import org.awaitility.Awaitility;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.keycloak.common.Profile;
+import org.keycloak.operator.crds.v2alpha1.deployment.Keycloak;
+import org.keycloak.operator.crds.v2alpha1.deployment.KeycloakStatusCondition;
+import org.keycloak.operator.crds.v2alpha1.deployment.ValueOrSecret;
+import org.keycloak.operator.crds.v2alpha1.deployment.spec.FeatureSpec;
+import org.keycloak.operator.crds.v2alpha1.deployment.spec.UpdateSpec;
+import org.keycloak.operator.upgrade.UpdateStrategy;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.keycloak.operator.testsuite.utils.CRAssert.assertKeycloakStatusCondition;
+import static org.keycloak.operator.testsuite.utils.CRAssert.eventuallyRecreateUpgradeStatus;
+import static org.keycloak.operator.testsuite.utils.CRAssert.eventuallyRollingUpgradeStatus;
+import static org.keycloak.operator.testsuite.utils.K8sUtils.deployKeycloak;
+
+@QuarkusTest
+public class UpgradeTest extends BaseOperatorTest {
+
+    private static Stream<UpdateStrategy> upgradeStrategy() {
+        return Stream.of(
+                null,
+                UpdateStrategy.RECREATE
+        );
+    }
+
+    @ParameterizedTest(name = "testImageChange-{0}")
+    @MethodSource("upgradeStrategy")
+    public void testImageChange(UpdateStrategy updateStrategy) throws InterruptedException {
+        var kc = createInitialDeployment(updateStrategy);
+        deployKeycloak(k8sclient, kc, true);
+
+        var stsGetter = k8sclient.apps().statefulSets().inNamespace(namespace).withName(kc.getMetadata().getName());
+        final String newImage = "quay.io/keycloak/non-existing-keycloak";
+
+        // changing the image to non-existing will always use the recreate upgrade type.
+        kc.getSpec().setImage(newImage);
+        var upgradeCondition = eventuallyRecreateUpgradeStatus(k8sclient, kc);
+
+        deployKeycloak(k8sclient, kc, false);
+        await(upgradeCondition);
+
+        Awaitility.await()
+                .ignoreExceptions()
+                .untilAsserted(() -> {
+                    var sts = stsGetter.get();
+                    assertEquals(kc.getSpec().getInstances(), sts.getSpec().getReplicas()); // just checking specs as we're using a non-existing image
+                    assertEquals(newImage, sts.getSpec().getTemplate().getSpec().getContainers().get(0).getImage());
+
+                    var currentKc = k8sclient.resources(Keycloak.class)
+                            .inNamespace(namespace).withName(kc.getMetadata().getName()).get();
+                    assertKeycloakStatusCondition(currentKc, KeycloakStatusCondition.READY, false, "Waiting for more replicas");
+                });
+    }
+
+    @ParameterizedTest(name = "testCacheMaxCount-{0}")
+    @MethodSource("upgradeStrategy")
+    public void testCacheMaxCount(UpdateStrategy updateStrategy) throws InterruptedException {
+        var kc = createInitialDeployment(updateStrategy);
+        deployKeycloak(k8sclient, kc, true);
+
+        // changing the local cache max-count should never use the recreate upgrade type
+        // except if forced by the Keycloak CR.
+        kc.getSpec().getAdditionalOptions().add(new ValueOrSecret("cache-embedded-authorization-max-count", "10"));
+        var upgradeCondition = updateStrategy == UpdateStrategy.RECREATE ?
+                eventuallyRecreateUpgradeStatus(k8sclient, kc) :
+                eventuallyRollingUpgradeStatus(k8sclient, kc);
+
+        deployKeycloak(k8sclient, kc, true);
+
+        await(upgradeCondition);
+    }
+
+    private static Keycloak createInitialDeployment(UpdateStrategy updateStrategy) {
+        var kc = getTestKeycloakDeployment(true);
+        kc.getSpec().setInstances(3);
+        if (updateStrategy == null) {
+            return kc;
+        }
+        var updateSpec = new UpdateSpec();
+        updateSpec.setStrategy(updateStrategy);
+        kc.getSpec().setUpdateSpec(updateSpec);
+
+        if (kc.getSpec().getFeatureSpec() == null) {
+            kc.getSpec().setFeatureSpec(new FeatureSpec());
+        }
+        kc.getSpec().getFeatureSpec().setEnabledFeatures(List.of(Profile.Feature.ROLLING_UPDATES.getKey()));
+        return kc;
+    }
+
+    private static <T> void await(CompletableFuture<T> future) throws InterruptedException {
+        try {
+            future.get(2, TimeUnit.MINUTES);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new AssertionError(e);
+        }
+    }
+}
+
+
+===== FILE quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/cli/command/AbstractUpdatesCommand.java (after PR) =====
+/*
+ * Copyright 2025 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.quarkus.runtime.cli.command;
+
+import java.io.File;
+import java.util.List;
+import java.util.function.Predicate;
+
+import org.keycloak.config.OptionCategory;
+import org.keycloak.quarkus.runtime.cli.PropertyException;
+import org.keycloak.quarkus.runtime.compatibility.CompatibilityManager;
+import org.keycloak.quarkus.runtime.compatibility.CompatibilityManagerImpl;
+import picocli.CommandLine;
+
+public abstract class AbstractUpdatesCommand extends AbstractCommand implements Runnable {
+
+    protected final CompatibilityManager compatibilityManager = new CompatibilityManagerImpl();
+
+    @CommandLine.Mixin
+    HelpAllMixin helpAllMixin;
+
+    @CommandLine.Mixin
+    OptimizedMixin optimizedMixin;
+
+    @Override
+    public List<OptionCategory> getOptionCategories() {
+        return super.getOptionCategories().stream()
+                .filter(Predicate.not(OptionCategory.EXPORT::equals))
+                .filter(Predicate.not(OptionCategory.IMPORT::equals))
+                .toList();
+    }
+
+    static void validateOptionIsPresent(String value, String option) {
+        if (value == null || value.isBlank()) {
+            throw new PropertyException("Missing required argument: " + option);
+        }
+    }
+
+    static void validateFileIsNotDirectory(File file, String option) {
+        if (file.isDirectory()) {
+            throw new PropertyException("Incorrect argument %s. Path '%s' is not a valid file.".formatted(option, file.getAbsolutePath()));
+        }
+    }
+
+    void printOut(String message) {
+        var cmd = getCommandLine();
+        if (cmd.isPresent()) {
+            cmd.get().getOut().println(message);
+        } else {
+            System.out.println(message);
+        }
+    }
+
+    void printError(String message) {
+        var cmd = getCommandLine();
+        if (cmd.isPresent()) {
+            var colorScheme = cmd.get().getColorScheme();
+            cmd.get().getErr().println(colorScheme.errorText(message));
+        } else {
+            System.err.println(message);
+        }
+    }
+
+    void printPreviewWarning() {
+        printError("Warning! This command is preview and is not recommended for use in production. It may change or be removed at a future release.");
+    }
+
+    void printFeatureDisabled() {
+        printError("Unable to use this command. The preview feature 'rolling-updates' is not enabled.");
+    }
+
+}
+
+
+===== FILE quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/cli/command/UpdateCompatibilityCheck.java (after PR) =====
+/*
+ * Copyright 2025 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.quarkus.runtime.cli.command;
+
+import java.io.File;
+import java.io.IOException;
+
+import org.keycloak.common.Profile;
+import org.keycloak.quarkus.runtime.cli.PropertyException;
+import org.keycloak.quarkus.runtime.compatibility.CompatibilityResult;
+import org.keycloak.quarkus.runtime.compatibility.ServerInfo;
+import org.keycloak.util.JsonSerialization;
+import picocli.CommandLine;
+
+@CommandLine.Command(
+        name = UpdateCompatibilityCheck.NAME,
+        description = "Checks if the metadata is compatible with the current configuration. A zero exit code means a rolling upgrade is possible between old and the current metadata."
+)
+public class UpdateCompatibilityCheck extends AbstractUpdatesCommand {
+
+    public static final String NAME = "check";
+    public static final String INPUT_OPTION_NAME = "--file";
+
+
+    @CommandLine.Option(names = {INPUT_OPTION_NAME}, paramLabel = "FILE",
+            description = "The file path to read the metadata.")
+    String inputFile;
+
+    @Override
+    public void run() {
+        if (!Profile.isFeatureEnabled(Profile.Feature.ROLLING_UPDATES)) {
+            printFeatureDisabled();
+            picocli.exit(CompatibilityResult.FEATURE_DISABLED);
+            return;
+        }
+        printPreviewWarning();
+        validateConfig();
+        var info = readServerInfo();
+        var result = compatibilityManager.isCompatible(info);
+        result.errorMessage().ifPresent(this::printError);
+        result.endMessage().ifPresent(this::printOut);
+        picocli.exit(result.exitCode());
+    }
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public boolean includeRuntime() {
+        return true;
+    }
+
+    @Override
+    protected void validateConfig() {
+        super.validateConfig();
+        validateFileParameter();
+    }
+
+    private void validateFileParameter() {
+        validateOptionIsPresent(inputFile, INPUT_OPTION_NAME);
+        var file = new File(inputFile);
+        if (!file.exists()) {
+            throw new PropertyException("Incorrect argument %s. Path '%s' not found".formatted(INPUT_OPTION_NAME, file.getAbsolutePath()));
+        }
+        validateFileIsNotDirectory(file, INPUT_OPTION_NAME);
+    }
+
+    private ServerInfo readServerInfo() {
+        var file = new File(inputFile);
+        try {
+            return JsonSerialization.mapper.readValue(file, ServerInfo.class);
+        } catch (IOException e) {
+            throw new PropertyException("Unable to read file '%s'".formatted(file.getAbsolutePath()), e);
+        }
+    }
+}
+
+
+===== FILE quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/cli/command/UpdateCompatibilityMetadata.java (after PR) =====
+/*
+ * Copyright 2025 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.quarkus.runtime.cli.command;
+
+import java.io.File;
+import java.io.IOException;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import org.keycloak.common.Profile;
+import org.keycloak.quarkus.runtime.cli.PropertyException;
+import org.keycloak.quarkus.runtime.compatibility.CompatibilityResult;
+import org.keycloak.quarkus.runtime.compatibility.ServerInfo;
+import org.keycloak.util.JsonSerialization;
+import picocli.CommandLine;
+
+@CommandLine.Command(
+        name = UpdateCompatibilityMetadata.NAME,
+        description = "Stores the metadata necessary to determine if a configuration is compatible."
+)
+public class UpdateCompatibilityMetadata extends AbstractUpdatesCommand {
+
+    public static final String NAME = "metadata";
+    public static final String OUTPUT_OPTION_NAME = "--file";
+
+    @CommandLine.Option(names = {OUTPUT_OPTION_NAME}, paramLabel = "FILE",
+            description = "The file path to store the metadata. It is stored in the JSON format.")
+    String outputFile;
+
+    @Override
+    public void run() {
+        if (!Profile.isFeatureEnabled(Profile.Feature.ROLLING_UPDATES)) {
+            printFeatureDisabled();
+            picocli.exit(CompatibilityResult.FEATURE_DISABLED);
+            return;
+        }
+        printPreviewWarning();
+        validateConfig();
+        var info = compatibilityManager.current();
+        printToConsole(info);
+        writeToFile(info);
+    }
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public boolean includeRuntime() {
+        return true;
+    }
+
+    @Override
+    protected void validateConfig() {
+        super.validateConfig();
+        validateFileParameter();
+    }
+
+    private void validateFileParameter() {
+        if (noOutputFileSet()) {
+            return;
+        }
+        var file = new File(outputFile);
+        if (file.getParentFile() != null && !file.getParentFile().exists() && !file.getParentFile().mkdirs()) {
+            throw new PropertyException("Incorrect argument %s. Unable to create parent directory: %s".formatted(OUTPUT_OPTION_NAME, file.getParentFile().getAbsolutePath()));
+        }
+        validateFileIsNotDirectory(file, OUTPUT_OPTION_NAME);
+    }
+
+    private void printToConsole(ServerInfo info) {
+        try {
+            var json = JsonSerialization.mapper.writerWithDefaultPrettyPrinter().writeValueAsString(info);
+            printOut("Metadata:%n%s".formatted(json));
+        } catch (JsonProcessingException e) {
+            throw new PropertyException("Unable to create JSON representation of the metadata", e);
+        }
+    }
+
+    private void writeToFile(ServerInfo info) {
+        if (noOutputFileSet()) {
+            return;
+        }
+        var file = new File(outputFile);
+        try {
+            JsonSerialization.mapper.writeValue(file, info);
+        } catch (IOException e) {
+            throw new PropertyException("Unable to write file '%s'".formatted(file.getAbsolutePath()), e);
+        }
+    }
+
+    private boolean noOutputFileSet() {
+        return outputFile == null || outputFile.isBlank();
+    }
+}
+
+
+===== FILE quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/compatibility/CompatibilityResult.java (after PR) =====
+/*
+ * Copyright 2025 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.quarkus.runtime.compatibility;
+
+import java.util.Optional;
+
+/**
+ * The result of {@link CompatibilityManager#isCompatible(ServerInfo)}.
+ * <p>
+ * It is composed by the exit code (to help building scripts around this tool as is is easier than parsing logs), and an
+ * optional error message.
+ */
+public interface CompatibilityResult {
+
+    int ROLLING_UPGRADE_EXIT_CODE = 0;
+    // see picocli.CommandLine.ExitCode
+    // 1 -> software error
+    // 2 -> usage error
+    int RECREATE_UPGRADE_EXIT_CODE = 3;
+    int FEATURE_DISABLED = 4;
+
+    /**
+     * The compatible {@link CompatibilityResult} implementation
+     */
+    CompatibilityResult OK = new CompatibilityResult() {
+        @Override
+        public int exitCode() {
+            return ROLLING_UPGRADE_EXIT_CODE;
+        }
+
+        @Override
+        public Optional<String> endMessage() {
+            return Optional.of("[OK] Rolling Upgrade is available.");
+        }
+    };
+
+    /**
+     * @return The exit code to use to signal the compatibility result.
+     */
+    int exitCode();
+
+    /**
+     * @return An optional error message explaining what caused the incompatibility.
+     */
+    default Optional<String> errorMessage() {
+        return Optional.empty();
+    }
+
+    /**
+     * @return An optional message after the check is finished.
+     */
+    default Optional<String> endMessage() {
+        return Optional.empty();
+    }
+
+}
+
+
+===== FILE quarkus/tests/integration/src/test/java/org/keycloak/it/cli/dist/UpdateCommandDistTest.java (after PR) =====
+/*
+ * Copyright 2025 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.it.cli.dist;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.Map;
+
+import io.quarkus.test.junit.main.Launch;
+import org.junit.jupiter.api.Test;
+import org.keycloak.common.Version;
+import org.keycloak.it.junit5.extension.CLIResult;
+import org.keycloak.it.junit5.extension.DistributionTest;
+import org.keycloak.it.junit5.extension.RawDistOnly;
+import org.keycloak.it.utils.KeycloakDistribution;
+import org.keycloak.quarkus.runtime.cli.command.UpdateCompatibility;
+import org.keycloak.quarkus.runtime.cli.command.UpdateCompatibilityCheck;
+import org.keycloak.quarkus.runtime.cli.command.UpdateCompatibilityMetadata;
+import org.keycloak.quarkus.runtime.compatibility.CompatibilityManagerImpl;
+import org.keycloak.quarkus.runtime.compatibility.ServerInfo;
+import org.keycloak.util.JsonSerialization;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@DistributionTest
+@RawDistOnly(reason = "Requires creating JSON file to be available between containers")
+public class UpdateCommandDistTest {
+
+    private static final String ENABLE_FEATURE = "--features=rolling-updates";
+
+    @Test
+    @Launch({UpdateCompatibility.NAME, UpdateCompatibilityMetadata.NAME})
+    public void testFeatureNotEnabled(CLIResult cliResult) {
+        cliResult.assertError("Unable to use this command. The preview feature 'rolling-updates' is not enabled.");
+    }
+
+    @Test
+    @Launch({UpdateCompatibility.NAME})
+    public void testMissingSubCommand(CLIResult cliResult) {
+        cliResult.assertError("Missing required subcommand");
+    }
+
+    @Test
+    @Launch({UpdateCompatibility.NAME, UpdateCompatibilityMetadata.NAME, ENABLE_FEATURE})
+    public void testMissingOptionOnSave(CLIResult cliResult) {
+        cliResult.assertNoMessage("Missing required argument");
+    }
+
+    @Test
+    @Launch({UpdateCompatibility.NAME, UpdateCompatibilityCheck.NAME, ENABLE_FEATURE})
+    public void testMissingOptionOnCheck(CLIResult cliResult) {
+        cliResult.assertError("Missing required argument: " + UpdateCompatibilityCheck.INPUT_OPTION_NAME);
+    }
+
+    @Test
+    public void testCompatible(KeycloakDistribution distribution) throws IOException {
+        var jsonFile = createTempFile("compatible");
+        var result = distribution.run(UpdateCompatibility.NAME, UpdateCompatibilityMetadata.NAME, UpdateCompatibilityMetadata.OUTPUT_OPTION_NAME, jsonFile.getAbsolutePath(), ENABLE_FEATURE);
+        result.assertMessage("Metadata:");
+        assertEquals(0, result.exitCode());
+
+        var info = JsonSerialization.mapper.readValue(jsonFile, ServerInfo.class);
+        assertEquals(Version.VERSION, info.getVersions().get(CompatibilityManagerImpl.KEYCLOAK_VERSION_KEY));
+        assertEquals(org.infinispan.commons.util.Version.getVersion(), info.getVersions().get(CompatibilityManagerImpl.INFINISPAN_VERSION_KEY));
+
+        result = distribution.run(UpdateCompatibility.NAME, UpdateCompatibilityCheck.NAME, UpdateCompatibilityCheck.INPUT_OPTION_NAME, jsonFile.getAbsolutePath(), ENABLE_FEATURE);
+        result.assertMessage("[OK] Rolling Upgrade is available.");
+        result.assertNoError("Rolling Upgrade is not available.");
+    }
+
+    @Test
+    public void testWrongVersions(KeycloakDistribution distribution) throws IOException {
+        var jsonFile = createTempFile("wrong-versions");
+
+        // incompatible keycloak version
+        var info = new ServerInfo();
+        info.setVersions(Map.of(CompatibilityManagerImpl.KEYCLOAK_VERSION_KEY, "0.0.0.Final",
+                CompatibilityManagerImpl.INFINISPAN_VERSION_KEY, org.infinispan.commons.util.Version.getVersion()));
+        JsonSerialization.mapper.writeValue(jsonFile, info);
+
+        var result = distribution.run(UpdateCompatibility.NAME, UpdateCompatibilityCheck.NAME, UpdateCompatibilityCheck.INPUT_OPTION_NAME, jsonFile.getAbsolutePath(), ENABLE_FEATURE);
+        result.assertError("[Versions] Rolling Upgrade is not available. 'keycloak' is incompatible: Old=0.0.0.Final, New=%s".formatted(Version.VERSION));
+
+        // incompatible infinispan version
+        info.setVersions(Map.of(
+                CompatibilityManagerImpl.KEYCLOAK_VERSION_KEY, Version.VERSION,
+                CompatibilityManagerImpl.INFINISPAN_VERSION_KEY, "0.0.0.Final"));
+        JsonSerialization.mapper.writeValue(jsonFile, info);
+
+        result = distribution.run(UpdateCompatibility.NAME, UpdateCompatibilityCheck.NAME, UpdateCompatibilityCheck.INPUT_OPTION_NAME, jsonFile.getAbsolutePath(), ENABLE_FEATURE);
+        result.assertError("[Versions] Rolling Upgrade is not available. 'infinispan' is incompatible: Old=0.0.0.Final, New=%s".formatted(org.infinispan.commons.util.Version.getVersion()));
+    }
+
+    private static File createTempFile(String prefix) throws IOException {
+        var file = File.createTempFile(prefix, ".json");
+        file.deleteOnExit();
+        return file;
+    }
+
+}

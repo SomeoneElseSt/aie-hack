@@ -1,0 +1,1 @@
+{"bookingRefsFiltered.forEach(async ...) is not awaited, causing calendar/video reference deletions to race with subsequent steps like sendRequestRescheduleEmail, potentially leaving third-party events orphaned or causing intermittent failures without propagating errors to the caller": 0.9434192180633545}

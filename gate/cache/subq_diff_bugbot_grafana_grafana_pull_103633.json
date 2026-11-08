@@ -1,0 +1,1 @@
+{"Denial cache uses raw identifier (checkReq.UserUID) instead of resolved UID (userIdentifiers.UID) for cache key, while permission cache uses resolved UID. This causes denial cache to be ineffective when the same user is identified by different formats (e.g., numeric ID vs UID string)": 0.8465415835380554}

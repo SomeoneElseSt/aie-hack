@@ -1,0 +1,1 @@
+{"TopicUser.find_by on line 105 returns nil when the user has never interacted with the topic, but line 107 immediately calls tu.notification_level without a nil check, causing NoMethodError when the record doesn't exist": 0.978419303894043}

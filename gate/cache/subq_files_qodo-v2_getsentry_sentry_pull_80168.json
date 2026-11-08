@@ -1,0 +1,1 @@
+{"MetricAlertDetectorHandler subclasses StatefulDetectorHandler but implements none of its abstract methods (including build_occurrence_and_event_data), making it non-instantiable and causing a TypeError when Detector.detector_handler tries to instantiate it for detectors using the metric_alert_fire type": 0.9555491209030151}

@@ -1,0 +1,1 @@
+{"Missing Thread.join() in test - background thread may still be executing when assertions run. The test creates a background thread to read groups concurrently while the main thread deletes them, but after setting deletedAll=true, the test immediately asserts that no exceptions were caught without waiting for the background thread to finish.": 0.945756733417511}

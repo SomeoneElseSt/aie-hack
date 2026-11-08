@@ -1,0 +1,1 @@
+{"storedIdp can be null if the IDP doesn't exist, but registerIDPLoginInvalidation(storedIdp) on line 111 doesn't handle null. Add null check before calling registerIDPLoginInvalidation.": 0.5681320428848267}

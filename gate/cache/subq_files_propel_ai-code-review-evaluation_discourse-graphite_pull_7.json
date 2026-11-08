@@ -1,0 +1,1 @@
+{"When wrapping the color in `dark-light-choose`, the light-theme value was changed from `scale-color($primary, $lightness: 70%)` to `scale-color($primary, $lightness: 30%)`, making the custom message length hint dramatically darker than before and inconsistent with the desktop modal which still uses 70%": 0.9619720578193665}

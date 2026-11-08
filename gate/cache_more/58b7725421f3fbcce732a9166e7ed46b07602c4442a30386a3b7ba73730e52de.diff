@@ -1,0 +1,2102 @@
+diff --git a/chronicle-daemon/Cargo.lock b/chronicle-daemon/Cargo.lock
+index b64ed59..651db3e 100644
+--- a/chronicle-daemon/Cargo.lock
++++ b/chronicle-daemon/Cargo.lock
+@@ -268,6 +268,7 @@ name = "chronicle-storage"
+ version = "0.1.0"
+ dependencies = [
+  "chrono",
++ "log",
+  "r2d2",
+  "r2d2_sqlite",
+  "rusqlite",
+diff --git a/chronicle-daemon/crates/storage/Cargo.toml b/chronicle-daemon/crates/storage/Cargo.toml
+index fe94b52..1ac3861 100644
+--- a/chronicle-daemon/crates/storage/Cargo.toml
++++ b/chronicle-daemon/crates/storage/Cargo.toml
+@@ -12,6 +12,7 @@ r2d2_sqlite = "0.33"
+ tokio = { version = "1", features = ["rt"] }
+ thiserror = "2"
+ chrono = { version = "0.4", default-features = false, features = ["clock"] }
++log = "0.4"
+ 
+ [dev-dependencies]
+ tokio = { version = "1", features = ["rt", "macros"] }
+diff --git a/chronicle-daemon/crates/storage/src/audio.rs b/chronicle-daemon/crates/storage/src/audio.rs
+index c398a08..a082d09 100644
+--- a/chronicle-daemon/crates/storage/src/audio.rs
++++ b/chronicle-daemon/crates/storage/src/audio.rs
+@@ -1,4 +1,4 @@
+-use rusqlite::{params, Connection, Row};
++use rusqlite::{Connection, Row, params};
+ 
+ use crate::error::Result;
+ use crate::models::{AudioSegment, AudioSegmentMetadata};
+@@ -120,7 +120,10 @@ mod tests {
+         update_transcript(&conn, id, "Updated transcript content").unwrap();
+ 
+         let segment = get(&conn, id).unwrap();
+-        assert_eq!(segment.transcript.as_deref(), Some("Updated transcript content"));
++        assert_eq!(
++            segment.transcript.as_deref(),
++            Some("Updated transcript content")
++        );
+     }
+ 
+     #[test]
+diff --git a/chronicle-daemon/crates/storage/src/files.rs b/chronicle-daemon/crates/storage/src/files.rs
+index d17212e..d5ddca3 100644
+--- a/chronicle-daemon/crates/storage/src/files.rs
++++ b/chronicle-daemon/crates/storage/src/files.rs
+@@ -1,50 +1,27 @@
+-use std::path::{Path, PathBuf};
+-use chrono::{DateTime, Datelike, Utc};
+-use crate::error::Result;
+-
+ /// Sanitize a user-supplied identifier (display_id, source) so it cannot
+ /// escape the intended directory. Replaces `/`, `\`, `..`, and null bytes
+ /// with `_`.
++#[cfg(test)]
+ fn sanitize_id(input: &str) -> String {
+-    input
+-        .replace("..", "_")
+-        .replace(['/', '\\', '\0'], "_")
++    input.replace("..", "_").replace(['/', '\\', '\0'], "_")
+ }
+ 
+-/// Allocate a canonical file path under `base_dir/subdir/YYYY/MM/DD/`.
+-///
+-/// Creates the parent directory, then canonicalizes it so the returned path
+-/// matches what the filesystem reports. This is critical on macOS where
+-/// tempdir paths like `/var/folders/...` resolve to `/private/var/folders/...`.
+-/// Storing canonical paths in the DB means the orphan sweep can compare
+-/// without its own canonicalization step.
+-pub(crate) fn allocate_path(
+-    base_dir: &Path,
+-    timestamp: i64,
+-    id: &str,
+-    subdir: &str,
+-    ext: &str,
+-) -> Result<PathBuf> {
+-    let id = sanitize_id(id);
+-    let canonical_base = std::fs::canonicalize(base_dir)?;
+-    let (year, month, day) = date_parts(timestamp);
+-    let parent = base_dir
+-        .join(subdir)
+-        .join(format!("{}/{:02}/{:02}", year, month, day));
+-    std::fs::create_dir_all(&parent)?;
+-    let canonical_parent = std::fs::canonicalize(&parent)?;
+-    if !canonical_parent.starts_with(&canonical_base) {
+-        return Err(crate::error::StorageError::Other(
+-            "path escaped storage root".into(),
+-        ));
+-    }
+-    Ok(canonical_parent.join(format!("{}_{}.{}", timestamp, id, ext)))
++#[cfg(test)]
++fn date_parts(timestamp_millis: i64) -> (i32, u32, u32) {
++    use chrono::{DateTime, Datelike, Utc};
++    let dt = DateTime::<Utc>::from_timestamp_millis(timestamp_millis)
++        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
++    (dt.year(), dt.month(), dt.day())
+ }
+ 
+ /// Build a non-canonical screenshot path. Only used in tests to verify
+ /// the date-partitioned structure without hitting the filesystem.
+ #[cfg(test)]
+-fn screenshot_path(base_dir: &Path, timestamp: i64, display_id: &str) -> PathBuf {
++fn screenshot_path(
++    base_dir: &std::path::Path,
++    timestamp: i64,
++    display_id: &str,
++) -> std::path::PathBuf {
+     let safe_id = sanitize_id(display_id);
+     let (year, month, day) = date_parts(timestamp);
+     base_dir
+@@ -55,7 +32,7 @@ fn screenshot_path(base_dir: &Path, timestamp: i64, display_id: &str) -> PathBuf
+ 
+ /// Build a non-canonical audio path. Only used in tests.
+ #[cfg(test)]
+-fn audio_path(base_dir: &Path, timestamp: i64, source: &str) -> PathBuf {
++fn audio_path(base_dir: &std::path::Path, timestamp: i64, source: &str) -> std::path::PathBuf {
+     let safe_source = sanitize_id(source);
+     let (year, month, day) = date_parts(timestamp);
+     base_dir
+@@ -64,80 +41,6 @@ fn audio_path(base_dir: &Path, timestamp: i64, source: &str) -> PathBuf {
+         .join(format!("{}_{}.opus", timestamp, safe_source))
+ }
+ 
+-/// Recursively collect all file paths under `dir`.
+-pub(crate) fn walk_files(dir: &Path) -> Result<Vec<PathBuf>> {
+-    if dir.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+-        return Err(crate::error::StorageError::Other(
+-            format!("refusing to walk symlinked directory: {}", dir.display()),
+-        ));
+-    }
+-    let mut files = Vec::new();
+-    walk_files_recursive(dir, &mut files)?;
+-    Ok(files)
+-}
+-
+-fn walk_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+-    let entries = std::fs::read_dir(dir)?;
+-    for entry in entries {
+-        let entry = entry?;
+-        let ft = entry.file_type()?;
+-        // Skip symlinks to avoid following links outside the data directory.
+-        if ft.is_symlink() {
+-            continue;
+-        }
+-        let path = entry.path();
+-        if ft.is_dir() {
+-            walk_files_recursive(&path, files)?;
+-        } else if ft.is_file() {
+-            files.push(path);
+-        }
+-    }
+-    Ok(())
+-}
+-
+-/// Sum the size (in bytes) of all files under `path`, recursively.
+-pub(crate) fn dir_size(path: &Path) -> u64 {
+-    if !path.exists() {
+-        return 0;
+-    }
+-    let mut total: u64 = 0;
+-    dir_size_recursive(path, &mut total);
+-    total
+-}
+-
+-fn dir_size_recursive(path: &Path, total: &mut u64) {
+-    let entries = match std::fs::read_dir(path) {
+-        Ok(entries) => entries,
+-        Err(_) => return,
+-    };
+-    for entry in entries {
+-        let entry = match entry {
+-            Ok(e) => e,
+-            Err(_) => continue,
+-        };
+-        let ft = match entry.file_type() {
+-            Ok(ft) => ft,
+-            Err(_) => continue,
+-        };
+-        if ft.is_symlink() {
+-            continue;
+-        }
+-        if ft.is_dir() {
+-            dir_size_recursive(&entry.path(), total);
+-        } else if ft.is_file()
+-            && let Ok(meta) = std::fs::symlink_metadata(entry.path())
+-        {
+-            *total += meta.len();
+-        }
+-    }
+-}
+-
+-fn date_parts(timestamp_millis: i64) -> (i32, u32, u32) {
+-    let dt = DateTime::<Utc>::from_timestamp_millis(timestamp_millis)
+-        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
+-    (dt.year(), dt.month(), dt.day())
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -168,16 +71,6 @@ mod tests {
+         );
+     }
+ 
+-    #[test]
+-    fn allocate_path_creates_nested_directories() {
+-        let dir = tempfile::tempdir().unwrap();
+-        let ts: i64 = 1774094400000;
+-        let path = allocate_path(dir.path(), ts, "test_id", "screenshots", "heif").unwrap();
+-        assert!(path.parent().unwrap().is_dir());
+-        // Path should be canonical (no symlinks or relative components)
+-        assert!(path.is_absolute());
+-    }
+-
+     #[test]
+     fn sanitize_id_replaces_path_separators() {
+         assert_eq!(sanitize_id("../etc/passwd"), "__etc_passwd");
+@@ -194,26 +87,4 @@ mod tests {
+         // Should not escape the screenshots directory
+         assert!(!path.to_string_lossy().contains(".."));
+     }
+-
+-    #[test]
+-    fn walk_files_collects_recursively() {
+-        let dir = tempfile::tempdir().unwrap();
+-        let sub = dir.path().join("a/b");
+-        std::fs::create_dir_all(&sub).unwrap();
+-        std::fs::write(dir.path().join("top.txt"), b"x").unwrap();
+-        std::fs::write(sub.join("nested.txt"), b"y").unwrap();
+-
+-        let files = walk_files(dir.path()).unwrap();
+-        assert_eq!(files.len(), 2);
+-    }
+-
+-    #[test]
+-    fn dir_size_sums_file_sizes() {
+-        let dir = tempfile::tempdir().unwrap();
+-        std::fs::write(dir.path().join("a.bin"), &[0u8; 100]).unwrap();
+-        std::fs::write(dir.path().join("b.bin"), &[0u8; 200]).unwrap();
+-
+-        let size = dir_size(dir.path());
+-        assert_eq!(size, 300);
+-    }
+ }
+diff --git a/chronicle-daemon/crates/storage/src/lib.rs b/chronicle-daemon/crates/storage/src/lib.rs
+index f0314e9..ad1cb50 100644
+--- a/chronicle-daemon/crates/storage/src/lib.rs
++++ b/chronicle-daemon/crates/storage/src/lib.rs
+@@ -8,29 +8,31 @@ use std::path::{Path, PathBuf};
+ use r2d2::Pool;
+ use r2d2_sqlite::SqliteConnectionManager;
+ 
++use crate::media::MediaManager;
++
++pub(crate) mod audio;
+ /// Error types for storage operations.
+ pub mod error;
++pub(crate) mod files;
++pub mod media;
+ /// Data models, configuration, and query types.
+ pub mod models;
++pub(crate) mod retention;
+ pub(crate) mod schema;
+-pub(crate) mod files;
+ pub(crate) mod screenshots;
+-pub(crate) mod audio;
+ pub(crate) mod search;
+-pub(crate) mod retention;
+ 
+-pub use error::{StorageError, Result};
++pub use error::{Result, StorageError};
+ pub use models::{
+-    StorageConfig, ScreenshotMetadata, Screenshot,
+-    AudioSegmentMetadata, AudioSegment,
+-    SearchFilter, SearchResult, SearchSource,
+-    CleanupStats, StorageStatus,
++    AudioSegment, AudioSegmentMetadata, CleanupStats, Screenshot, ScreenshotMetadata, SearchFilter,
++    SearchResult, SearchSource, StorageConfig, StorageStatus,
+ };
+ 
+ /// SQLite-backed storage engine for screenshots, audio, and full-text search.
+ pub struct Storage {
+     pub(crate) pool: Pool<SqliteConnectionManager>,
+     pub(crate) base_dir: PathBuf,
++    media_mgr: MediaManager,
+ }
+ 
+ impl Storage {
+@@ -49,6 +51,10 @@ impl Storage {
+         let pool = tokio::task::spawn_blocking(move || {
+             std::fs::create_dir_all(&base_dir)?;
+ 
++            // Harden base directory permissions.
++            use std::os::unix::fs::PermissionsExt;
++            std::fs::set_permissions(&base_dir, std::fs::Permissions::from_mode(0o700))?;
++
+             let pool = Pool::builder()
+                 .max_size(pool_size)
+                 .connection_customizer(Box::new(ConnectionCustomizer))
+@@ -57,12 +63,23 @@ impl Storage {
+             let conn = pool.get()?;
+             schema::migrate(&conn)?;
+ 
++            // Harden DB file permissions.
++            let db_file = base_dir.join("chronicle.db");
++            if db_file.exists() {
++                std::fs::set_permissions(&db_file, std::fs::Permissions::from_mode(0o600))?;
++            }
++
+             Ok::<_, StorageError>(pool)
+         })
+         .await??;
+ 
+         let base_dir = config.base_dir;
+-        Ok(Self { pool, base_dir })
++        let media_mgr = MediaManager::new(base_dir.clone())?;
++        Ok(Self {
++            pool,
++            base_dir,
++            media_mgr,
++        })
+     }
+ 
+     /// The root directory for the database file and media subdirectories.
+@@ -70,14 +87,23 @@ impl Storage {
+         &self.base_dir
+     }
+ 
++    /// The media file manager for this storage instance.
++    pub fn media_manager(&self) -> &MediaManager {
++        &self.media_mgr
++    }
++
+     // --- Screenshot operations ---
+ 
+     /// Reserve a unique file path for a new screenshot image.
+-    pub async fn allocate_screenshot_path(&self, timestamp: i64, display_id: &str) -> Result<PathBuf> {
+-        let base_dir = self.base_dir.clone();
++    pub async fn allocate_screenshot_path(
++        &self,
++        timestamp: i64,
++        display_id: &str,
++    ) -> Result<PathBuf> {
++        let media_mgr = self.media_mgr.clone();
+         let display_id = display_id.to_string();
+         tokio::task::spawn_blocking(move || {
+-            files::allocate_path(&base_dir, timestamp, &display_id, "screenshots", "heif")
++            media_mgr.allocate_path("screenshots", timestamp, &display_id, "heif")
+         })
+         .await?
+     }
+@@ -131,10 +157,10 @@ impl Storage {
+ 
+     /// Reserve a unique file path for a new audio segment.
+     pub async fn allocate_audio_path(&self, timestamp: i64, source: &str) -> Result<PathBuf> {
+-        let base_dir = self.base_dir.clone();
++        let media_mgr = self.media_mgr.clone();
+         let source = source.to_string();
+         tokio::task::spawn_blocking(move || {
+-            files::allocate_path(&base_dir, timestamp, &source, "audio", "opus")
++            media_mgr.allocate_path("audio", timestamp, &source, "opus")
+         })
+         .await?
+     }
+@@ -214,6 +240,7 @@ impl Storage {
+     /// Delete records and media files older than the configured retention period.
+     pub async fn run_cleanup(&self) -> Result<CleanupStats> {
+         let pool = self.pool.clone();
++        let media_mgr = self.media_mgr.clone();
+         tokio::task::spawn_blocking(move || {
+             let conn = pool.get()?;
+             let retention_days: i64 = match conn.query_row(
+@@ -238,7 +265,7 @@ impl Storage {
+                 Err(rusqlite::Error::QueryReturnedNoRows) => 30,
+                 Err(e) => return Err(e.into()),
+             };
+-            retention::run_cleanup(&conn, retention_days)
++            retention::run_cleanup(&conn, &media_mgr, retention_days)
+         })
+         .await?
+     }
+@@ -246,10 +273,10 @@ impl Storage {
+     /// Remove media files on disk that have no matching database record.
+     pub async fn sweep_orphans(&self) -> Result<CleanupStats> {
+         let pool = self.pool.clone();
+-        let base_dir = self.base_dir.clone();
++        let media_mgr = self.media_mgr.clone();
+         tokio::task::spawn_blocking(move || {
+             let conn = pool.get()?;
+-            let bytes_freed = retention::sweep_orphans(&conn, &base_dir)?;
++            let bytes_freed = retention::sweep_orphans(&conn, &media_mgr)?;
+             Ok(CleanupStats {
+                 bytes_freed,
+                 ..CleanupStats::default()
+@@ -263,34 +290,31 @@ impl Storage {
+     /// Gather aggregate statistics about the database and on-disk storage.
+     pub async fn status(&self) -> Result<StorageStatus> {
+         let pool = self.pool.clone();
+-        let base_dir = self.base_dir.clone();
++        let media_mgr = self.media_mgr.clone();
+         tokio::task::spawn_blocking(move || {
+             let conn = pool.get()?;
+ 
+-            let screenshot_count: u64 = conn
+-                .query_row("SELECT COUNT(*) FROM screenshots", [], |row| {
++            let screenshot_count: u64 =
++                conn.query_row("SELECT COUNT(*) FROM screenshots", [], |row| {
+                     row.get::<_, i64>(0).map(|v| v as u64)
+                 })?;
+ 
+-            let audio_segment_count: u64 = conn
+-                .query_row("SELECT COUNT(*) FROM audio_segments", [], |row| {
++            let audio_segment_count: u64 =
++                conn.query_row("SELECT COUNT(*) FROM audio_segments", [], |row| {
+                     row.get::<_, i64>(0).map(|v| v as u64)
+                 })?;
+ 
+             // Find oldest entry across both tables
+-            let oldest_screenshot: Option<i64> = conn
+-                .query_row(
+-                    "SELECT MIN(timestamp) FROM screenshots",
+-                    [],
+-                    |row| row.get(0),
+-                )?;
+-
+-            let oldest_audio: Option<i64> = conn
+-                .query_row(
+-                    "SELECT MIN(start_timestamp) FROM audio_segments",
+-                    [],
+-                    |row| row.get(0),
+-                )?;
++            let oldest_screenshot: Option<i64> =
++                conn.query_row("SELECT MIN(timestamp) FROM screenshots", [], |row| {
++                    row.get(0)
++                })?;
++
++            let oldest_audio: Option<i64> = conn.query_row(
++                "SELECT MIN(start_timestamp) FROM audio_segments",
++                [],
++                |row| row.get(0),
++            )?;
+ 
+             let oldest_entry = match (oldest_screenshot, oldest_audio) {
+                 (Some(s), Some(a)) => Some(s.min(a)),
+@@ -300,21 +324,35 @@ impl Storage {
+             };
+ 
+             // DB file size (include WAL and SHM sidecars)
+-            let db_path = base_dir.join("chronicle.db");
+-            let db_size_bytes = std::fs::metadata(&db_path)
+-                .map(|m| m.len())
+-                .unwrap_or(0);
+-            let wal_size = std::fs::metadata(db_path.with_extension("db-wal"))
+-                .map(|m| m.len())
+-                .unwrap_or(0);
+-            let shm_size = std::fs::metadata(db_path.with_extension("db-shm"))
+-                .map(|m| m.len())
+-                .unwrap_or(0);
++            let db_path = media_mgr.base_dir().join("chronicle.db");
++            let db_size_bytes = match std::fs::metadata(&db_path) {
++                Ok(m) => m.len(),
++                Err(e) => {
++                    log::warn!("failed to read db metadata at {}: {}", db_path.display(), e);
++                    0
++                }
++            };
++            let wal_size = match std::fs::metadata(db_path.with_extension("db-wal")) {
++                Ok(m) => m.len(),
++                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
++                    log::warn!("failed to read WAL metadata: {}", e);
++                    0
++                }
++                Err(_) => 0, // WAL file not existing is normal
++            };
++            let shm_size = match std::fs::metadata(db_path.with_extension("db-shm")) {
++                Ok(m) => m.len(),
++                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
++                    log::warn!("failed to read SHM metadata: {}", e);
++                    0
++                }
++                Err(_) => 0,
++            };
+             let db_size_bytes = db_size_bytes + wal_size + shm_size;
+ 
+             // Total disk usage from screenshots/ and audio/ directories
+-            let screenshots_size = files::dir_size(&base_dir.join("screenshots"));
+-            let audio_size = files::dir_size(&base_dir.join("audio"));
++            let screenshots_size = media_mgr.dir_size("screenshots");
++            let audio_size = media_mgr.dir_size("audio");
+             let total_disk_usage_bytes = db_size_bytes + screenshots_size + audio_size;
+ 
+             Ok(StorageStatus {
+@@ -355,7 +393,10 @@ impl r2d2::CustomizeConnection<rusqlite::Connection, rusqlite::Error> for Connec
+     // foreign_keys, and busy_timeout are connection-persistent — they stick for
+     // the lifetime of the connection and don't need to be re-applied on each
+     // checkout.
+-    fn on_acquire(&self, conn: &mut rusqlite::Connection) -> std::result::Result<(), rusqlite::Error> {
++    fn on_acquire(
++        &self,
++        conn: &mut rusqlite::Connection,
++    ) -> std::result::Result<(), rusqlite::Error> {
+         schema::setup_connection(conn).map_err(|e| match e {
+             StorageError::Database(e) => e,
+             other => rusqlite::Error::ModuleError(other.to_string()),
+@@ -504,6 +545,17 @@ mod tests {
+         assert_eq!(storage.base_dir(), dir.path());
+     }
+ 
++    #[tokio::test]
++    async fn media_manager_returns_base_dir() {
++        let dir = tempdir().unwrap();
++        let config = StorageConfig {
++            base_dir: dir.path().to_path_buf(),
++            pool_size: 2,
++        };
++        let storage = Storage::open(config).await.unwrap();
++        assert_eq!(storage.media_manager().base_dir(), dir.path());
++    }
++
+     #[tokio::test]
+     async fn status_on_empty_db() {
+         let dir = tempdir().unwrap();
+@@ -518,4 +570,49 @@ mod tests {
+         assert_eq!(status.audio_segment_count, 0);
+         assert_eq!(status.oldest_entry, None);
+     }
++
++    #[tokio::test]
++    async fn sweep_orphans_removes_untracked_files_on_startup() {
++        let dir = tempdir().unwrap();
++        let config = StorageConfig {
++            base_dir: dir.path().to_path_buf(),
++            pool_size: 2,
++        };
++        let storage = Storage::open(config).await.unwrap();
++
++        // Simulate a crash: create an orphan file in the screenshots directory
++        let orphan_dir = dir.path().join("screenshots/2026/03/21");
++        std::fs::create_dir_all(&orphan_dir).unwrap();
++        let orphan_file = orphan_dir.join("999_orphan.heif");
++        std::fs::write(&orphan_file, b"orphan data").unwrap();
++        assert!(orphan_file.exists());
++
++        // Run sweep (what startup would do)
++        let stats = storage.sweep_orphans().await.unwrap();
++        assert!(stats.bytes_freed > 0, "should have freed orphan bytes");
++        assert!(!orphan_file.exists(), "orphan file should be deleted");
++    }
++
++    #[tokio::test]
++    async fn status_handles_metadata_errors_gracefully() {
++        let dir = tempdir().unwrap();
++        let config = StorageConfig {
++            base_dir: dir.path().to_path_buf(),
++            pool_size: 2,
++        };
++        let storage = Storage::open(config).await.unwrap();
++
++        // Delete the database file and its sidecars to simulate metadata read failure
++        let db_path = dir.path().join("chronicle.db");
++        std::fs::remove_file(&db_path).unwrap();
++        let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
++        let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
++
++        // status() should still succeed (returning 0 for unreadable fields)
++        let status = storage.status().await.unwrap();
++        assert_eq!(
++            status.db_size_bytes, 0,
++            "should report 0 for missing db file"
++        );
++    }
+ }
+diff --git a/chronicle-daemon/crates/storage/src/media.rs b/chronicle-daemon/crates/storage/src/media.rs
+new file mode 100644
+index 0000000..fe193eb
+--- /dev/null
++++ b/chronicle-daemon/crates/storage/src/media.rs
+@@ -0,0 +1,571 @@
++use std::io::Write;
++use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
++use std::path::{Path, PathBuf};
++
++use chrono::{DateTime, Datelike, Utc};
++
++use crate::error::Result;
++
++const FILE_MODE: u32 = 0o600;
++const DIR_MODE: u32 = 0o700;
++
++/// Sanitize a user-supplied identifier so it cannot escape the intended
++/// directory. Replaces `/`, `\`, `..`, and null bytes with `_`.
++fn sanitize_id(input: &str) -> String {
++    input.replace("..", "_").replace(['/', '\\', '\0'], "_")
++}
++
++fn date_parts(timestamp_millis: i64) -> (i32, u32, u32) {
++    let dt = DateTime::<Utc>::from_timestamp_millis(timestamp_millis)
++        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
++    (dt.year(), dt.month(), dt.day())
++}
++
++/// Owns the base directory and all file lifecycle operations.
++/// Permission policy is enforced here: files get 0o600, directories get 0o700.
++#[derive(Clone)]
++pub struct MediaManager {
++    base_dir: PathBuf,
++    canonical_base: PathBuf,
++}
++
++impl MediaManager {
++    pub fn new(base_dir: PathBuf) -> Result<Self> {
++        let canonical_base = std::fs::canonicalize(&base_dir).map_err(|e| {
++            crate::error::StorageError::Other(format!(
++                "cannot canonicalize storage root {}: {}",
++                base_dir.display(),
++                e
++            ))
++        })?;
++        Ok(Self {
++            base_dir,
++            canonical_base,
++        })
++    }
++
++    pub fn base_dir(&self) -> &Path {
++        &self.base_dir
++    }
++
++    /// Verify that a path resolves to a location under the storage root.
++    ///
++    /// Always uses canonical (resolved) paths so that symlinks and `..`
++    /// segments cannot bypass the check.
++    fn validate_path(&self, path: &Path) -> Result<()> {
++        // Try to canonicalize the full path first.
++        if let Ok(canonical_path) = std::fs::canonicalize(path)
++            && canonical_path.starts_with(&self.canonical_base)
++        {
++            return Ok(());
++        }
++
++        // For paths that don't exist yet, canonicalize the parent.
++        if let Some(parent) = path.parent()
++            && let Ok(canonical_parent) = std::fs::canonicalize(parent)
++            && canonical_parent.starts_with(&self.canonical_base)
++        {
++            return Ok(());
++        }
++
++        Err(crate::error::StorageError::Other(format!(
++            "path outside storage root: {}",
++            path.display()
++        )))
++    }
++
++    /// Write bytes to path with owner-only permissions (0o600) set at creation
++    /// time to avoid a window where the file is more permissive.
++    pub fn write_file(&self, path: &Path, data: &[u8]) -> Result<()> {
++        self.validate_path(path)?;
++        let mut file = std::fs::OpenOptions::new()
++            .write(true)
++            .create(true)
++            .truncate(true)
++            .mode(FILE_MODE)
++            .open(path)?;
++        file.write_all(data)?;
++        // Enforce permissions even if the file already existed.
++        std::fs::set_permissions(path, std::fs::Permissions::from_mode(FILE_MODE))?;
++        Ok(())
++    }
++
++    /// Move (rename) a file from one path to another, then set 0o600.
++    /// The `from` path is not validated because it may be in a staging
++    /// directory outside base_dir. The `to` path must be under base_dir.
++    /// Rejects non-regular files (symlinks, directories, devices) to prevent
++    /// set_permissions from following a symlink to an unintended target.
++    pub fn move_file(&self, from: &Path, to: &Path) -> Result<()> {
++        let from_meta = std::fs::symlink_metadata(from)?;
++        if !from_meta.file_type().is_file() {
++            return Err(crate::error::StorageError::Other(format!(
++                "refusing to move non-regular file: {}",
++                from.display()
++            )));
++        }
++        self.validate_path(to)?;
++        std::fs::rename(from, to)?;
++        if let Err(e) = std::fs::set_permissions(to, std::fs::Permissions::from_mode(FILE_MODE)) {
++            let _ = std::fs::remove_file(to);
++            return Err(e.into());
++        }
++        Ok(())
++    }
++
++    /// Delete a file, returning bytes freed. Returns Ok(0) if the file is already gone.
++    pub fn delete_file(&self, path: &Path) -> Result<u64> {
++        // Validate before any I/O to avoid leaking metadata for paths outside
++        // the storage root. If validation fails because the file (and its
++        // parent) are already gone, that's a benign NotFound — return Ok(0).
++        if let Err(e) = self.validate_path(path) {
++            if !path.exists()
++                && path
++                    .parent()
++                    .map(|p| !p.exists())
++                    .unwrap_or(false)
++            {
++                return Ok(0);
++            }
++            return Err(e);
++        }
++        let size = match std::fs::metadata(path) {
++            Ok(meta) => meta.len(),
++            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
++            Err(e) => return Err(e.into()),
++        };
++        match std::fs::remove_file(path) {
++            Ok(()) => Ok(size),
++            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
++            Err(e) => Err(e.into()),
++        }
++    }
++
++    /// Set owner-only permissions (0o600) on an existing file.
++    /// Use after external writes (e.g. encode_heif) that bypass MediaManager.
++    ///
++    /// Design deviation: the design specifies routing all writes through
++    /// write_file(). However, encode_heif is an external function from the
++    /// capture crate that writes directly to a path and cannot be wrapped.
++    /// harden_file closes the permission window immediately after the write.
++    pub fn harden_file(&self, path: &Path) -> Result<()> {
++        self.validate_path(path)?;
++        std::fs::set_permissions(path, std::fs::Permissions::from_mode(FILE_MODE))?;
++        Ok(())
++    }
++
++    /// Validate that a subdir name is a simple relative component (no `/`, `\`,
++    /// `..`, null bytes, or absolute paths).
++    fn validate_subdir(subdir: &str) -> Result<()> {
++        if subdir.is_empty()
++            || subdir.contains('/')
++            || subdir.contains('\\')
++            || subdir.contains('\0')
++            || subdir.contains("..")
++            || Path::new(subdir).is_absolute()
++        {
++            return Err(crate::error::StorageError::Other(format!(
++                "invalid subdir: {subdir}"
++            )));
++        }
++        Ok(())
++    }
++
++    /// Recursively collect all file paths under base_dir/subdir.
++    /// Returns an empty vec if the directory doesn't exist or is unreadable.
++    /// Skips symlinks to avoid following links outside the data directory.
++    /// Logs and skips unreadable entries (best-effort walk).
++    pub fn walk_files(&self, subdir: &str) -> Vec<PathBuf> {
++        if Self::validate_subdir(subdir).is_err() {
++            return Vec::new();
++        }
++        let dir = self.base_dir.join(subdir);
++        if !dir.exists() {
++            return Vec::new();
++        }
++        if dir
++            .symlink_metadata()
++            .map(|m| m.file_type().is_symlink())
++            .unwrap_or(false)
++        {
++            log::warn!("refusing to walk symlinked directory: {}", dir.display());
++            return Vec::new();
++        }
++        let mut files = Vec::new();
++        walk_files_recursive(&dir, &mut files);
++        files
++    }
++
++    /// Sum the size (in bytes) of all files under base_dir/subdir.
++    /// Refuses to follow a symlinked root directory (mirrors walk_files).
++    pub fn dir_size(&self, subdir: &str) -> u64 {
++        if Self::validate_subdir(subdir).is_err() {
++            return 0;
++        }
++        let dir = self.base_dir.join(subdir);
++        if !dir.exists() {
++            return 0;
++        }
++        if dir
++            .symlink_metadata()
++            .map(|m| m.file_type().is_symlink())
++            .unwrap_or(false)
++        {
++            log::warn!("refusing to size symlinked directory: {}", dir.display());
++            return 0;
++        }
++        let mut total: u64 = 0;
++        dir_size_recursive(&dir, &mut total);
++        total
++    }
++
++    /// Allocate a canonical file path under base_dir/subdir/YYYY/MM/DD/.
++    /// Creates parent directories with mode 0o700.
++    pub fn allocate_path(
++        &self,
++        subdir: &str,
++        timestamp: i64,
++        id: &str,
++        ext: &str,
++    ) -> Result<PathBuf> {
++        Self::validate_subdir(subdir)?;
++        let id = sanitize_id(id);
++        let (year, month, day) = date_parts(timestamp);
++        let parent = self
++            .base_dir
++            .join(subdir)
++            .join(format!("{}/{:02}/{:02}", year, month, day));
++
++        std::fs::DirBuilder::new()
++            .recursive(true)
++            .mode(DIR_MODE)
++            .create(&parent)?;
++
++        let canonical_parent = std::fs::canonicalize(&parent)?;
++        if !canonical_parent.starts_with(&self.canonical_base) {
++            return Err(crate::error::StorageError::Other(
++                "path escaped storage root".into(),
++            ));
++        }
++        Ok(canonical_parent.join(format!("{}_{}.{}", timestamp, id, ext)))
++    }
++}
++
++fn walk_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
++    let entries = match std::fs::read_dir(dir) {
++        Ok(entries) => entries,
++        Err(e) => {
++            log::warn!("skipping unreadable directory {}: {}", dir.display(), e);
++            return;
++        }
++    };
++    for entry in entries {
++        let entry = match entry {
++            Ok(e) => e,
++            Err(e) => {
++                log::warn!("skipping unreadable entry in {}: {}", dir.display(), e);
++                continue;
++            }
++        };
++        let ft = match entry.file_type() {
++            Ok(ft) => ft,
++            Err(_) => continue,
++        };
++        if ft.is_symlink() {
++            continue;
++        }
++        let path = entry.path();
++        if ft.is_dir() {
++            walk_files_recursive(&path, files);
++        } else if ft.is_file() {
++            files.push(path);
++        }
++    }
++}
++
++fn dir_size_recursive(path: &Path, total: &mut u64) {
++    let entries = match std::fs::read_dir(path) {
++        Ok(entries) => entries,
++        Err(e) => {
++            log::warn!("skipping unreadable directory {}: {}", path.display(), e);
++            return;
++        }
++    };
++    for entry in entries {
++        let entry = match entry {
++            Ok(e) => e,
++            Err(e) => {
++                log::warn!("skipping unreadable entry in {}: {}", path.display(), e);
++                continue;
++            }
++        };
++        let ft = match entry.file_type() {
++            Ok(ft) => ft,
++            Err(_) => continue,
++        };
++        if ft.is_symlink() {
++            continue;
++        }
++        if ft.is_dir() {
++            dir_size_recursive(&entry.path(), total);
++        } else if ft.is_file()
++            && let Ok(meta) = std::fs::symlink_metadata(entry.path())
++        {
++            *total += meta.len();
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::os::unix::fs::PermissionsExt;
++
++    #[test]
++    fn write_file_sets_owner_only_permissions() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let path = dir.path().join("test.dat");
++        mgr.write_file(&path, b"secret data").unwrap();
++
++        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
++        assert_eq!(
++            mode, 0o600,
++            "file should be owner-only (0o600), got {:#o}",
++            mode
++        );
++        assert_eq!(std::fs::read(&path).unwrap(), b"secret data");
++    }
++
++    #[test]
++    fn move_file_sets_owner_only_permissions() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++
++        let src = dir.path().join("src.dat");
++        std::fs::write(&src, b"audio data").unwrap();
++
++        let dest = dir.path().join("dest.dat");
++        mgr.move_file(&src, &dest).unwrap();
++
++        assert!(!src.exists(), "source should be removed after move");
++        let mode = std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777;
++        assert_eq!(mode, 0o600, "moved file should be 0o600, got {:#o}", mode);
++        assert_eq!(std::fs::read(&dest).unwrap(), b"audio data");
++    }
++
++    #[test]
++    fn delete_file_returns_bytes_freed() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let path = dir.path().join("deleteme.dat");
++        std::fs::write(&path, &[0u8; 256]).unwrap();
++
++        let freed = mgr.delete_file(&path).unwrap();
++        assert_eq!(freed, 256);
++        assert!(!path.exists());
++    }
++
++    #[test]
++    fn delete_file_returns_zero_for_missing() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let freed = mgr.delete_file(&dir.path().join("nope.dat")).unwrap();
++        assert_eq!(freed, 0);
++    }
++
++    #[test]
++    fn harden_file_sets_permissions_on_existing_file() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let path = dir.path().join("existing.dat");
++        std::fs::write(&path, b"content").unwrap();
++
++        mgr.harden_file(&path).unwrap();
++        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
++        assert_eq!(mode, 0o600);
++    }
++
++    #[test]
++    fn allocate_path_creates_dirs_with_0o700() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let ts: i64 = 1774094400000;
++
++        let path = mgr
++            .allocate_path("screenshots", ts, "display1", "heif")
++            .unwrap();
++        assert!(path.is_absolute());
++
++        let parent = path.parent().unwrap();
++        assert!(parent.is_dir());
++        let mode = std::fs::metadata(parent).unwrap().permissions().mode() & 0o777;
++        assert_eq!(mode, 0o700, "parent dir should be 0o700, got {:#o}", mode);
++    }
++
++    #[test]
++    fn allocate_path_sanitizes_id() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let ts: i64 = 1774094400000;
++
++        let path = mgr
++            .allocate_path("screenshots", ts, "../evil", "heif")
++            .unwrap();
++        let filename = path.file_name().unwrap().to_string_lossy();
++        assert!(
++            !filename.contains(".."),
++            "path traversal should be sanitized"
++        );
++    }
++
++    #[test]
++    fn allocate_path_sanitizes_traversal_attempts() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let ts: i64 = 1774094400000;
++
++        let result = mgr.allocate_path("screenshots", ts, "../../etc/passwd", "heif");
++        assert!(result.is_ok());
++        let path = result.unwrap();
++        let canonical_base = std::fs::canonicalize(dir.path()).unwrap();
++        assert!(path.starts_with(&canonical_base));
++    }
++
++    #[test]
++    fn walk_files_collects_recursively() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let sub = dir.path().join("screenshots/2026/03/21");
++        std::fs::create_dir_all(&sub).unwrap();
++        std::fs::write(sub.join("a.heif"), b"x").unwrap();
++        std::fs::write(sub.join("b.heif"), b"y").unwrap();
++
++        let files = mgr.walk_files("screenshots");
++        assert_eq!(files.len(), 2);
++    }
++
++    #[test]
++    fn walk_files_returns_empty_for_missing_subdir() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let files = mgr.walk_files("nonexistent");
++        assert!(files.is_empty());
++    }
++
++    #[test]
++    fn dir_size_sums_files() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let sub = dir.path().join("audio");
++        std::fs::create_dir_all(&sub).unwrap();
++        std::fs::write(sub.join("a.opus"), &[0u8; 100]).unwrap();
++        std::fs::write(sub.join("b.opus"), &[0u8; 200]).unwrap();
++
++        assert_eq!(mgr.dir_size("audio"), 300);
++    }
++
++    #[test]
++    fn dir_size_returns_zero_for_missing_subdir() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        assert_eq!(mgr.dir_size("nonexistent"), 0);
++    }
++
++    #[test]
++    fn write_file_rejects_path_outside_base() {
++        let dir = tempfile::tempdir().unwrap();
++        std::fs::create_dir_all(dir.path().join("storage")).unwrap();
++        let mgr = MediaManager::new(dir.path().join("storage")).unwrap();
++        let outside = dir.path().join("outside.dat");
++        let result = mgr.write_file(&outside, b"data");
++        assert!(result.is_err());
++    }
++
++    #[test]
++    fn delete_file_rejects_path_outside_base() {
++        let dir = tempfile::tempdir().unwrap();
++        std::fs::create_dir_all(dir.path().join("storage")).unwrap();
++        let mgr = MediaManager::new(dir.path().join("storage")).unwrap();
++        let outside = dir.path().join("outside.dat");
++        std::fs::write(&outside, b"data").unwrap();
++        let result = mgr.delete_file(&outside);
++        assert!(result.is_err());
++        assert!(outside.exists(), "file outside base should not be deleted");
++    }
++
++    #[test]
++    fn harden_file_rejects_path_outside_base() {
++        let dir = tempfile::tempdir().unwrap();
++        std::fs::create_dir_all(dir.path().join("storage")).unwrap();
++        let mgr = MediaManager::new(dir.path().join("storage")).unwrap();
++        let outside = dir.path().join("outside.dat");
++        std::fs::write(&outside, b"data").unwrap();
++        let result = mgr.harden_file(&outside);
++        assert!(result.is_err());
++    }
++
++    #[test]
++    fn move_file_rejects_destination_outside_base() {
++        let dir = tempfile::tempdir().unwrap();
++        std::fs::create_dir_all(dir.path().join("storage")).unwrap();
++        let mgr = MediaManager::new(dir.path().join("storage")).unwrap();
++        let src = dir.path().join("storage/src.dat");
++        std::fs::write(&src, b"data").unwrap();
++        let outside_dest = dir.path().join("outside.dat");
++        let result = mgr.move_file(&src, &outside_dest);
++        assert!(result.is_err());
++        assert!(src.exists(), "source should not be moved to outside path");
++    }
++
++    #[test]
++    fn move_file_rejects_symlink_source() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++
++        let real_file = dir.path().join("real.dat");
++        std::fs::write(&real_file, b"target data").unwrap();
++        let symlink = dir.path().join("link.dat");
++        std::os::unix::fs::symlink(&real_file, &symlink).unwrap();
++
++        let dest = dir.path().join("dest.dat");
++        let result = mgr.move_file(&symlink, &dest);
++        assert!(result.is_err(), "should reject symlink source");
++        assert!(symlink.exists(), "symlink should not be moved");
++    }
++
++    #[test]
++    fn write_file_creates_with_restricted_permissions() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let path = dir.path().join("atomic.dat");
++        mgr.write_file(&path, b"secret").unwrap();
++
++        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
++        assert_eq!(
++            mode, 0o600,
++            "file should be created with 0o600, got {:#o}",
++            mode
++        );
++    }
++
++    #[test]
++    fn dir_size_refuses_symlinked_subdir() {
++        let dir = tempfile::tempdir().unwrap();
++        let mgr = MediaManager::new(dir.path().to_path_buf()).unwrap();
++
++        // Create a real directory with files outside the expected subdir
++        let real_dir = dir.path().join("real_audio");
++        std::fs::create_dir_all(&real_dir).unwrap();
++        std::fs::write(real_dir.join("a.opus"), &[0u8; 500]).unwrap();
++
++        // Symlink the subdir to the real directory
++        let symlink_dir = dir.path().join("audio");
++        std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
++
++        assert_eq!(
++            mgr.dir_size("audio"),
++            0,
++            "should refuse to size a symlinked subdir"
++        );
++    }
++}
+diff --git a/chronicle-daemon/crates/storage/src/models.rs b/chronicle-daemon/crates/storage/src/models.rs
+index cf0e59e..c567820 100644
+--- a/chronicle-daemon/crates/storage/src/models.rs
++++ b/chronicle-daemon/crates/storage/src/models.rs
+@@ -16,8 +16,7 @@ impl Default for StorageConfig {
+         // Using HOME is intentional. Chronicle is macOS-only and HOME is always
+         // set by the system. This avoids pulling in a `dirs` crate dependency
+         // just for one path lookup.
+-        let home = std::env::var("HOME")
+-            .expect("HOME environment variable must be set");
++        let home = std::env::var("HOME").expect("HOME environment variable must be set");
+         let base_dir = PathBuf::from(home).join("Library/Application Support/Chronicle");
+         Self {
+             base_dir,
+diff --git a/chronicle-daemon/crates/storage/src/retention.rs b/chronicle-daemon/crates/storage/src/retention.rs
+index 6b94045..98b2f07 100644
+--- a/chronicle-daemon/crates/storage/src/retention.rs
++++ b/chronicle-daemon/crates/storage/src/retention.rs
+@@ -1,18 +1,42 @@
+ use std::path::Path;
+ 
+-use rusqlite::{params, Connection};
++use rusqlite::{Connection, params};
+ 
+ use crate::error::Result;
+-use crate::files;
++use crate::media::MediaManager;
+ use crate::models::CleanupStats;
+ 
+-// Must stay below SQLite's SQLITE_MAX_VARIABLE_NUMBER (default 999).
+ const CLEANUP_BATCH_SIZE: usize = 500;
+ 
+-/// Delete expired screenshots and audio segments in batches.
+-/// Deletes DB rows first, then removes associated files.
+-pub(crate) fn run_cleanup(conn: &Connection, retention_days: i64) -> Result<CleanupStats> {
+-    // A retention of 0 or negative days is invalid — treat it as a no-op.
++/// Descriptor for a media table's columns. Parameterizes generic cleanup/sweep.
++struct MediaTable {
++    table: &'static str,
++    timestamp_col: &'static str,
++    path_col: &'static str,
++    subdir: &'static str,
++}
++
++const SCREENSHOT_TABLE: MediaTable = MediaTable {
++    table: "screenshots",
++    timestamp_col: "timestamp",
++    path_col: "image_path",
++    subdir: "screenshots",
++};
++
++const AUDIO_TABLE: MediaTable = MediaTable {
++    table: "audio_segments",
++    timestamp_col: "start_timestamp",
++    path_col: "audio_path",
++    subdir: "audio",
++};
++
++/// Delete expired records and their media files in batches.
++/// Order: delete files first, then DB rows (crash-safe — see design doc).
++pub(crate) fn run_cleanup(
++    conn: &Connection,
++    media_mgr: &MediaManager,
++    retention_days: i64,
++) -> Result<CleanupStats> {
+     if retention_days <= 0 {
+         return Ok(CleanupStats::default());
+     }
+@@ -22,14 +46,41 @@ pub(crate) fn run_cleanup(conn: &Connection, retention_days: i64) -> Result<Clea
+ 
+     let mut stats = CleanupStats::default();
+ 
+-    // Delete expired screenshots in batches
+-    loop {
+-        let tx = conn.unchecked_transaction()?;
++    let (s_deleted, s_freed) = cleanup_media(conn, &SCREENSHOT_TABLE, media_mgr, cutoff)?;
++    stats.screenshots_deleted += s_deleted;
++    stats.bytes_freed += s_freed;
+ 
++    let (a_deleted, a_freed) = cleanup_media(conn, &AUDIO_TABLE, media_mgr, cutoff)?;
++    stats.audio_segments_deleted += a_deleted;
++    stats.bytes_freed += a_freed;
++
++    Ok(stats)
++}
++
++/// Generic cleanup for one media table. Returns (rows_deleted, bytes_freed).
++///
++/// **Single-caller assumption:** This function is not safe for concurrent
++/// execution. The SELECT runs outside the transaction, so a concurrent call
++/// could select the same batch. The daemon calls `run_cleanup` from a single
++/// async task — if that changes, wrap SELECT + file deletion + DB DELETE in
++/// a broader transaction or add row-level locking.
++fn cleanup_media(
++    conn: &Connection,
++    media: &MediaTable,
++    media_mgr: &MediaManager,
++    cutoff: i64,
++) -> Result<(usize, u64)> {
++    let mut total_deleted = 0usize;
++    let mut total_freed = 0u64;
++
++    loop {
++        // 1. Select batch of expired rows
++        let select_sql = format!(
++            "SELECT id, {} FROM {} WHERE {} < ?1 LIMIT ?2",
++            media.path_col, media.table, media.timestamp_col
++        );
+         let batch: Vec<(i64, String)> = {
+-            let mut stmt = tx.prepare(
+-                "SELECT id, image_path FROM screenshots WHERE timestamp < ?1 LIMIT ?2",
+-            )?;
++            let mut stmt = conn.prepare(&select_sql)?;
+             let rows = stmt.query_map(params![cutoff, CLEANUP_BATCH_SIZE as i64], |row| {
+                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+             })?;
+@@ -37,151 +88,84 @@ pub(crate) fn run_cleanup(conn: &Connection, retention_days: i64) -> Result<Clea
+         };
+ 
+         if batch.is_empty() {
+-            tx.commit()?;
+             break;
+         }
+ 
+         let count = batch.len();
+-        let ids: Vec<i64> = batch.iter().map(|(id, _)| *id).collect();
+-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+-        let sql = format!("DELETE FROM screenshots WHERE id IN ({})", placeholders);
+-        let id_params: Vec<&dyn rusqlite::ToSql> =
+-            ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+-        tx.execute(&sql, id_params.as_slice())?;
+-
+-        tx.commit()?;
+ 
++        // 2. Delete files FIRST (crash-safe: orphan DB rows are easy to detect)
+         for (_, path) in &batch {
+-            let bytes = delete_file_if_exists(Path::new(path));
+-            stats.bytes_freed += bytes;
++            match media_mgr.delete_file(Path::new(path)) {
++                Ok(freed) => total_freed += freed,
++                Err(e) => {
++                    log::warn!("cleanup: failed to delete {}: {}", path, e);
++                }
++            }
+         }
+ 
+-        stats.screenshots_deleted += count;
+-
+-        if count < CLEANUP_BATCH_SIZE {
+-            break;
+-        }
+-    }
+-
+-    // Delete expired audio segments in batches
+-    loop {
++        // 3. Delete DB rows in a transaction
+         let tx = conn.unchecked_transaction()?;
+-
+-        let batch: Vec<(i64, String)> = {
+-            let mut stmt = tx.prepare(
+-                "SELECT id, audio_path FROM audio_segments WHERE start_timestamp < ?1 LIMIT ?2",
+-            )?;
+-            let rows = stmt.query_map(params![cutoff, CLEANUP_BATCH_SIZE as i64], |row| {
+-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+-            })?;
+-            rows.collect::<std::result::Result<Vec<_>, _>>()?
+-        };
+-
+-        if batch.is_empty() {
+-            tx.commit()?;
+-            break;
+-        }
+-
+-        let count = batch.len();
+         let ids: Vec<i64> = batch.iter().map(|(id, _)| *id).collect();
+         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+-        let sql = format!(
+-            "DELETE FROM audio_segments WHERE id IN ({})",
+-            placeholders
+-        );
++        let delete_sql = format!("DELETE FROM {} WHERE id IN ({})", media.table, placeholders);
+         let id_params: Vec<&dyn rusqlite::ToSql> =
+             ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+-        tx.execute(&sql, id_params.as_slice())?;
+-
++        tx.execute(&delete_sql, id_params.as_slice())?;
+         tx.commit()?;
+ 
+-        for (_, path) in &batch {
+-            let bytes = delete_file_if_exists(Path::new(path));
+-            stats.bytes_freed += bytes;
+-        }
+-
+-        stats.audio_segments_deleted += count;
++        total_deleted += count;
+ 
+         if count < CLEANUP_BATCH_SIZE {
+             break;
+         }
+     }
+ 
+-    Ok(stats)
++    Ok((total_deleted, total_freed))
+ }
+ 
+-/// Walk screenshots/ and audio/ directories, delete any files not tracked in the DB.
+-pub(crate) fn sweep_orphans(conn: &Connection, base_dir: &Path) -> Result<u64> {
++/// Walk media directories and delete files not tracked in the database.
++pub(crate) fn sweep_orphans(conn: &Connection, media_mgr: &MediaManager) -> Result<u64> {
+     let mut bytes_freed: u64 = 0;
+-
+-    let screenshots_dir = base_dir.join("screenshots");
+-    if screenshots_dir.exists() {
+-        bytes_freed += sweep_screenshots(conn, &screenshots_dir)?;
+-    }
+-
+-    let audio_dir = base_dir.join("audio");
+-    if audio_dir.exists() {
+-        bytes_freed += sweep_audio(conn, &audio_dir)?;
+-    }
+-
++    bytes_freed += sweep_media_orphans(conn, &SCREENSHOT_TABLE, media_mgr)?;
++    bytes_freed += sweep_media_orphans(conn, &AUDIO_TABLE, media_mgr)?;
+     Ok(bytes_freed)
+ }
+ 
+-/// Sweep the screenshots directory for orphan files not tracked in the DB.
+-fn sweep_screenshots(conn: &Connection, dir: &Path) -> Result<u64> {
++fn sweep_media_orphans(
++    conn: &Connection,
++    media: &MediaTable,
++    media_mgr: &MediaManager,
++) -> Result<u64> {
++    let file_list = media_mgr.walk_files(media.subdir);
+     let mut bytes_freed: u64 = 0;
+-    let file_list = files::walk_files(dir)?;
+-
+-    for file_path in file_list {
+-        let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| file_path.clone());
+-        let path_str = canonical.to_string_lossy().to_string();
+-        let count: i64 = conn.query_row(
+-            "SELECT COUNT(*) FROM screenshots WHERE image_path = ?1",
+-            params![path_str],
+-            |row| row.get(0),
+-        )?;
+ 
+-        if count == 0 {
+-            bytes_freed += delete_file_if_exists(&file_path);
+-        }
+-    }
+-
+-    Ok(bytes_freed)
+-}
+-
+-/// Sweep the audio directory for orphan files not tracked in the DB.
+-fn sweep_audio(conn: &Connection, dir: &Path) -> Result<u64> {
+-    let mut bytes_freed: u64 = 0;
+-    let file_list = files::walk_files(dir)?;
++    let count_sql = format!(
++        "SELECT COUNT(*) FROM {} WHERE {} = ?1",
++        media.table, media.path_col
++    );
+ 
+     for file_path in file_list {
+         let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| file_path.clone());
+         let path_str = canonical.to_string_lossy().to_string();
+-        let count: i64 = conn.query_row(
+-            "SELECT COUNT(*) FROM audio_segments WHERE audio_path = ?1",
+-            params![path_str],
+-            |row| row.get(0),
+-        )?;
++        let count: i64 = conn.query_row(&count_sql, params![path_str], |row| row.get(0))?;
+ 
+         if count == 0 {
+-            bytes_freed += delete_file_if_exists(&file_path);
++            match media_mgr.delete_file(&file_path) {
++                Ok(freed) => bytes_freed += freed,
++                Err(e) => {
++                    log::warn!(
++                        "orphan sweep: failed to delete {}: {}",
++                        file_path.display(),
++                        e
++                    );
++                }
++            }
+         }
+     }
+ 
+     Ok(bytes_freed)
+ }
+ 
+-fn delete_file_if_exists(path: &Path) -> u64 {
+-    let size = match std::fs::metadata(path) {
+-        Ok(meta) => meta.len(),
+-        Err(_) => return 0,
+-    };
+-    match std::fs::remove_file(path) {
+-        Ok(()) => size,
+-        Err(_) => 0,
+-    }
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -200,6 +184,12 @@ mod tests {
+         chrono::Utc::now().timestamp_millis()
+     }
+ 
++    fn dummy_media_mgr() -> crate::media::MediaManager {
++        let path = std::path::PathBuf::from("/tmp/chronicle-test-dummy");
++        std::fs::create_dir_all(&path).unwrap();
++        crate::media::MediaManager::new(path).unwrap()
++    }
++
+     #[test]
+     fn cleanup_deletes_expired_screenshots() {
+         let conn = setup_db();
+@@ -233,7 +223,8 @@ mod tests {
+         screenshots::insert(&conn, &old_meta).unwrap();
+         let new_id = screenshots::insert(&conn, &new_meta).unwrap();
+ 
+-        let stats = run_cleanup(&conn, 30).unwrap();
++        let media_mgr = dummy_media_mgr();
++        let stats = run_cleanup(&conn, &media_mgr, 30).unwrap();
+         assert_eq!(stats.screenshots_deleted, 1);
+ 
+         // New screenshot should still exist
+@@ -276,7 +267,8 @@ mod tests {
+         audio::insert(&conn, &old_meta).unwrap();
+         let new_id = audio::insert(&conn, &new_meta).unwrap();
+ 
+-        let stats = run_cleanup(&conn, 30).unwrap();
++        let media_mgr = dummy_media_mgr();
++        let stats = run_cleanup(&conn, &media_mgr, 30).unwrap();
+         assert_eq!(stats.audio_segments_deleted, 1);
+ 
+         let remaining = audio::get(&conn, new_id).unwrap();
+@@ -312,7 +304,8 @@ mod tests {
+         };
+         screenshots::insert(&conn, &meta).unwrap();
+ 
+-        let stats = run_cleanup(&conn, 30).unwrap();
++        let media_mgr = crate::media::MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let stats = run_cleanup(&conn, &media_mgr, 30).unwrap();
+         assert_eq!(stats.screenshots_deleted, 1);
+         assert!(stats.bytes_freed > 0);
+         assert!(!file_path.exists());
+@@ -338,11 +331,46 @@ mod tests {
+         screenshots::insert(&conn, &meta).unwrap();
+ 
+         // Should not error even though the file doesn't exist
+-        let stats = run_cleanup(&conn, 30).unwrap();
++        let media_mgr = dummy_media_mgr();
++        let stats = run_cleanup(&conn, &media_mgr, 30).unwrap();
+         assert_eq!(stats.screenshots_deleted, 1);
+         assert_eq!(stats.bytes_freed, 0);
+     }
+ 
++    #[test]
++    fn cleanup_deletes_file_before_db_row() {
++        let conn = setup_db();
++        let now = now_millis();
++        let old_ts = now - 31 * 86_400 * 1000;
++
++        let dir = tempfile::tempdir().unwrap();
++        let file_path = dir.path().join("old_shot.heif");
++        std::fs::write(&file_path, b"image data").unwrap();
++
++        let meta = ScreenshotMetadata {
++            timestamp: old_ts,
++            display_id: "display1".into(),
++            app_name: None,
++            app_bundle_id: None,
++            window_title: None,
++            image_path: file_path.to_string_lossy().into_owned(),
++            ocr_text: None,
++            phash: None,
++            resolution: None,
++        };
++        screenshots::insert(&conn, &meta).unwrap();
++
++        let media_mgr = crate::media::MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let stats = run_cleanup(&conn, &media_mgr, 30).unwrap();
++
++        assert_eq!(stats.screenshots_deleted, 1);
++        assert!(!file_path.exists(), "file should be deleted");
++        let count: i64 = conn
++            .query_row("SELECT COUNT(*) FROM screenshots", [], |row| row.get(0))
++            .unwrap();
++        assert_eq!(count, 0, "DB row should be deleted");
++    }
++
+     #[test]
+     fn sweep_orphans_deletes_untracked_files() {
+         let conn = setup_db();
+@@ -355,8 +383,67 @@ mod tests {
+         std::fs::write(&orphan_file, b"orphan data").unwrap();
+         assert!(orphan_file.exists());
+ 
+-        let bytes_freed = sweep_orphans(&conn, dir.path()).unwrap();
++        let media_mgr = crate::media::MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let bytes_freed = sweep_orphans(&conn, &media_mgr).unwrap();
+         assert!(bytes_freed > 0);
+         assert!(!orphan_file.exists());
+     }
++
++    #[test]
++    fn cleanup_unified_handles_both_tables() {
++        let conn = setup_db();
++        let now = now_millis();
++        let old_ts = now - 31 * 86_400 * 1000;
++
++        let dir = tempfile::tempdir().unwrap();
++
++        let shot_path = dir.path().join("old_shot.heif");
++        std::fs::write(&shot_path, b"image").unwrap();
++        let audio_path = dir.path().join("old_audio.opus");
++        std::fs::write(&audio_path, b"audio").unwrap();
++
++        screenshots::insert(
++            &conn,
++            &ScreenshotMetadata {
++                timestamp: old_ts,
++                display_id: "d1".into(),
++                app_name: None,
++                app_bundle_id: None,
++                window_title: None,
++                image_path: shot_path.to_string_lossy().into_owned(),
++                ocr_text: None,
++                phash: None,
++                resolution: None,
++            },
++        )
++        .unwrap();
++
++        audio::insert(
++            &conn,
++            &AudioSegmentMetadata {
++                start_timestamp: old_ts,
++                end_timestamp: old_ts + 30_000,
++                source: "mic".into(),
++                audio_path: audio_path.to_string_lossy().into_owned(),
++                transcript: None,
++                whisper_model: None,
++                language: None,
++            },
++        )
++        .unwrap();
++
++        let media_mgr = crate::media::MediaManager::new(dir.path().to_path_buf()).unwrap();
++        let stats = run_cleanup(&conn, &media_mgr, 30).unwrap();
++
++        assert_eq!(
++            stats.screenshots_deleted, 1,
++            "should delete expired screenshot"
++        );
++        assert_eq!(
++            stats.audio_segments_deleted, 1,
++            "should delete expired audio"
++        );
++        assert!(!shot_path.exists(), "screenshot file should be deleted");
++        assert!(!audio_path.exists(), "audio file should be deleted");
++    }
+ }
+diff --git a/chronicle-daemon/crates/storage/src/schema.rs b/chronicle-daemon/crates/storage/src/schema.rs
+index 8b510bd..e7a04d4 100644
+--- a/chronicle-daemon/crates/storage/src/schema.rs
++++ b/chronicle-daemon/crates/storage/src/schema.rs
+@@ -2,9 +2,7 @@ use rusqlite::Connection;
+ 
+ use crate::error::Result;
+ 
+-const MIGRATIONS: &[&str] = &[
+-    include_str!("migrations/001_initial_schema.sql"),
+-];
++const MIGRATIONS: &[&str] = &[include_str!("migrations/001_initial_schema.sql")];
+ 
+ /// Configure connection-level PRAGMAs. Call on every new connection.
+ pub(crate) fn setup_connection(conn: &Connection) -> Result<()> {
+@@ -17,8 +15,7 @@ pub(crate) fn setup_connection(conn: &Connection) -> Result<()> {
+ 
+ /// Run pending migrations. Uses PRAGMA user_version to track progress.
+ pub(crate) fn migrate(conn: &Connection) -> Result<()> {
+-    let current_version: u32 =
+-        conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
++    let current_version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+ 
+     for (i, migration) in MIGRATIONS.iter().enumerate() {
+         let version = (i + 1) as u32;
+diff --git a/chronicle-daemon/crates/storage/src/screenshots.rs b/chronicle-daemon/crates/storage/src/screenshots.rs
+index 821b11a..ebc5349 100644
+--- a/chronicle-daemon/crates/storage/src/screenshots.rs
++++ b/chronicle-daemon/crates/storage/src/screenshots.rs
+@@ -1,4 +1,4 @@
+-use rusqlite::{params, Connection, Row};
++use rusqlite::{Connection, Row, params};
+ 
+ use crate::error::Result;
+ use crate::models::{Screenshot, ScreenshotMetadata};
+diff --git a/chronicle-daemon/crates/storage/src/search.rs b/chronicle-daemon/crates/storage/src/search.rs
+index 191db4b..7bd67d5 100644
+--- a/chronicle-daemon/crates/storage/src/search.rs
++++ b/chronicle-daemon/crates/storage/src/search.rs
+@@ -1,9 +1,7 @@
+-use rusqlite::{params, Connection};
++use rusqlite::{Connection, params};
+ 
+ use crate::error::{Result, StorageError};
+-use crate::models::{
+-    AudioSegment, Screenshot, SearchFilter, SearchResult, SearchSource,
+-};
++use crate::models::{AudioSegment, Screenshot, SearchFilter, SearchResult, SearchSource};
+ 
+ pub(crate) fn search(
+     conn: &Connection,
+@@ -34,29 +32,30 @@ pub(crate) fn search(
+              LIMIT ?2",
+         )?;
+ 
+-        let rows = stmt.query_map(params![query, sub_limit], |row| {
+-            let screenshot = Screenshot {
+-                id: row.get(0)?,
+-                timestamp: row.get(1)?,
+-                display_id: row.get(2)?,
+-                app_name: row.get(3)?,
+-                app_bundle_id: row.get(4)?,
+-                window_title: row.get(5)?,
+-                image_path: row.get(6)?,
+-                ocr_text: row.get(7)?,
+-                phash: row.get(8)?,
+-                resolution: row.get(9)?,
+-                created_at: row.get(10)?,
+-            };
+-            let snippet: String = row.get(11)?;
+-            let rank: f64 = row.get(12)?;
+-            Ok(SearchResult {
+-                source: SearchSource::Screen(screenshot),
+-                snippet,
+-                rank,
++        let rows = stmt
++            .query_map(params![query, sub_limit], |row| {
++                let screenshot = Screenshot {
++                    id: row.get(0)?,
++                    timestamp: row.get(1)?,
++                    display_id: row.get(2)?,
++                    app_name: row.get(3)?,
++                    app_bundle_id: row.get(4)?,
++                    window_title: row.get(5)?,
++                    image_path: row.get(6)?,
++                    ocr_text: row.get(7)?,
++                    phash: row.get(8)?,
++                    resolution: row.get(9)?,
++                    created_at: row.get(10)?,
++                };
++                let snippet: String = row.get(11)?;
++                let rank: f64 = row.get(12)?;
++                Ok(SearchResult {
++                    source: SearchSource::Screen(screenshot),
++                    snippet,
++                    rank,
++                })
+             })
+-        })
+-        .map_err(|e| map_fts5_error(e, query))?;
++            .map_err(|e| map_fts5_error(e, query))?;
+ 
+         for row in rows {
+             results.push(row?);
+@@ -76,27 +75,28 @@ pub(crate) fn search(
+              LIMIT ?2",
+         )?;
+ 
+-        let rows = stmt.query_map(params![query, sub_limit], |row| {
+-            let segment = AudioSegment {
+-                id: row.get(0)?,
+-                start_timestamp: row.get(1)?,
+-                end_timestamp: row.get(2)?,
+-                source: row.get(3)?,
+-                audio_path: row.get(4)?,
+-                transcript: row.get(5)?,
+-                whisper_model: row.get(6)?,
+-                language: row.get(7)?,
+-                created_at: row.get(8)?,
+-            };
+-            let snippet: String = row.get(9)?;
+-            let rank: f64 = row.get(10)?;
+-            Ok(SearchResult {
+-                source: SearchSource::Audio(segment),
+-                snippet,
+-                rank,
++        let rows = stmt
++            .query_map(params![query, sub_limit], |row| {
++                let segment = AudioSegment {
++                    id: row.get(0)?,
++                    start_timestamp: row.get(1)?,
++                    end_timestamp: row.get(2)?,
++                    source: row.get(3)?,
++                    audio_path: row.get(4)?,
++                    transcript: row.get(5)?,
++                    whisper_model: row.get(6)?,
++                    language: row.get(7)?,
++                    created_at: row.get(8)?,
++                };
++                let snippet: String = row.get(9)?;
++                let rank: f64 = row.get(10)?;
++                Ok(SearchResult {
++                    source: SearchSource::Audio(segment),
++                    snippet,
++                    rank,
++                })
+             })
+-        })
+-        .map_err(|e| map_fts5_error(e, query))?;
++            .map_err(|e| map_fts5_error(e, query))?;
+ 
+         for row in rows {
+             results.push(row?);
+@@ -104,7 +104,11 @@ pub(crate) fn search(
+     }
+ 
+     // Sort combined results by rank (lower is better in FTS5)
+-    results.sort_by(|a, b| a.rank.partial_cmp(&b.rank).unwrap_or(std::cmp::Ordering::Equal));
++    results.sort_by(|a, b| {
++        a.rank
++            .partial_cmp(&b.rank)
++            .unwrap_or(std::cmp::Ordering::Equal)
++    });
+ 
+     // Apply limit and offset on the combined sorted results
+     let results = results.into_iter().skip(offset).take(limit).collect();
+@@ -193,8 +197,12 @@ mod tests {
+         let results = search(&conn, "kubernetes", &SearchFilter::All, 10, 0).unwrap();
+         assert_eq!(results.len(), 2);
+ 
+-        let has_screen = results.iter().any(|r| matches!(r.source, SearchSource::Screen(_)));
+-        let has_audio = results.iter().any(|r| matches!(r.source, SearchSource::Audio(_)));
++        let has_screen = results
++            .iter()
++            .any(|r| matches!(r.source, SearchSource::Screen(_)));
++        let has_audio = results
++            .iter()
++            .any(|r| matches!(r.source, SearchSource::Audio(_)));
+         assert!(has_screen);
+         assert!(has_audio);
+     }
+diff --git a/chronicle-daemon/crates/storage/tests/integration.rs b/chronicle-daemon/crates/storage/tests/integration.rs
+index af492e1..bffa329 100644
+--- a/chronicle-daemon/crates/storage/tests/integration.rs
++++ b/chronicle-daemon/crates/storage/tests/integration.rs
+@@ -1,6 +1,6 @@
+ use chronicle_storage::{
+-    AudioSegmentMetadata, CleanupStats, ScreenshotMetadata, SearchFilter, SearchSource,
+-    Storage, StorageConfig,
++    AudioSegmentMetadata, CleanupStats, ScreenshotMetadata, SearchFilter, SearchSource, Storage,
++    StorageConfig,
+ };
+ use chrono::{Datelike, Utc};
+ use tempfile::tempdir;
+@@ -35,10 +35,7 @@ async fn full_workflow() {
+         "screenshot path should contain date structure, got: {screenshot_path_str}"
+     );
+ 
+-    let audio_path = storage
+-        .allocate_audio_path(ts, "mic")
+-        .await
+-        .unwrap();
++    let audio_path = storage.allocate_audio_path(ts, "mic").await.unwrap();
+     assert!(
+         audio_path.parent().unwrap().exists(),
+         "audio parent dir should be created"
+@@ -90,7 +87,11 @@ async fn full_workflow() {
+         .search("kubernetes", SearchFilter::All, 10, 0)
+         .await
+         .unwrap();
+-    assert_eq!(results.len(), 2, "All filter should find 2 results for 'kubernetes'");
++    assert_eq!(
++        results.len(),
++        2,
++        "All filter should find 2 results for 'kubernetes'"
++    );
+ 
+     // 7. Search with ScreenOnly filter -- expect 1 result
+     let results = storage
+@@ -121,7 +122,11 @@ async fn full_workflow() {
+         .search("grafana", SearchFilter::ScreenOnly, 10, 0)
+         .await
+         .unwrap();
+-    assert_eq!(results.len(), 1, "'grafana' should match in ScreenOnly after OCR update");
++    assert_eq!(
++        results.len(),
++        1,
++        "'grafana' should match in ScreenOnly after OCR update"
++    );
+ 
+     // 10. Update transcript
+     storage
+@@ -164,24 +169,41 @@ async fn full_workflow() {
+ 
+     // 13. Get and set config (verify default retention_days = "30", set to "7", verify)
+     let retention = storage.get_config("retention_days").await.unwrap();
+-    assert_eq!(retention, Some("30".to_string()), "default retention_days should be 30");
++    assert_eq!(
++        retention,
++        Some("30".to_string()),
++        "default retention_days should be 30"
++    );
+ 
+     storage.set_config("retention_days", "7").await.unwrap();
+     let retention = storage.get_config("retention_days").await.unwrap();
+-    assert_eq!(retention, Some("7".to_string()), "retention_days should be updated to 7");
++    assert_eq!(
++        retention,
++        Some("7".to_string()),
++        "retention_days should be updated to 7"
++    );
+ 
+     // 14. Get status (verify counts, db_size > 0)
+     let status = storage.status().await.unwrap();
+     assert_eq!(status.screenshot_count, 1);
+     assert_eq!(status.audio_segment_count, 1);
+     assert!(status.db_size_bytes > 0, "db_size_bytes should be > 0");
+-    assert!(status.total_disk_usage_bytes > 0, "total_disk_usage_bytes should be > 0");
++    assert!(
++        status.total_disk_usage_bytes > 0,
++        "total_disk_usage_bytes should be > 0"
++    );
+     assert_eq!(status.oldest_entry, Some(ts));
+ 
+     // 15. Run cleanup (nothing expired with fresh data and 7-day retention)
+     let cleanup: CleanupStats = storage.run_cleanup().await.unwrap();
+-    assert_eq!(cleanup.screenshots_deleted, 0, "no screenshots should be deleted");
+-    assert_eq!(cleanup.audio_segments_deleted, 0, "no audio segments should be deleted");
++    assert_eq!(
++        cleanup.screenshots_deleted, 0,
++        "no screenshots should be deleted"
++    );
++    assert_eq!(
++        cleanup.audio_segments_deleted, 0,
++        "no audio segments should be deleted"
++    );
+ 
+     // Verify data is still intact after cleanup
+     let status_after = storage.status().await.unwrap();
+diff --git a/chronicle-daemon/src/main.rs b/chronicle-daemon/src/main.rs
+index 1ce4b73..1bc34cc 100644
+--- a/chronicle-daemon/src/main.rs
++++ b/chronicle-daemon/src/main.rs
+@@ -21,6 +21,17 @@ async fn main() -> Result<()> {
+     // --- Storage ---
+     let storage = Arc::new(Storage::open(StorageConfig::default()).await?);
+ 
++    // --- Startup orphan sweep ---
++    match storage.sweep_orphans().await {
++        Ok(stats) if stats.bytes_freed > 0 => {
++            log::info!("Startup orphan sweep freed {} bytes", stats.bytes_freed);
++        }
++        Ok(_) => {}
++        Err(e) => {
++            log::error!("Startup orphan sweep failed: {e}");
++        }
++    }
++
+     // --- IPC server ---
+     let cancel = CancellationToken::new();
+     let socket_path = storage.base_dir().join("chronicle.sock");
+diff --git a/chronicle-daemon/src/pipeline.rs b/chronicle-daemon/src/pipeline.rs
+index a80a838..c26fbd1 100644
+--- a/chronicle-daemon/src/pipeline.rs
++++ b/chronicle-daemon/src/pipeline.rs
+@@ -54,6 +54,17 @@ async fn process_frame(
+     // so briefly blocking the task is acceptable.
+     encode_heif(frame.sample_buffer.inner(), &image_path, HEIF_QUALITY)?;
+ 
++    // Harden file permissions (encode_heif writes directly, bypassing MediaManager)
++    if let Err(e) = storage.media_manager().harden_file(&image_path) {
++        if let Err(del_err) = storage.media_manager().delete_file(&image_path) {
++            log::error!(
++                "failed to harden {} and cleanup also failed: {del_err}",
++                image_path.display()
++            );
++        }
++        return Err(e.into());
++    }
++
+     // 5. Insert DB record — clean up the HEIF file if this fails so we
+     //    don't accumulate orphaned files on disk.
+     let row_id = match storage
+@@ -72,7 +83,7 @@ async fn process_frame(
+     {
+         Ok(id) => id,
+         Err(e) => {
+-            let _ = std::fs::remove_file(&image_path);
++            let _ = storage.media_manager().delete_file(&image_path);
+             return Err(e.into());
+         }
+     };
+@@ -99,10 +110,7 @@ async fn process_frame(
+ /// Run OCR on stored screenshots and index the extracted text.
+ ///
+ /// Runs until the OCR channel closes (capture→store loop exited).
+-pub async fn ocr_loop(
+-    storage: Arc<Storage>,
+-    mut ocr_rx: mpsc::Receiver<(i64, PathBuf)>,
+-) {
++pub async fn ocr_loop(storage: Arc<Storage>, mut ocr_rx: mpsc::Receiver<(i64, PathBuf)>) {
+     while let Some((row_id, image_path)) = ocr_rx.recv().await {
+         let path = image_path.clone();
+         let result = tokio::task::spawn_blocking(move || extract_text(&path)).await;
+@@ -184,7 +192,9 @@ async fn process_audio_segment(
+     // 2. Move from staging to permanent location (atomic rename, same filesystem).
+     //    rename(2) on the same filesystem is a metadata-only operation (microseconds).
+     //    Both directories are under the Chronicle data dir, so no cross-mount copy.
+-    std::fs::rename(&segment.path, &dest_path)?;
++    storage
++        .media_manager()
++        .move_file(&segment.path, &dest_path)?;
+ 
+     // 3. Insert DB record — clean up dest file if insert fails
+     match storage
+@@ -208,7 +218,7 @@ async fn process_audio_segment(
+             Ok(())
+         }
+         Err(e) => {
+-            let _ = std::fs::remove_file(&dest_path);
++            let _ = storage.media_manager().delete_file(&dest_path);
+             Err(e.into())
+         }
+     }
+@@ -251,21 +261,20 @@ mod tests {
+ 
+     /// Path to the OCR test fixture with known text.
+     fn sample_text_image() -> PathBuf {
+-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+-            .join("crates/ocr/tests/fixtures/sample-text.png")
++        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/ocr/tests/fixtures/sample-text.png")
+     }
+ 
+     /// Path to the OCR test fixture with no text (blank).
+     fn blank_image() -> PathBuf {
+-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+-            .join("crates/ocr/tests/fixtures/blank.png")
++        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/ocr/tests/fixtures/blank.png")
+     }
+ 
+     #[tokio::test]
+     async fn ocr_loop_stores_extracted_text() {
+         let (storage, _dir) = temp_storage().await;
+         let image_path = sample_text_image();
+-        let row_id = insert_test_screenshot(&storage, image_path.to_str().unwrap(), 1_700_000_000_000).await;
++        let row_id =
++            insert_test_screenshot(&storage, image_path.to_str().unwrap(), 1_700_000_000_000).await;
+ 
+         let (ocr_tx, ocr_rx) = mpsc::channel(32);
+         ocr_tx.try_send((row_id, image_path)).unwrap();
+@@ -279,17 +288,15 @@ mod tests {
+             "expected OCR text to be stored for screenshot with known text"
+         );
+         let text = screenshot.ocr_text.unwrap();
+-        assert!(
+-            !text.is_empty(),
+-            "expected non-empty OCR text"
+-        );
++        assert!(!text.is_empty(), "expected non-empty OCR text");
+     }
+ 
+     #[tokio::test]
+     async fn ocr_loop_skips_empty_text() {
+         let (storage, _dir) = temp_storage().await;
+         let image_path = blank_image();
+-        let row_id = insert_test_screenshot(&storage, image_path.to_str().unwrap(), 1_700_000_001_000).await;
++        let row_id =
++            insert_test_screenshot(&storage, image_path.to_str().unwrap(), 1_700_000_001_000).await;
+ 
+         let (ocr_tx, ocr_rx) = mpsc::channel(32);
+         ocr_tx.try_send((row_id, image_path)).unwrap();
+@@ -309,10 +316,12 @@ mod tests {
+     async fn ocr_loop_continues_on_missing_image() {
+         let (storage, _dir) = temp_storage().await;
+         let missing_path = PathBuf::from("/nonexistent/image.png");
+-        let row_id_bad = insert_test_screenshot(&storage, "/nonexistent/image.png", 1_700_000_002_000).await;
++        let row_id_bad =
++            insert_test_screenshot(&storage, "/nonexistent/image.png", 1_700_000_002_000).await;
+ 
+         let image_path = sample_text_image();
+-        let row_id_good = insert_test_screenshot(&storage, image_path.to_str().unwrap(), 1_700_000_003_000).await;
++        let row_id_good =
++            insert_test_screenshot(&storage, image_path.to_str().unwrap(), 1_700_000_003_000).await;
+ 
+         let (ocr_tx, ocr_rx) = mpsc::channel(32);
+         // Send bad path first, then good path
+@@ -368,7 +377,10 @@ mod tests {
+ 
+         audio_store_loop(storage.clone(), rx).await;
+ 
+-        assert!(!staging_file.exists(), "staging file should have been moved");
++        assert!(
++            !staging_file.exists(),
++            "staging file should have been moved"
++        );
+ 
+         let audio = storage.get_audio_segment(1).await.unwrap();
+         assert_eq!(audio.start_timestamp, 1_700_000_000_000);
+@@ -427,6 +439,45 @@ mod tests {
+         audio_store_loop(storage, rx).await;
+     }
+ 
++    #[tokio::test]
++    async fn audio_store_loop_hardens_file_permissions() {
++        use chronicle_audio::{AudioSource, CompletedSegment};
++        use std::os::unix::fs::PermissionsExt;
++
++        let (storage, dir) = temp_storage().await;
++
++        let staging_dir = dir.path().join("audio-staging");
++        std::fs::create_dir_all(&staging_dir).unwrap();
++        let staging_file = staging_dir.join("perm_test.opus");
++        // Write with permissive mode so we can verify the move tightens it
++        std::fs::write(&staging_file, b"perm test data").unwrap();
++        std::fs::set_permissions(&staging_file, std::fs::Permissions::from_mode(0o644)).unwrap();
++
++        let segment = CompletedSegment {
++            source: AudioSource::Microphone,
++            path: staging_file.clone(),
++            start_timestamp: 1_700_000_100_000,
++            end_timestamp: 1_700_000_130_000,
++        };
++
++        let (tx, rx) = mpsc::channel(16);
++        tx.send(segment).await.unwrap();
++        drop(tx);
++
++        audio_store_loop(storage.clone(), rx).await;
++
++        let audio = storage.get_audio_segment(1).await.unwrap();
++        let perm_path = std::path::Path::new(&audio.audio_path);
++        assert!(perm_path.exists(), "permanent audio file should exist");
++
++        let mode = std::fs::metadata(perm_path).unwrap().permissions().mode() & 0o777;
++        assert_eq!(
++            mode, 0o600,
++            "audio file should be owner-only (0o600), got {:#o}",
++            mode
++        );
++    }
++
+     #[tokio::test]
+     async fn bridge_audio_segments_forwards_to_tokio_channel() {
+         use chronicle_audio::AudioSource;

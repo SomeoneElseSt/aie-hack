@@ -1,0 +1,1 @@
+{"Background jobs set I18n.locale but do not call I18n.fallbacks.ensure_loaded!, causing fallback locales (like :en) to not be loaded in Sidekiq/job contexts, resulting in missing translations even when fallback translations exist": 0.7554765343666077}

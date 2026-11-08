@@ -1,0 +1,1 @@
+{"GroupAdapter#getSubGroupsCount() can return null on cache miss, making group.subGroupCount falsy in the admin UI and hiding real subgroups - should default to 0 instead of null": 0.6927698850631714}

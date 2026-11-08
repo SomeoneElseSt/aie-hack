@@ -1,0 +1,1 @@
+{"Dead code: Two ASN1Encoder instances are created and written to but their results are never used, appearing to be leftover from development that should be removed": 0.7226338982582092}

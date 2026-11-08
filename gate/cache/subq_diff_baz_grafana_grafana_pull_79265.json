@@ -1,0 +1,1 @@
+{"updateDevice's WHERE clause uses 'updated_at BETWEEN device.UpdatedAt - 30d AND device.UpdatedAt + 1m', which prevents matching devices with updated_at older than 30 days, causing ErrDeviceLimitReached to be returned when the anonymous device limit is hit instead of updating the existing device - should match on device_id regardless of updated_at": 0.7515753507614136}

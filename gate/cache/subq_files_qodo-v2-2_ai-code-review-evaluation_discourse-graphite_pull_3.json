@@ -1,0 +1,1 @@
+{"BlockedEmail.should_block? performs an exact string match on the submitted email without normalizing (downcase/strip) the email before lookup, allowing bypass of blocked entries by changing casing or whitespace": 0.962044894695282, "Duplicate blocked_email rows can be created that differ only by case due to lack of normalization": 0.9054474234580994}

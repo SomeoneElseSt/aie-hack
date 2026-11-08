@@ -1,0 +1,1 @@
+{"The exit code change from 4 to 3 for RECREATE_UPGRADE_EXIT_CODE is a breaking change that could impact external automation or scripts relying on the previous exit code semantics. This change needs to be prominently documented in release notes and CLI documentation with migration guidance for users.": 0.5295601487159729}

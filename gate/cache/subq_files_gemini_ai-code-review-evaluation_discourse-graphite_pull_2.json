@@ -1,0 +1,1 @@
+{"TopicUser.find_by can return nil if the user has never interacted with the topic, causing a NoMethodError when tu.notification_level is called - should use find_or_initialize_by instead": 0.9686864614486694, "Typo in template 'stopNotificiationsText' should be 'stopNotificationsText' to match the controller correction": 0.28333985805511475}

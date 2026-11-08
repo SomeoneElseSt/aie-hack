@@ -1,0 +1,1 @@
+{"Nested ternary expression `twoFactorRequired ? !twoFactorLostAccess ? <TwoFactor center /> : <BackupCode center /> : null` should be flattened to `twoFactorRequired && (twoFactorLostAccess ? <BackupCode center /> : <TwoFactor center />)` for better readability": 0.0850922092795372}

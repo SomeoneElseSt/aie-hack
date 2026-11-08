@@ -1,0 +1,2614 @@
+===== FILE app/assets/javascripts/discourse/controllers/create_account_controller.js (after PR) =====
+/**
+  The modal for creating accounts
+
+  @class CreateAccountController
+  @extends Discourse.Controller
+  @namespace Discourse
+  @uses Discourse.ModalFunctionality
+  @module Discourse
+**/
+Discourse.CreateAccountController = Discourse.Controller.extend(Discourse.ModalFunctionality, {
+  uniqueUsernameValidation: null,
+  globalNicknameExists: false,
+  complete: false,
+  accountPasswordConfirm: 0,
+  accountChallenge: 0,
+  formSubmitted: false,
+  rejectedEmails: Em.A([]),
+
+  submitDisabled: function() {
+    if (this.get('formSubmitted')) return true;
+    if (this.get('nameValidation.failed')) return true;
+    if (this.get('emailValidation.failed')) return true;
+    if (this.get('usernameValidation.failed')) return true;
+    if (this.get('passwordValidation.failed')) return true;
+    return false;
+  }.property('nameValidation.failed', 'emailValidation.failed', 'usernameValidation.failed', 'passwordValidation.failed', 'formSubmitted'),
+
+  passwordRequired: function() {
+    return this.blank('authOptions.auth_provider');
+  }.property('authOptions.auth_provider'),
+
+  // Validate the name
+  nameValidation: function() {
+
+    // If blank, fail without a reason
+    if (this.blank('accountName')) return Discourse.InputValidation.create({ failed: true });
+
+    if (this.get('accountPasswordConfirm') === 0) {
+      this.fetchConfirmationValue();
+    }
+
+    // If too short
+    if (this.get('accountName').length < 3) {
+      return Discourse.InputValidation.create({
+        failed: true,
+        reason: I18n.t('user.name.too_short')
+      });
+    }
+
+    // Looks good!
+    return Discourse.InputValidation.create({
+      ok: true,
+      reason: I18n.t('user.name.ok')
+    });
+  }.property('accountName'),
+
+  // Check the email address
+  emailValidation: function() {
+    // If blank, fail without a reason
+    var email;
+    if (this.blank('accountEmail')) {
+      return Discourse.InputValidation.create({
+        failed: true
+      });
+    }
+
+    email = this.get("accountEmail");
+
+    if (this.get('rejectedEmails').contains(email)) {
+      return Discourse.InputValidation.create({
+        failed: true,
+        reason: I18n.t('user.email.invalid')
+      });
+    }
+
+    if ((this.get('authOptions.email') === email) && this.get('authOptions.email_valid')) {
+      return Discourse.InputValidation.create({
+        ok: true,
+        reason: I18n.t('user.email.authenticated', {
+          provider: this.get('authOptions.auth_provider')
+        })
+      });
+    }
+
+    if (Discourse.Utilities.emailValid(email)) {
+      return Discourse.InputValidation.create({
+        ok: true,
+        reason: I18n.t('user.email.ok')
+      });
+    }
+
+    return Discourse.InputValidation.create({
+      failed: true,
+      reason: I18n.t('user.email.invalid')
+    });
+  }.property('accountEmail', 'rejectedEmails.@each'),
+
+  usernameMatch: function() {
+    if (this.usernameNeedsToBeValidatedWithEmail()) {
+      if (this.get('emailValidation.failed')) {
+        if (this.shouldCheckUsernameMatch()) {
+          return this.set('uniqueUsernameValidation', Discourse.InputValidation.create({
+            failed: true,
+            reason: I18n.t('user.username.enter_email')
+          }));
+        } else {
+          return this.set('uniqueUsernameValidation', Discourse.InputValidation.create({ failed: true }));
+        }
+      } else if (this.shouldCheckUsernameMatch()) {
+        this.set('uniqueUsernameValidation', Discourse.InputValidation.create({
+          failed: true,
+          reason: I18n.t('user.username.checking')
+        }));
+        return this.checkUsernameAvailability();
+      }
+    }
+  }.observes('accountEmail'),
+
+  basicUsernameValidation: function() {
+    this.set('uniqueUsernameValidation', null);
+
+    // If blank, fail without a reason
+    if (this.blank('accountUsername')) {
+      return Discourse.InputValidation.create({
+        failed: true
+      });
+    }
+
+    // If too short
+    if (this.get('accountUsername').length < 3) {
+      return Discourse.InputValidation.create({
+        failed: true,
+        reason: I18n.t('user.username.too_short')
+      });
+    }
+
+    // If too long
+    if (this.get('accountUsername').length > 15) {
+      return Discourse.InputValidation.create({
+        failed: true,
+        reason: I18n.t('user.username.too_long')
+      });
+    }
+
+    this.checkUsernameAvailability();
+    // Let's check it out asynchronously
+    return Discourse.InputValidation.create({
+      failed: true,
+      reason: I18n.t('user.username.checking')
+    });
+  }.property('accountUsername'),
+
+  shouldCheckUsernameMatch: function() {
+    return !this.blank('accountUsername') && this.get('accountUsername').length > 2;
+  },
+
+  checkUsernameAvailability: Discourse.debounce(function() {
+    var _this = this;
+    if (this.shouldCheckUsernameMatch()) {
+      return Discourse.User.checkUsername(this.get('accountUsername'), this.get('accountEmail')).then(function(result) {
+        _this.set('globalNicknameExists', false);
+        if (result.available) {
+          if (result.global_match) {
+            _this.set('globalNicknameExists', true);
+            return _this.set('uniqueUsernameValidation', Discourse.InputValidation.create({
+              ok: true,
+              reason: I18n.t('user.username.global_match')
+            }));
+          } else {
+            return _this.set('uniqueUsernameValidation', Discourse.InputValidation.create({
+              ok: true,
+              reason: I18n.t('user.username.available')
+            }));
+          }
+        } else {
+          if (result.suggestion) {
+            if (result.global_match !== void 0 && result.global_match === false) {
+              _this.set('globalNicknameExists', true);
+              return _this.set('uniqueUsernameValidation', Discourse.InputValidation.create({
+                failed: true,
+                reason: I18n.t('user.username.global_mismatch', result)
+              }));
+            } else {
+              return _this.set('uniqueUsernameValidation', Discourse.InputValidation.create({
+                failed: true,
+                reason: I18n.t('user.username.not_available', result)
+              }));
+            }
+          } else if (result.errors) {
+            return _this.set('uniqueUsernameValidation', Discourse.InputValidation.create({
+              failed: true,
+              reason: result.errors.join(' ')
+            }));
+          } else {
+            _this.set('globalNicknameExists', true);
+            return _this.set('uniqueUsernameValidation', Discourse.InputValidation.create({
+              failed: true,
+              reason: I18n.t('user.username.enter_email')
+            }));
+          }
+        }
+      });
+    }
+  }, 500),
+
+  // Actually wait for the async name check before we're 100% sure we're good to go
+  usernameValidation: function() {
+    var basicValidation, uniqueUsername;
+    basicValidation = this.get('basicUsernameValidation');
+    uniqueUsername = this.get('uniqueUsernameValidation');
+    if (uniqueUsername) {
+      return uniqueUsername;
+    }
+    return basicValidation;
+  }.property('uniqueUsernameValidation', 'basicUsernameValidation'),
+
+  usernameNeedsToBeValidatedWithEmail: function() {
+    return( this.get('globalNicknameExists') || false );
+  },
+
+  // Validate the password
+  passwordValidation: function() {
+    var password;
+    if (!this.get('passwordRequired')) {
+      return Discourse.InputValidation.create({
+        ok: true
+      });
+    }
+
+    // If blank, fail without a reason
+    password = this.get("accountPassword");
+    if (this.blank('accountPassword')) {
+      return Discourse.InputValidation.create({ failed: true });
+    }
+
+    // If too short
+    if (password.length < 6) {
+      return Discourse.InputValidation.create({
+        failed: true,
+        reason: I18n.t('user.password.too_short')
+      });
+    }
+
+    // Looks good!
+    return Discourse.InputValidation.create({
+      ok: true,
+      reason: I18n.t('user.password.ok')
+    });
+  }.property('accountPassword'),
+
+  fetchConfirmationValue: function() {
+    var createAccountController = this;
+    return Discourse.ajax('/users/hp.json').then(function (json) {
+      createAccountController.set('accountPasswordConfirm', json.value);
+      createAccountController.set('accountChallenge', json.challenge.split("").reverse().join(""));
+    });
+  },
+
+  createAccount: function() {
+    var createAccountController = this;
+    this.set('formSubmitted', true);
+    var name = this.get('accountName');
+    var email = this.get('accountEmail');
+    var password = this.get('accountPassword');
+    var username = this.get('accountUsername');
+    var passwordConfirm = this.get('accountPasswordConfirm');
+    var challenge = this.get('accountChallenge');
+    return Discourse.User.createAccount(name, email, password, username, passwordConfirm, challenge).then(function(result) {
+      if (result.success) {
+        createAccountController.flash(result.message);
+        createAccountController.set('complete', true);
+      } else {
+        createAccountController.flash(result.message || I18n.t('create_account.failed'), 'error');
+        if (result.errors && result.errors.email && result.values) {
+          createAccountController.get('rejectedEmails').pushObject(result.values.email);
+        }
+        createAccountController.set('formSubmitted', false);
+      }
+      if (result.active) {
+        return window.location.reload();
+      }
+    }, function() {
+      createAccountController.set('formSubmitted', false);
+      return createAccountController.flash(I18n.t('create_account.failed'), 'error');
+    });
+  }
+
+});
+
+
+===== FILE app/controllers/users_controller.rb (after PR) =====
+require_dependency 'discourse_hub'
+require_dependency 'user_name_suggester'
+
+class UsersController < ApplicationController
+
+  skip_before_filter :check_xhr, only: [:show, :password_reset, :update, :activate_account, :avatar, :authorize_email, :user_preferences_redirect]
+  skip_before_filter :authorize_mini_profiler, only: [:avatar]
+
+  before_filter :ensure_logged_in, only: [:username, :update, :change_email, :user_preferences_redirect]
+
+  # we need to allow account creation with bad CSRF tokens, if people are caching, the CSRF token on the
+  #  page is going to be empty, this means that server will see an invalid CSRF and blow the session
+  #  once that happens you can't log in with social
+  skip_before_filter :verify_authenticity_token, only: [:create]
+  skip_before_filter :redirect_to_login_if_required, only: [:check_username,
+                                                            :create,
+                                                            :get_honeypot_value,
+                                                            :activate_account,
+                                                            :send_activation_email,
+                                                            :authorize_email,
+                                                            :password_reset]
+
+  def show
+    @user = fetch_user_from_params
+    user_serializer = UserSerializer.new(@user, scope: guardian, root: 'user')
+    respond_to do |format|
+      format.html do
+        store_preloaded("user_#{@user.username}", MultiJson.dump(user_serializer))
+      end
+
+      format.json do
+        render_json_dump(user_serializer)
+      end
+    end
+  end
+
+  def user_preferences_redirect
+    redirect_to email_preferences_path(current_user.username_lower)
+  end
+
+  def update
+    user = User.where(username_lower: params[:username].downcase).first
+    guardian.ensure_can_edit!(user)
+    json_result(user, serializer: UserSerializer) do |u|
+
+      website = params[:website]
+      if website
+        website = "http://" + website unless website =~ /^http/
+      end
+
+      u.bio_raw = params[:bio_raw] || u.bio_raw
+      u.name = params[:name] || u.name
+      u.website = website || u.website
+      u.digest_after_days = params[:digest_after_days] || u.digest_after_days
+      u.auto_track_topics_after_msecs = params[:auto_track_topics_after_msecs].to_i if params[:auto_track_topics_after_msecs]
+      u.new_topic_duration_minutes = params[:new_topic_duration_minutes].to_i if params[:new_topic_duration_minutes]
+      u.title = params[:title] || u.title if guardian.can_grant_title?(u)
+
+      [:email_digests, :email_direct, :email_private_messages,
+       :external_links_in_new_tab, :enable_quoting, :dynamic_favicon].each do |i|
+        if params[i].present?
+          u.send("#{i.to_s}=", params[i] == 'true')
+        end
+      end
+
+      if u.save
+        u
+      else
+        nil
+      end
+    end
+  end
+
+  def username
+    params.require(:new_username)
+
+    user = fetch_user_from_params
+    guardian.ensure_can_edit!(user)
+
+    result = user.change_username(params[:new_username])
+    raise Discourse::InvalidParameters.new(:new_username) unless result
+
+    render nothing: true
+  end
+
+  def preferences
+    render nothing: true
+  end
+
+  def invited
+    invited_list = InvitedList.new(fetch_user_from_params)
+    render_serialized(invited_list, InvitedListSerializer)
+  end
+
+  def is_local_username
+    params.require(:username)
+    u = params[:username].downcase
+    r = User.exec_sql('select 1 from users where username_lower = ?', u).values
+    render json: {valid: r.length == 1}
+  end
+
+  def check_username
+    params.require(:username)
+
+    # The special case where someone is changing the case of their own username
+    return render(json: {available: true}) if current_user and params[:username].downcase == current_user.username.downcase
+
+    validator = UsernameValidator.new(params[:username])
+    if !validator.valid_format?
+      render json: {errors: validator.errors}
+    elsif !SiteSetting.call_discourse_hub?
+      if User.username_available?(params[:username])
+        render json: {available: true}
+      else
+        render json: {available: false, suggestion: UserNameSuggester.suggest(params[:username])}
+      end
+    else
+
+      # Contact the Discourse Hub server
+      email_given = (params[:email].present? || current_user.present?)
+      available_locally = User.username_available?(params[:username])
+      global_match = false
+      available_globally, suggestion_from_discourse_hub = begin
+        if email_given
+          global_match, available, suggestion = DiscourseHub.nickname_match?( params[:username], params[:email] || current_user.email )
+          [available || global_match, suggestion]
+        else
+          DiscourseHub.nickname_available?(params[:username])
+        end
+      end
+
+      if available_globally && available_locally
+        render json: {available: true, global_match: (global_match ? true : false)}
+      elsif available_locally && !available_globally
+        if email_given
+          # Nickname and email do not match what's registered on the discourse hub.
+          render json: {available: false, global_match: false, suggestion: suggestion_from_discourse_hub}
+        else
+          # The nickname is available locally, but is registered on the discourse hub.
+          # We need an email to see if the nickname belongs to this person.
+          # Don't give a suggestion until we get the email and try to match it with on the discourse hub.
+          render json: {available: false}
+        end
+      elsif available_globally && !available_locally
+        # Already registered on this site with the matching nickname and email address. Why are you signing up again?
+        render json: {available: false, suggestion: UserNameSuggester.suggest(params[:username])}
+      else
+        # Not available anywhere.
+        render json: {available: false, suggestion: suggestion_from_discourse_hub}
+      end
+
+    end
+  rescue RestClient::Forbidden
+    render json: {errors: [I18n.t("discourse_hub.access_token_problem")]}
+  end
+
+  def create
+    return fake_success_response if suspicious? params
+
+    user = User.new_from_params(params)
+
+    auth = session[:authentication]
+    if valid_session_authentication?(auth, params[:email])
+      user.active = true
+    end
+    user.password_required! unless auth
+
+    if user.valid? && SiteSetting.call_discourse_hub?
+      DiscourseHub.register_nickname(user.username, user.email)
+    end
+
+    if user.save
+      if SiteSetting.must_approve_users?
+        message = I18n.t("login.wait_approval")
+      elsif !user.active?
+        message = I18n.t("login.activate_email", email: user.email)
+        Jobs.enqueue(:user_email,
+          type: :signup,
+          user_id: user.id,
+          email_token: user.email_tokens.first.token
+        )
+      else
+        message = I18n.t("login.active")
+        log_on_user(user)
+        user.enqueue_welcome_message('welcome_user')
+      end
+
+      create_third_party_auth_records(user, auth) if auth.present?
+
+      # Clear authentication session.
+      session[:authentication] = nil
+
+      render json: { success: true, active: user.active?, message: message }
+    else
+      render json: {
+        success: false,
+        message: I18n.t("login.errors", errors: user.errors.full_messages.join("\n")),
+        errors: user.errors.to_hash,
+        values: user.attributes.slice("name", "username", "email")
+      }
+    end
+  rescue ActiveRecord::StatementInvalid
+    render json: { success: false, message: I18n.t("login.something_already_taken") }
+  rescue DiscourseHub::NicknameUnavailable
+    render json: { success: false,
+      message: I18n.t(
+        "login.errors",
+        errors:I18n.t(
+          "login.not_available", suggestion: UserNameSuggester.suggest(params[:username])
+        )
+      )
+    }
+  rescue RestClient::Forbidden
+    render json: { errors: [I18n.t("discourse_hub.access_token_problem")] }
+  end
+
+  def get_honeypot_value
+    render json: {value: honeypot_value, challenge: challenge_value}
+  end
+
+  # all avatars are funneled through here
+  def avatar
+
+    # TEMP to catch all missing spots
+    # raise ActiveRecord::RecordNotFound
+
+    user = User.select(:email).where(username_lower: params[:username].downcase).first
+    if user.present?
+      # for now we only support gravatar in square (redirect cached for a day),
+      # later we can use x-sendfile and/or a cdn to serve local
+      size = determine_avatar_size(params[:size])
+      url = user.avatar_template.gsub("{size}", size.to_s)
+      expires_in 1.day
+      redirect_to url
+    else
+      raise ActiveRecord::RecordNotFound
+    end
+  end
+
+  def password_reset
+    expires_now()
+
+    @user = EmailToken.confirm(params[:token])
+    if @user.blank?
+      flash[:error] = I18n.t('password_reset.no_token')
+    else
+      if request.put? && params[:password].present?
+        @user.password = params[:password]
+        if @user.save
+
+          if Guardian.new(@user).can_access_forum?
+            # Log in the user
+            log_on_user(@user)
+            flash[:success] = I18n.t('password_reset.success')
+          else
+            @requires_approval = true
+            flash[:success] = I18n.t('password_reset.success_unapproved')
+          end
+        end
+      end
+    end
+    render layout: 'no_js'
+  end
+
+  def change_email
+    params.require(:email)
+    user = fetch_user_from_params
+    guardian.ensure_can_edit!(user)
+    lower_email = Email.downcase(params[:email]).strip
+
+    # Raise an error if the email is already in use
+    if User.where("email = ?", lower_email).exists?
+      raise Discourse::InvalidParameters.new(:email)
+    end
+
+    email_token = user.email_tokens.create(email: lower_email)
+    Jobs.enqueue(
+      :user_email,
+      to_address: lower_email,
+      type: :authorize_email,
+      user_id: user.id,
+      email_token: email_token.token
+    )
+
+    render nothing: true
+  end
+
+  def authorize_email
+    expires_now()
+    if @user = EmailToken.confirm(params[:token])
+      log_on_user(@user)
+    else
+      flash[:error] = I18n.t('change_email.error')
+    end
+    render layout: 'no_js'
+  end
+
+  def activate_account
+    expires_now()
+    if @user = EmailToken.confirm(params[:token])
+
+      # Log in the user unless they need to be approved
+      if Guardian.new(@user).can_access_forum?
+        @user.enqueue_welcome_message('welcome_user') if @user.send_welcome_message
+        log_on_user(@user)
+      else
+        @needs_approval = true
+      end
+
+    else
+      flash[:error] = I18n.t('activation.already_done')
+    end
+    render layout: 'no_js'
+  end
+
+  def send_activation_email
+    @user = fetch_user_from_params
+    @email_token = @user.email_tokens.unconfirmed.active.first
+    if @user
+      @email_token ||= @user.email_tokens.create(email: @user.email)
+      Jobs.enqueue(:user_email, type: :signup, user_id: @user.id, email_token: @email_token.token)
+    end
+    render nothing: true
+  end
+
+  def search_users
+    term = params[:term].to_s.strip
+    topic_id = params[:topic_id]
+    topic_id = topic_id.to_i if topic_id
+
+    results = UserSearch.search term, topic_id
+
+    render json: { users: results.as_json(only: [ :username, :name ],
+                                          methods: :avatar_template) }
+  end
+
+  private
+
+    def honeypot_value
+      Digest::SHA1::hexdigest("#{Discourse.current_hostname}:#{Discourse::Application.config.secret_token}")[0,15]
+    end
+
+    def challenge_value
+      '3019774c067cc2b'
+    end
+
+    def suspicious?(params)
+      honeypot_or_challenge_fails?(params) || SiteSetting.invite_only?
+    end
+
+    def fake_success_response
+      render(
+        json: {
+          success: true,
+          active: false,
+          message: I18n.t("login.activate_email", email: params[:email])
+        }
+      )
+    end
+
+    def honeypot_or_challenge_fails?(params)
+      params[:password_confirmation] != honeypot_value ||
+      params[:challenge] != challenge_value.try(:reverse)
+    end
+
+    def valid_session_authentication?(auth, email)
+      auth && auth[:email] == email && auth[:email_valid]
+    end
+
+    def create_third_party_auth_records(user, auth)
+      if twitter_auth?(auth)
+        TwitterUserInfo.create(
+          user_id: user.id,
+          screen_name: auth[:twitter_screen_name],
+          twitter_user_id: auth[:twitter_user_id]
+        )
+      end
+
+      if facebook_auth?(auth)
+        FacebookUserInfo.create!(auth[:facebook].merge(user_id: user.id))
+      end
+
+      if github_auth?(auth)
+        GithubUserInfo.create(
+          user_id: user.id,
+          screen_name: auth[:github_screen_name],
+          github_user_id: auth[:github_user_id]
+        )
+      end
+    end
+
+    def twitter_auth?(auth)
+      auth[:twitter_user_id] && auth[:twitter_screen_name] &&
+      TwitterUserInfo.find_by_twitter_user_id(auth[:twitter_user_id]).nil?
+    end
+
+    def facebook_auth?(auth)
+      auth[:facebook].present? &&
+      FacebookUserInfo.find_by_facebook_user_id(auth[:facebook][:facebook_user_id]).nil?
+    end
+
+    def github_auth?(auth)
+      auth[:github_user_id] && auth[:github_screen_name] &&
+      GithubUserInfo.find_by_github_user_id(auth[:github_user_id]).nil?
+    end
+
+    def determine_avatar_size(size)
+      size = size.to_i
+      size = 64 if size == 0
+      size = 10 if size < 10
+      size = 128 if size > 128
+      size
+    end
+end
+
+
+===== FILE app/models/blocked_email.rb (after PR) =====
+class BlockedEmail < ActiveRecord::Base
+
+  before_validation :set_defaults
+
+  validates :email, presence: true, uniqueness: true
+
+  def self.actions
+    @actions ||= Enum.new(:block, :do_nothing)
+  end
+
+  def self.should_block?(email)
+    record = BlockedEmail.where(email: email).first
+    if record
+      record.match_count += 1
+      record.last_match_at = Time.zone.now
+      record.save
+    end
+    record && record.action_type == actions[:block]
+  end
+
+  def set_defaults
+    self.action_type ||= BlockedEmail.actions[:block]
+  end
+
+end
+
+
+===== FILE app/models/user.rb (after PR) =====
+require_dependency 'email'
+require_dependency 'email_token'
+require_dependency 'trust_level'
+require_dependency 'pbkdf2'
+require_dependency 'summarize'
+require_dependency 'discourse'
+require_dependency 'post_destroyer'
+require_dependency 'user_name_suggester'
+require_dependency 'roleable'
+require_dependency 'pretty_text'
+
+class User < ActiveRecord::Base
+  include Roleable
+
+  has_many :posts
+  has_many :notifications
+  has_many :topic_users
+  has_many :topics
+  has_many :user_open_ids, dependent: :destroy
+  has_many :user_actions
+  has_many :post_actions
+  has_many :email_logs
+  has_many :post_timings
+  has_many :topic_allowed_users
+  has_many :topics_allowed, through: :topic_allowed_users, source: :topic
+  has_many :email_tokens
+  has_many :views
+  has_many :user_visits
+  has_many :invites
+  has_many :topic_links
+
+  has_one :facebook_user_info, dependent: :destroy
+  has_one :twitter_user_info, dependent: :destroy
+  has_one :github_user_info, dependent: :destroy
+  has_one :cas_user_info, dependent: :destroy
+  belongs_to :approved_by, class_name: 'User'
+
+  has_many :group_users
+  has_many :groups, through: :group_users
+  has_many :secure_categories, through: :groups, source: :categories
+
+  has_one :user_search_data
+
+  validates_presence_of :username
+  validate :username_validator
+  validates :email, presence: true, uniqueness: true
+  validates :email, email: true, if: :email_changed?
+  validate :password_validator
+
+  before_save :cook
+  before_save :update_username_lower
+  before_save :ensure_password_is_hashed
+  after_initialize :add_trust_level
+
+  after_save :update_tracked_topics
+
+  after_create :create_email_token
+
+  # Whether we need to be sending a system message after creation
+  attr_accessor :send_welcome_message
+
+  # This is just used to pass some information into the serializer
+  attr_accessor :notification_channel_position
+
+  scope :blocked, -> { where(blocked: true) } # no index
+  scope :banned, -> { where('banned_till IS NOT NULL AND banned_till > ?', Time.zone.now) } # no index
+
+  module NewTopicDuration
+    ALWAYS = -1
+    LAST_VISIT = -2
+  end
+
+  def self.username_length
+    3..15
+  end
+
+  def self.username_available?(username)
+    lower = username.downcase
+    User.where(username_lower: lower).blank?
+  end
+
+  EMAIL = %r{([^@]+)@([^\.]+)}
+
+  def self.new_from_params(params)
+    user = User.new
+    user.name = params[:name]
+    user.email = params[:email]
+    user.password = params[:password]
+    user.username = params[:username]
+    user
+  end
+
+  def self.create_for_email(email, opts={})
+    username = UserNameSuggester.suggest(email)
+
+    discourse_hub_nickname_operation do
+      match, available, suggestion = DiscourseHub.nickname_match?(username, email)
+      username = suggestion unless match || available
+    end
+
+    user = User.new(email: email, username: username, name: username)
+    user.trust_level = opts[:trust_level] if opts[:trust_level].present?
+    user.save!
+
+    discourse_hub_nickname_operation { DiscourseHub.register_nickname(username, email) }
+
+    user
+  end
+
+  def self.suggest_name(email)
+    return "" unless email
+    name = email.split(/[@\+]/)[0]
+    name = name.gsub(".", " ")
+    name.titleize
+  end
+
+  # Find a user by temporary key, nil if not found or key is invalid
+  def self.find_by_temporary_key(key)
+    user_id = $redis.get("temporary_key:#{key}")
+    if user_id.present?
+      where(id: user_id.to_i).first
+    end
+  end
+
+  def self.find_by_username_or_email(username_or_email)
+    lower_user = username_or_email.downcase
+    lower_email = Email.downcase(username_or_email)
+
+    users =
+      if username_or_email.include?('@')
+        User.where(email: lower_email)
+      else
+        User.where(username_lower: lower_user)
+      end
+        .to_a
+
+    if users.count > 1
+      raise Discourse::TooManyMatches
+    elsif users.count == 1
+      users[0]
+    else
+      nil
+    end
+  end
+
+  def enqueue_welcome_message(message_type)
+    return unless SiteSetting.send_welcome_message?
+    Jobs.enqueue(:send_system_message, user_id: id, message_type: message_type)
+  end
+
+  def change_username(new_username)
+    current_username = self.username
+    self.username = new_username
+
+    if current_username.downcase != new_username.downcase && valid?
+      User.discourse_hub_nickname_operation { DiscourseHub.change_nickname(current_username, new_username) }
+    end
+
+    save
+  end
+
+  # Use a temporary key to find this user, store it in redis with an expiry
+  def temporary_key
+    key = SecureRandom.hex(32)
+    $redis.setex "temporary_key:#{key}", 1.week, id.to_s
+    key
+  end
+
+
+  # tricky, we need our bus to be subscribed from the right spot
+  def sync_notification_channel_position
+    @unread_notifications_by_type = nil
+    self.notification_channel_position = MessageBus.last_id("/notification/#{id}")
+  end
+
+  def invited_by
+    used_invite = invites.where("redeemed_at is not null").includes(:invited_by).first
+    used_invite.try(:invited_by)
+  end
+
+  # Approve this user
+  def approve(approved_by, send_mail=true)
+    self.approved = true
+
+    if Fixnum === approved_by
+      self.approved_by_id = approved_by
+    else
+      self.approved_by = approved_by
+    end
+
+    self.approved_at = Time.now
+
+    send_approval_email if save and send_mail
+  end
+
+  def self.email_hash(email)
+    Digest::MD5.hexdigest(email.strip.downcase)
+  end
+
+  def email_hash
+    User.email_hash(email)
+  end
+
+  def unread_notifications_by_type
+    @unread_notifications_by_type ||= notifications.where("id > ? and read = false", seen_notification_id).group(:notification_type).count
+  end
+
+  def reload
+    @unread_notifications_by_type = nil
+    @unread_pms = nil
+    super
+  end
+
+  def unread_private_messages
+    @unread_pms ||= notifications.where("read = false AND notification_type = ?", Notification.types[:private_message]).count
+  end
+
+  def unread_notifications
+    unread_notifications_by_type.except(Notification.types[:private_message]).values.sum
+  end
+
+  def saw_notification_id(notification_id)
+    User.where(["seen_notification_id < ?", notification_id]).update_all ["seen_notification_id = ?", notification_id]
+  end
+
+  def publish_notifications_state
+    MessageBus.publish("/notification/#{id}",
+                       {unread_notifications: unread_notifications,
+                        unread_private_messages: unread_private_messages},
+                       user_ids: [id] # only publish the notification to this user
+    )
+  end
+
+  # A selection of people to autocomplete on @mention
+  def self.mentionable_usernames
+    User.select(:username).order('last_posted_at desc').limit(20)
+  end
+
+  def password=(password)
+    # special case for passwordless accounts
+    @raw_password = password unless password.blank?
+  end
+
+  # Indicate that this is NOT a passwordless account for the purposes of validation
+  def password_required!
+    @password_required = true
+  end
+
+  def confirm_password?(password)
+    return false unless password_hash && salt
+    self.password_hash == hash_password(password, salt)
+  end
+
+  def seen_before?
+    last_seen_at.present?
+  end
+
+  def has_visit_record?(date)
+    user_visits.where(visited_at: date).first
+  end
+
+  def update_visit_record!(date)
+    unless has_visit_record?(date)
+      update_column(:days_visited, days_visited + 1)
+      user_visits.create!(visited_at: date)
+    end
+  end
+
+  def update_ip_address!(new_ip_address)
+    unless ip_address == new_ip_address || new_ip_address.blank?
+      update_column(:ip_address, new_ip_address)
+    end
+  end
+
+  def update_last_seen!(now=nil)
+    now ||= Time.zone.now
+    now_date = now.to_date
+
+    # Only update last seen once every minute
+    redis_key = "user:#{self.id}:#{now_date}"
+    if $redis.setnx(redis_key, "1")
+      $redis.expire(redis_key, SiteSetting.active_user_rate_limit_secs)
+
+      update_visit_record!(now_date)
+
+      # using update_column to avoid the AR transaction
+      # Keep track of our last visit
+      if seen_before? && (self.last_seen_at < (now - SiteSetting.previous_visit_timeout_hours.hours))
+        previous_visit_at = last_seen_at
+        update_column(:previous_visit_at, previous_visit_at)
+      end
+      update_column(:last_seen_at, now)
+    end
+  end
+
+  def self.avatar_template(email)
+    email_hash = self.email_hash(email)
+    # robohash was possibly causing caching issues
+    # robohash = CGI.escape("http://robohash.org/size_") << "{size}x{size}" << CGI.escape("/#{email_hash}.png")
+    "https://www.gravatar.com/avatar/#{email_hash}.png?s={size}&r=pg&d=identicon"
+  end
+
+  # Don't pass this up to the client - it's meant for server side use
+  # The only spot this is now used is for self oneboxes in open graph data
+  def small_avatar_url
+    "https://www.gravatar.com/avatar/#{email_hash}.png?s=60&r=pg&d=identicon"
+  end
+
+  # return null for local avatars, a template for gravatar
+  def avatar_template
+    User.avatar_template(email)
+  end
+
+
+  # Updates the denormalized view counts for all users
+  def self.update_view_counts
+    # Update denormalized topics_entered
+    exec_sql "UPDATE users SET topics_entered = x.c
+             FROM
+            (SELECT v.user_id,
+                    COUNT(DISTINCT parent_id) AS c
+             FROM views AS v
+             WHERE parent_type = 'Topic'
+             GROUP BY v.user_id) AS X
+            WHERE x.user_id = users.id"
+
+    # Update denormalzied posts_read_count
+    exec_sql "UPDATE users SET posts_read_count = x.c
+              FROM
+              (SELECT pt.user_id,
+                      COUNT(*) AS c
+               FROM post_timings AS pt
+               GROUP BY pt.user_id) AS X
+               WHERE x.user_id = users.id"
+  end
+
+  # The following count methods are somewhat slow - definitely don't use them in a loop.
+  # They might need to be denormalized
+  def like_count
+    UserAction.where(user_id: id, action_type: UserAction::WAS_LIKED).count
+  end
+
+  def post_count
+    posts.count
+  end
+
+  def flags_given_count
+    PostAction.where(user_id: id, post_action_type_id: PostActionType.flag_types.values).count
+  end
+
+  def flags_received_count
+    posts.includes(:post_actions).where('post_actions.post_action_type_id' => PostActionType.flag_types.values).count
+  end
+
+  def private_topics_count
+    topics_allowed.where(archetype: Archetype.private_message).count
+  end
+
+  def bio_excerpt
+    excerpt = PrettyText.excerpt(bio_cooked, 350)
+    return excerpt if excerpt.blank? || has_trust_level?(:basic)
+    PrettyText.strip_links(excerpt)
+  end
+
+  def bio_processed
+    return bio_cooked if bio_cooked.blank? || has_trust_level?(:basic)
+    PrettyText.strip_links(bio_cooked)
+  end
+
+  def delete_all_posts!(guardian)
+    raise Discourse::InvalidAccess unless guardian.can_delete_all_posts? self
+
+    posts.order("post_number desc").each do |p|
+      PostDestroyer.new(guardian.user, p).destroy
+    end
+  end
+
+  def is_banned?
+    banned_till && banned_till > DateTime.now
+  end
+
+  # Use this helper to determine if the user has a particular trust level.
+  # Takes into account admin, etc.
+  def has_trust_level?(level)
+    raise "Invalid trust level #{level}" unless TrustLevel.valid_level?(level)
+    admin? || moderator? || TrustLevel.compare(trust_level, level)
+  end
+
+  # a touch faster than automatic
+  def admin?
+    admin
+  end
+
+  def change_trust_level!(level)
+    raise "Invalid trust level #{level}" unless TrustLevel.valid_level?(level)
+    self.trust_level = TrustLevel.levels[level]
+    transaction do
+      self.save!
+      Group.user_trust_level_change!(self.id, self.trust_level)
+    end
+  end
+
+  def guardian
+    Guardian.new(self)
+  end
+
+  def username_format_validator
+    UsernameValidator.perform_validation(self, 'username')
+  end
+
+  def email_confirmed?
+    email_tokens.where(email: email, confirmed: true).present? || email_tokens.empty?
+  end
+
+  def activate
+    email_token = self.email_tokens.active.first
+    if email_token
+      EmailToken.confirm(email_token.token)
+    else
+      self.active = true
+      save
+    end
+  end
+
+  def deactivate
+    self.active = false
+    save
+  end
+
+  def treat_as_new_topic_start_date
+    duration = new_topic_duration_minutes || SiteSetting.new_topic_duration_minutes
+    case duration
+      when User::NewTopicDuration::ALWAYS
+        created_at
+      when User::NewTopicDuration::LAST_VISIT
+        previous_visit_at || created_at
+      else
+        duration.minutes.ago
+    end
+  end
+
+  MAX_TIME_READ_DIFF = 100
+  # attempt to add total read time to user based on previous time this was called
+  def update_time_read!
+    last_seen_key = "user-last-seen:#{id}"
+    last_seen = $redis.get(last_seen_key)
+    if last_seen.present?
+      diff = (Time.now.to_f - last_seen.to_f).round
+      if diff > 0 && diff < MAX_TIME_READ_DIFF
+        User.where(id: id, time_read: time_read).update_all ["time_read = time_read + ?", diff]
+      end
+    end
+    $redis.set(last_seen_key, Time.now.to_f)
+  end
+
+  def readable_name
+    return "#{name} (#{username})" if name.present? && name != username
+    username
+  end
+
+  def bio_summary
+    return nil unless bio_cooked.present?
+    Summarize.new(bio_cooked).summary
+  end
+
+  def self.count_by_signup_date(sinceDaysAgo=30)
+    where('created_at > ?', sinceDaysAgo.days.ago).group('date(created_at)').order('date(created_at)').count
+  end
+
+  def self.counts_by_trust_level
+    group('trust_level').count
+  end
+
+  def update_topic_reply_count
+    self.topic_reply_count =
+        Topic
+        .where(['id in (
+              SELECT topic_id FROM posts p
+              JOIN topics t2 ON t2.id = p.topic_id
+              WHERE p.deleted_at IS NULL AND
+                t2.user_id <> p.user_id AND
+                p.user_id = ?
+              )', self.id])
+        .count
+  end
+
+  def secure_category_ids
+    cats = self.staff? ? Category.select(:id).where(read_restricted: true) : secure_categories.select('categories.id')
+    cats.map { |c| c.id }.sort
+  end
+
+  def topic_create_allowed_category_ids
+    Category.topic_create_allowed(self.id).select(:id)
+  end
+
+  # Flag all posts from a user as spam
+  def flag_linked_posts_as_spam
+    admin = Discourse.system_user
+    topic_links.includes(:post).each do |tl|
+      begin
+        PostAction.act(admin, tl.post, PostActionType.types[:spam])
+      rescue PostAction::AlreadyActed
+        # If the user has already acted, just ignore it
+      end
+    end
+  end
+
+
+  protected
+
+  def cook
+    if bio_raw.present?
+      self.bio_cooked = PrettyText.cook(bio_raw) if bio_raw_changed?
+    else
+      self.bio_cooked = nil
+    end
+  end
+
+  def update_tracked_topics
+    return unless auto_track_topics_after_msecs_changed?
+
+    where_conditions = {notifications_reason_id: nil, user_id: id}
+    if auto_track_topics_after_msecs < 0
+      TopicUser.where(where_conditions).update_all({notification_level: TopicUser.notification_levels[:regular]})
+    else
+      TopicUser.where(where_conditions).update_all(["notification_level = CASE WHEN total_msecs_viewed < ? THEN ? ELSE ? END",
+                            auto_track_topics_after_msecs, TopicUser.notification_levels[:regular], TopicUser.notification_levels[:tracking]])
+    end
+  end
+
+
+  def create_email_token
+    email_tokens.create(email: email)
+  end
+
+  def ensure_password_is_hashed
+    if @raw_password
+      self.salt = SecureRandom.hex(16)
+      self.password_hash = hash_password(@raw_password, salt)
+    end
+  end
+
+  def hash_password(password, salt)
+    Pbkdf2.hash_password(password, salt, Rails.configuration.pbkdf2_iterations, Rails.configuration.pbkdf2_algorithm)
+  end
+
+  def add_trust_level
+    # there is a possiblity we did not load trust level column, skip it
+    return unless has_attribute? :trust_level
+    self.trust_level ||= SiteSetting.default_trust_level
+  end
+
+  def update_username_lower
+    self.username_lower = username.downcase
+  end
+
+  def username_validator
+    username_format_validator || begin
+      lower = username.downcase
+      existing = User.where(username_lower: lower).first
+      if username_changed? && existing && existing.id != self.id
+        errors.add(:username, I18n.t(:'user.username.unique'))
+      end
+    end
+  end
+
+  def password_validator
+    if (@raw_password && @raw_password.length < 6) || (@password_required && !@raw_password)
+      errors.add(:password, "must be 6 letters or longer")
+    end
+  end
+
+    def send_approval_email
+      Jobs.enqueue(:user_email,
+        type: :signup_after_approval,
+        user_id: id,
+        email_token: email_tokens.first.token
+      )
+    end
+
+  private
+
+  def self.discourse_hub_nickname_operation
+    if SiteSetting.call_discourse_hub?
+      begin
+        yield
+      rescue DiscourseHub::NicknameUnavailable
+        false
+      rescue => e
+        Rails.logger.error e.message + "\n" + e.backtrace.join("\n")
+      end
+    end
+  end
+end
+
+# == Schema Information
+#
+# Table name: users
+#
+#  id                            :integer          not null, primary key
+#  username                      :string(20)       not null
+#  created_at                    :datetime         not null
+#  updated_at                    :datetime         not null
+#  name                          :string(255)
+#  bio_raw                       :text
+#  seen_notification_id          :integer          default(0), not null
+#  last_posted_at                :datetime
+#  email                         :string(256)      not null
+#  password_hash                 :string(64)
+#  salt                          :string(32)
+#  active                        :boolean
+#  username_lower                :string(20)       not null
+#  auth_token                    :string(32)
+#  last_seen_at                  :datetime
+#  website                       :string(255)
+#  admin                         :boolean          default(FALSE), not null
+#  last_emailed_at               :datetime
+#  email_digests                 :boolean          default(TRUE), not null
+#  trust_level                   :integer          not null
+#  bio_cooked                    :text
+#  email_private_messages        :boolean          default(TRUE)
+#  email_direct                  :boolean          default(TRUE), not null
+#  approved                      :boolean          default(FALSE), not null
+#  approved_by_id                :integer
+#  approved_at                   :datetime
+#  topics_entered                :integer          default(0), not null
+#  posts_read_count              :integer          default(0), not null
+#  digest_after_days             :integer          default(7), not null
+#  previous_visit_at             :datetime
+#  banned_at                     :datetime
+#  banned_till                   :datetime
+#  date_of_birth                 :date
+#  auto_track_topics_after_msecs :integer
+#  views                         :integer          default(0), not null
+#  flag_level                    :integer          default(0), not null
+#  time_read                     :integer          default(0), not null
+#  days_visited                  :integer          default(0), not null
+#  ip_address                    :string
+#  new_topic_duration_minutes    :integer
+#  external_links_in_new_tab     :boolean          default(FALSE), not null
+#  enable_quoting                :boolean          default(TRUE), not null
+#  moderator                     :boolean          default(FALSE)
+#  likes_given                   :integer          default(0), not null
+#  likes_received                :integer          default(0), not null
+#  topic_reply_count             :integer          default(0), not null
+#  blocked                       :boolean          default(FALSE)
+#  dynamic_favicon               :boolean          default(FALSE), not null
+#  title                         :string(255)
+#
+# Indexes
+#
+#  index_users_on_auth_token      (auth_token)
+#  index_users_on_email           (email) UNIQUE
+#  index_users_on_last_posted_at  (last_posted_at)
+#  index_users_on_username        (username) UNIQUE
+#  index_users_on_username_lower  (username_lower) UNIQUE
+#
+
+
+===== FILE config/locales/server.en.yml (after PR) =====
+# encoding: utf-8
+# This file contains content for the server portion of Discourse used by Ruby
+#
+# To validate this YAML file after you change it, please paste it into
+# http://yamllint.com/
+
+en:
+  dates:
+    short_date_no_year: "D MMM"
+    short_date: "D MMM, YYYY"
+    long_date: "MMMM D, YYYY h:mma"
+  time:
+    formats:
+      short: "%m-%d-%Y"
+      short_no_year: "%B %-d"
+      date_only: "%b %-d, %Y"
+
+  title: "Discourse"
+  topics: "Topics"
+  posts: "posts"
+  loading: "Loading"
+  powered_by_html: 'Powered by <a href="http://www.discourse.org">Discourse</a>, best viewed with JavaScript enabled'
+
+  via: "%{username} via %{site_name}"
+  is_reserved: "is reserved"
+
+  site_under_maintenance: 'Site is currently undergoing maintenance.'
+  operation_already_running: "An %{operation} is currently running. Can't start a new %{operation} job right now."
+
+  too_many_mentions:
+    zero: "Sorry, you can't mention other users."
+    one: "Sorry, you can only mention one other user in a post."
+    other: "Sorry, you can only mention %{count} users in a post."
+  too_many_mentions_newuser:
+    zero: "Sorry, new users can't mention other users."
+    one: "Sorry, new users can only mention one other user in a post."
+    other: "Sorry, new users can only mention %{count} users in a post."
+  too_many_images:
+    zero: "Sorry, new users can't put images in posts."
+    one: "Sorry, new users can only put one image in a post."
+    other: "Sorry, new users can only put %{count} images in a post."
+  too_many_attachments:
+    zero: "Sorry, new users can't put attachments in posts."
+    one: "Sorry, new users can only put one attachment in a post."
+    other: "Sorry, new users can only put %{count} attachments in a post."
+  too_many_links:
+    zero: "Sorry, new users can't put links in posts."
+    one: "Sorry, new users can only put one link in a post."
+    other: "Sorry, new users can only put %{count} links in a post."
+  spamming_host: "Sorry you cannot post a link to that host."
+
+  just_posted_that: "is too similar to what you recently posted"
+  has_already_been_used: "has already been used"
+  invalid_characters: "contains invalid characters"
+  is_invalid: "is invalid; try to be a little more descriptive"
+  next_page: "next page →"
+  by: "By"
+  topics_in_category: "Topics in the '%{category}' category"
+  rss_posts_in_topic: "RSS feed of '%{topic}'"
+  rss_topics_in_category: "RSS feed of topics in the '%{category}' category"
+  author_wrote: "%{author} wrote:"
+  private_message_abbrev: "PM"
+  rss_description:
+    latest: "Latest topics"
+    hot: "Hot topics"
+
+  groups:
+    errors:
+      can_not_modify_automatic: "You can not modify an automatic group"
+    default_names:
+      admins: "admins"
+      moderators: "moderators"
+      staff: "staff"
+      trust_level_1: "trust_level_1"
+      trust_level_2: "trust_level_2"
+      trust_level_3: "trust_level_3"
+      trust_level_4: "trust_level_4"
+      trust_level_5: "trust_level_5"
+
+  education:
+    until_posts:
+      one: "post"
+      other: "%{count} posts"
+
+    'new-topic': |
+      Welcome to %{site_name} &mdash; **thanks for starting a new conversation!**
+
+      - Does the title accurately describe your topic? Does it sound interesting?
+
+      - What is this about? Who would be interested in it? Why does it matter? What kind of responses are you hoping for from the community?
+
+      - Include good search words in your topic so others can *find* it. To group your topic with related topics, select a category.
+
+      For more guidance, [see our FAQ](/faq). This panel will only appear for your first %{education_posts_text}.
+
+    'new-reply': |
+      Welcome to %{site_name} &mdash; **thanks for contributing to the conversation!**
+
+      - Does your reply improve the conversation in some way, however small?
+
+      - Be kind to your fellow community members.
+
+      - Constructive criticism is welcome, but remember to criticize *ideas*, not people.
+
+      For more guidance, [see our FAQ](/faq). This panel will only appear for your first %{education_posts_text}.
+
+
+  activerecord:
+    attributes:
+      category:
+        name: "Category Name"
+      post:
+        raw: "Body"
+    errors:
+      messages:
+        is_invalid: "is invalid; try to be a little more descriptive"
+        has_already_been_used: "has already been used"
+      models:
+        topic:
+          attributes:
+            archetype:
+              cant_send_pm: "Sorry, you cannot send a private message to that user."
+
+  user_profile:
+    no_info_me: "<div class='missing-profile'>the About Me field of your profile is currently blank, <a href='/users/%{username_lower}/preferences/about-me'>would you like to fill it out?</a></div>"
+    no_info_other: "<div class='missing-profile'>%{name} hasn't entered anything in the About Me field of their profile yet</div>"
+
+  category:
+    topic_prefix: "Category definition for %{category}"
+    replace_paragraph: "[Replace this first paragraph with a short description of your new category. This guidance will appear in the category selection area, so try to keep it below 200 characters.]"
+    post_template: "%{replace_paragraph}\n\nUse the following paragraphs for a longer description, as well as to establish any category guidelines or rules.\n\nSome things to consider in any discussion replies below:\n\n- What is this category for? Why should people select this category for their topic?\n\n- How is this different than the other categories we already have?\n\n- Do we need this category?\n\n- Should we merge this with another category, or split it into more categories?\n"
+
+  trust_levels:
+    newuser:
+      title: "new user"
+    basic:
+      title: "basic user"
+    regular:
+      title: "regular user"
+    leader:
+      title: "leader"
+    elder:
+      title: "elder"
+    change_failed_explanation: "You attempted to demote %{user_name} to '%{new_trust_level}'. However their trust level is already '%{current_trust_level}'. %{user_name} will remain at '%{current_trust_level}'"
+
+
+  rate_limiter:
+    too_many_requests: "We have a daily limit on how many times that action can be taken. Please wait %{time_left} before trying again."
+    hours:
+      one: "1 hour"
+      other: "%{count} hours"
+    minutes:
+      one: "1 minute"
+      other: "%{count} minutes"
+    seconds:
+      one: "1 second"
+      other: "%{count} seconds"
+
+  datetime:
+    distance_in_words:
+      half_a_minute: "< 1m"
+      less_than_x_seconds:
+        one:   "< 1s"
+        other: "< %{count}s"
+      x_seconds:
+        one:   "1s"
+        other: "%{count}s"
+      less_than_x_minutes:
+        one:   "< 1m"
+        other: "< %{count}m"
+      x_minutes:
+        one:   "1m"
+        other: "%{count}m"
+      about_x_hours:
+        one:   "1h"
+        other: "%{count}h"
+      x_days:
+        one:   "1d"
+        other: "%{count}d"
+      about_x_months:
+        one:   "1mon"
+        other: "%{count}mon"
+      x_months:
+        one:   "1mon"
+        other: "%{count}mon"
+      about_x_years:
+        one:   "1y"
+        other: "%{count}y"
+      over_x_years:
+        one:   "> 1y"
+        other: "> %{count}y"
+      almost_x_years:
+        one:   "1y"
+        other: "%{count}y"
+
+    distance_in_words_verbose:
+      half_a_minute: "just now"
+      less_than_x_seconds:
+        one:   "just now"
+        other: "just now"
+      x_seconds:
+        one:   "1 second ago"
+        other: "%{count} seconds ago"
+      less_than_x_minutes:
+        one:   "less than 1 minute ago"
+        other: "less than %{count} minutes ago"
+      x_minutes:
+        one:   "1 minute ago"
+        other: "%{count} minutes ago"
+      about_x_hours:
+        one:   "1 hour ago"
+        other: "%{count} hours ago"
+      x_days:
+        one:   "1 day ago"
+        other: "%{count} days ago"
+      about_x_months:
+        one:   "about 1 month ago"
+        other: "about %{count} months ago"
+      x_months:
+        one:   "1 month ago"
+        other: "%{count} months ago"
+      about_x_years:
+        one:   "about 1 year ago"
+        other: "about %{count} years ago"
+      over_x_years:
+        one:   "over 1 year ago"
+        other: "over %{count} years ago"
+      almost_x_years:
+        one:   "almost 1 year ago"
+        other: "almost %{count} years ago"
+
+  password_reset:
+    no_token: "Sorry, your token has expired. Please try resetting your password again."
+    choose_new: "Please choose a new password"
+    update: 'update password'
+    title: 'reset password'
+    success: "You successfully changed your password and are now logged in."
+    success_unapproved: "You successfully changed your password."
+    continue: "Continue to %{site_name}"
+
+  change_email:
+    confirmed: "Your email has been updated."
+    please_continue: "Please continue to %{link}"
+    error: "There was an error changing your email address. Perhaps the address is already in use?"
+
+  activation:
+    already_done: "Sorry, this account confirmation link is no longer valid. Perhaps your account is already active?"
+    please_continue: "Your new account is confirmed, and you are now logged in. Continue to %{link}"
+    welcome_to: "Welcome to %{site_name}!"
+    approval_required: "A moderator must manually approve your new account before you can access this forum. You'll get an email when your account is approved!"
+
+  post_action_types:
+    off_topic:
+      title: 'Off-Topic'
+      description: 'This post is radically off-topic in the current conversation, and should probably be moved to a different topic. If this is a topic, perhaps it does not belong here.'
+      long_form: 'flagged this as off-topic'
+    spam:
+      title: 'Spam'
+      description: 'This post is an advertisement. It is not useful or relevant to the current conversation, but promotional in nature.'
+      long_form: 'flagged this as spam'
+    inappropriate:
+      title: 'Inappropriate'
+      description: 'This post contains content that a reasonable person would consider offensive, abusive, or hate speech.'
+      long_form: 'flagged this as inappropriate'
+    notify_user:
+      title: 'Notify {{username}}'
+      description: 'This post contains something I want to talk to this person directly and privately about.'
+      long_form: 'notified user'
+      email_title: 'Regarding your post in "%{title}"'
+      email_body: "%{link}\n\n%{message}"
+    notify_moderators:
+      title: 'Notify moderators'
+      description: 'This post requires general moderator attention based on the <a href="/faq">FAQ</a>, <a href="%{tos_url}">TOS</a>, or for another reason not listed above.'
+      long_form: 'notified moderators'
+      email_title: 'A post in "%{title}" requires moderator attention'
+      email_body: "%{link}\n\n%{message}"
+    bookmark:
+      title: 'Bookmark'
+      description: 'Bookmark this post'
+      long_form: 'bookmarked this post'
+    like:
+      title: 'Like'
+      description: 'Like this post'
+      long_form: 'liked this'
+    vote:
+      title: 'Vote'
+      description: 'Vote for this post'
+      long_form: 'voted for this post'
+
+  flagging:
+    you_must_edit: '<p>Your post was flagged by the community. Please see your private messages.</p>'
+    user_must_edit: '<p>Flagged content hidden.</p>'
+
+  archetypes:
+    regular:
+      title: "Regular Topic"
+
+  unsubscribed:
+    title: 'Unsubscribed'
+    description: "You have been unsubscribed. We won't contact you again!"
+    oops: "In case you didn't mean to do this, click below."
+    not_found: "Error Unsubscribing"
+    not_found_description: "Sorry, we couldn't unsubscribe you. It's possible the link in your email has expired."
+
+  resubscribe:
+    action: "Re-Subscribe"
+    title: "Re-Subscribed!"
+    description: "You have been re-subscribed."
+
+  reports:
+    visits:
+      title: "User Visits"
+      xaxis: "Day"
+      yaxis: "Number of visits"
+    signups:
+      title: "Users"
+      xaxis: "Day"
+      yaxis: "Number of new users"
+    topics:
+      title: "Topics"
+      xaxis: "Day"
+      yaxis: "Number of new topics"
+    posts:
+      title: "Posts"
+      xaxis: "Day"
+      yaxis: "Number of new posts"
+    likes:
+      title: "Likes"
+      xaxis: "Day"
+      yaxis: "Number of new likes"
+    flags:
+      title: "Flags"
+      xaxis: "Day"
+      yaxis: "Number of flags"
+    bookmarks:
+      title: "Bookmarks"
+      xaxis: "Day"
+      yaxis: "Number of new bookmarks"
+    favorites:
+      title: "Favorites"
+      xaxis: "Day"
+      yaxis: "Number of new favorites"
+    users_by_trust_level:
+      title: "Users per Trust Level"
+      xaxis: "Trust Level"
+      yaxis: "Number of Users"
+    emails:
+      title: "Emails Sent"
+      xaxis: "Day"
+      yaxis: "Number of Emails"
+    user_to_user_private_messages:
+      title: "User-to-User"
+      xaxis: "Day"
+      yaxis: "Number of private messages"
+    system_private_messages:
+      title: "System"
+      xaxis: "Day"
+      yaxis: "Number of private messages"
+    moderator_warning_private_messages:
+      title: "Moderator Warning"
+      xaxis: "Day"
+      yaxis: "Number of private messages"
+    notify_moderators_private_messages:
+      title: "Notify Moderators"
+      xaxis: "Day"
+      yaxis: "Number of private messages"
+    notify_user_private_messages:
+      title: "Nofity User"
+      xaxis: "Day"
+      yaxis: "Number of private messages"
+    top_referrers:
+      title: "Top Referrers"
+      xaxis: "User"
+      num_clicks: "Clicks"
+      num_topics: "Topics"
+    top_traffic_sources:
+      title: "Top Traffic Sources"
+      xaxis: "Domain"
+      num_clicks: "Clicks"
+      num_topics: "Topics"
+      num_users: "Users"
+    top_referred_topics:
+      title: "Top Referred Topics"
+      xaxis: "Topic"
+      num_clicks: "Clicks"
+
+  dashboard:
+    rails_env_warning: "Your server is running in %{env} mode."
+    host_names_warning: "Your config/database.yml file is using the default localhost hostname. Update it to use your site's hostname."
+    gc_warning: 'Your server is using default ruby garbage collection parameters, which will not give you the best performance. Read this topic on performance tuning: <a href="http://meta.discourse.org/t/tuning-ruby-and-rails-for-discourse/4126" target="_blank">Tuning Ruby and Rails for Discourse</a>.'
+    clockwork_warning: 'Clockwork is not running. Ensure that a clockwork process is always running so that important jobs can be scheduled. <a href="https://github.com/tomykaira/clockwork" target="_blank">Learn about clockwork here</a>.'
+    sidekiq_warning: 'Sidekiq is not running. Many tasks, like sending emails, are executed asynchronously by sidekiq. Please ensure at least one sidekiq process is running. <a href="https://github.com/mperham/sidekiq" target="_blank">Learn about Sidekiq here</a>.'
+    queue_size_warning: 'The number of queued jobs is %{queue_size}, which is high. This could indicate a problem with the Sidekiq process(es), or you may need to add more Sidekiq workers.'
+    memory_warning: 'Your server is running with less than 1 GB of total memory. At least 1 GB of memory is recommended.'
+    facebook_config_warning: 'The server is configured to allow signup and log in with Facebook (enable_facebook_logins), but the app id and app secret values are not set. Go to <a href="/admin/site_settings">the Site Settings</a> and update the settings. <a href="https://github.com/discourse/discourse/wiki/The-Discourse-Admin-Quick-Start-Guide#enable-facebook-logins" target="_blank">See this guide to learn more</a>.'
+    cas_config_warning: 'The server is configured to allow signup and log in with CAS (enable_cas_logins), but the hostname and domain name values are not set.'
+    twitter_config_warning: 'The server is configured to allow signup and log in with Twitter (enable_twitter_logins), but the key and secret values are not set. Go to <a href="/admin/site_site_settings">the Site Settings</a> and update the settings. <a href="https://github.com/discourse/discourse/wiki/The-Discourse-Admin-Quick-Start-Guide#enable-twitter-logins" target="_blank">See this guide to learn more</a>.'
+    github_config_warning: 'The server is configured to allow signup and log in with GitHub (enable_github_logins), but the client id and secret values are not set. Go to <a href="/admin/site_settings">the Site Settings</a> and update the settings. <a href="https://github.com/discourse/discourse/wiki/The-Discourse-Admin-Quick-Start-Guide" target="_blank">See this guide to learn more</a>.'
+    s3_config_warning: 'The server is configured to upload files to s3, but at least one the following setting is not set: s3_access_key_id, s3_secret_access_key or s3_upload_bucket. Go to <a href="/admin/site_settings">the Site Settings</a> and update the settings. <a href="http://meta.discourse.org/t/how-to-set-up-image-uploads-to-s3/7229" target="_blank">See "How to set up image uploads to S3?" to learn more</a>.'
+    image_magick_warning: 'The server is configured to create thumbnails of large images, but ImageMagick is not installed. Install ImageMagick using your favorite package manager or go to <a href="http://www.imagemagick.org/script/binary-releases.php" target="_blank">to download the latest release</a>.'
+    failing_emails_warning: 'There are %{num_failed_jobs} email jobs that failed. Check your config/environments/production.rb file and ensure that the config.action_mailer settings are correct. <a href="/sidekiq/retries" target="_blank">See the failed jobs in Sidekiq</a>.'
+    default_logo_warning: "You haven't customized the logo images for your site. Update logo_url, logo_small_url, and favicon_url in the <a href='/admin/site_settings'>Site Settings</a>."
+    contact_email_missing: "You haven't provided a contact email for your site. Please update contact_email in the <a href='/admin/site_settings'>Site Settings</a>."
+    contact_email_invalid: "The site contact email is invalid. Please update contact_email in the <a href='/admin/site_settings'>Site Settings</a>."
+    title_nag: "The title Site Setting is still set to the default value. Please update it with your site's title in the <a href='/admin/site_settings'>Site Settings</a>."
+    consumer_email_warning: "Your site is configured to use Gmail (or another consumer email service) to send email. <a href='http://support.google.com/a/bin/answer.py?hl=en&answer=166852' target='_blank'>Gmail limits how many emails you can send</a>. Consider using an email service provider like mandrill.com to ensure email deliverability."
+    access_password_removal: "Your site was using the access_password setting, which has been removed. The login_required and must_approve_users settings have been enabled, which should be used instead. You can change them in the <a href='/admin/site_settings'>Site Settings</a>. Be sure to <a href='/admin/users/list/pending'>approve users in the Pending Users list</a>. (This message will go away after 2 days.)"
+    system_username_warning: "The system_username setting is blank. Please update it in the <a href='/admin/site_settings'>Site Settings</a>. Set it to the username of an admin user who should be the sender of system messages."
+    notification_email_warning: "The notification_email setting is blank. Please update it in the <a href='/admin/site_settings'>Site Settings</a>."
+
+  content_types:
+    education_new_reply:
+      title: "New User Education: First Replies"
+      description: "Pop up just-in-time guidance automatically displayed above the composer when new users begin typing their first two new replies."
+    education_new_topic:
+      title: "New User Education: First Topics"
+      description: "Pop up just-in-time guidance automatically displayed above the composer when new users begin typing their first two new topics."
+    usage_tips:
+      title: "New User Tips"
+      description: "Common usage tips, essential forum information, and key guidance intended for new users."
+    welcome_user:
+      title: "Welcome: New User"
+      description: "A private message automatically sent to all new users when they sign up."
+    welcome_invite:
+      title: "Welcome: Invited User"
+      description: "A private message automatically sent to all new invited users when they accept the invitation from another user to participate."
+    privacy_policy:
+      title: "Privacy Policy"
+      description: "Your site's privacy policy. Leave blank for default policy."
+    faq:
+      title: "FAQ"
+      description: "Your site's FAQ. Leave blank for the default FAQ."
+    login_required_welcome_message:
+      title: "Login Required: Welcome Message"
+      description: "Welcome message that is displayed to logged out users when
+        the 'login required' setting is enabled."
+    tos_user_content_license:
+      title: "Terms of Service: Content License"
+      description: "The text for the Content License section of the Terms of Service."
+    tos_miscellaneous:
+      title: "Terms of Service: Miscellaneous"
+      description: "The text for the Miscellaneous section of the Terms of Service."
+    login_required:
+      title: "Login Required: Homepage"
+      description: "The text displayed for unauthorized users when login is required on the site."
+
+  site_settings:
+    default_locale: "The default language of this Discourse instance (ISO 639-1 Code)"
+    min_post_length: "Minimum post length in characters"
+    min_private_message_post_length: "Minimum post length in characters for private messages"
+    max_post_length: "Maximum post length in characters"
+    min_topic_title_length: "Minimum topic title length in characters"
+    max_topic_title_length: "Maximum topic title length in characters"
+    min_private_message_title_length: "Minimum title length for a private message in characters"
+    min_search_term_length: "Minimum search term length in characters"
+    allow_uncategorized_topics: "Allow topics to be created without a category"
+    allow_duplicate_topic_titles: "Allow topics with identical titles"
+    unique_posts_mins: "How many minutes before a user can make a post with the same content again"
+    enforce_global_nicknames: "Enforce global nickname uniqueness (WARNING: only change this during initial setup)"
+    discourse_org_access_key: "The access key used to access the Discourse Hub nickname registry at discourse.org"
+    educate_until_posts: "Show pop-up composer education panel until the user has made this many posts"
+    title: "Title of this site, will be used in the title tag and elsewhere"
+    contact_email: "The email address of someone who can be contacted about the site. Important notices from Discourse.org regarding critical updates may be sent to this address."
+    company_full_name: "The full name of the company that runs this site, used in legal documents like the /tos"
+    company_short_name: "The short name of the company that runs this site, used in legal documents like the /tos"
+    company_domain: "The domain name owned by the company that runs this site, used in legal documents like the /tos"
+    api_key: "The secure API key used to create and update topics, use the /admin/api section to set it up"
+    queue_jobs: "DEVELOPER ONLY! WARNING! By default, queue jobs in sidekiq. If disabled, your site will be broken."
+    crawl_images: "Enable retrieving images from third party sources to insert width and height dimensions"
+    ninja_edit_window: "Number of seconds after posting where edits do not create a new version"
+    max_image_width: "Maximum allowed width of images in a post"
+    category_featured_topics: "Number of topics displayed per category in the /categories page"
+    add_rel_nofollow_to_user_content: "Add rel nofollow to all submitted user content, except for internal links (including parent domains) changing this requires you update all your baked markdown with: \"rake posts:rebake\""
+    exclude_rel_nofollow_domains: "A comma delimited list of domains where nofollow is not added (tld.com will automatically allow sub.tld.com as well)"
+
+    post_excerpt_maxlength: "Maximum length in chars of a post's excerpt"
+    post_onebox_maxlength: "Maximum length of a oneboxed Discourse post"
+    category_post_template: "The category definition post template used when you create a new category"
+    onebox_max_chars: "Maximum characters a onebox will import from an external website into the post"
+
+    logo_url: "The logo for your site eg: http://example.com/logo.png"
+    logo_small_url: "The small logo for your site used when scrolling down on topics eg: http://example.com/logo-small.png"
+    favicon_url: "A favicon for your site, see http://en.wikipedia.org/wiki/Favicon"
+    apple_touch_icon_url: "Icon used for Apple touch devices. Recommended size is 144px by 144px."
+
+    notification_email: "The return email address used when sending system emails such as notifying users of lost passwords, new accounts etc"
+    email_custom_headers: "A pipe-delimited list of custom email headers"
+    use_ssl: "Should the site be accessible via SSL? (NOT IMPLEMENTED, EXPERIMENTAL)"
+    best_of_score_threshold: "The minimum score of a post to be included in the 'best of'"
+    best_of_posts_required: "Minimum posts in a topic before 'best of' mode is enabled"
+    best_of_likes_required: "Minimum likes in a topic before the 'best of' mode will be enabled"
+    best_of_percent_filter: "When a user clicks best of, show the top % of posts"
+    enable_private_messages: "Allow basic (1) trust level users to create private messages and reply to private messages"
+
+    enable_long_polling: "Message bus used for notification can use long polling"
+    long_polling_interval: "Interval before a new long poll is issued in milliseconds "
+    polling_interval: "How often should logged in user clients poll in milliseconds"
+    anon_polling_interval: "How often should anonymous clients poll in milliseconds"
+
+    auto_track_topics_after: "Global default milliseconds before a topic is automatically tracked, users can override (0 for always, -1 for never)"
+    new_topic_duration_minutes: "Global default number of minutes a topic is considered new, users can override (-1 for always, -2 for last visit)"
+
+    flags_required_to_hide_post: "Number of flags that cause a post to be automatically hidden and PM sent to the user (0 for never)"
+    cooldown_minutes_after_hiding_posts: "Number of minutes a user must wait before they can edit the post that was hidden due to flagging"
+    num_flags_to_block_new_user: "If a new user's posts get this many spam flags from (n) different users, hide all their posts and prevent future posting. 0 disables this feature."
+    num_users_to_block_new_user: "If a new user's posts get (x) spam flags from this many different users, hide all their posts and prevent future posting. 0 disables this feature."
+
+
+    traditional_markdown_linebreaks: "Use traditional linebreaks in Markdown, which require two trailing spaces for a linebreak"
+    post_undo_action_window_mins: "Number of seconds users are allowed to reverse actions on a post (like, flag, etc)"
+    must_approve_users: "Admins must approve all users before they gain access"
+    ga_tracking_code: "Google analytics tracking code code, eg: UA-12345678-9; see http://google.com/analytics"
+    ga_domain_name: "Google analytics domain name, eg: mysite.com; see http://google.com/analytics"
+    enable_escaped_fragments: "Enable workaround solution to help old crawlers to index your site. WARNING: enable it only if you are really have to do it."
+    enable_noscript_support: "Enable supporting &lt;noscipt&gt; tag"
+    top_menu: "Determine which items appear in the homepage navigation, and in what order. Example latest|hot|read|favorited|unread|new|posted|categories"
+    post_menu: "Determine which items appear on the post menu, and in what order. Example like|edit|flag|delete|share|bookmark|reply"
+    share_links: "Determine which items appear on the share dialog, and in what order. Example twitter|facebook|google+|email"
+    track_external_right_clicks: "Track external links that are right clicked (eg: open in new tab) disabled by default because it rewrites URLs"
+    topics_per_page: "How many topics are loaded by default on the topics list page"
+    posts_per_page: "How many posts are returned on a topic page"
+    system_username: "Username for the author of automated private messages sent by the forum"
+    send_welcome_message: "Do new users get a welcome private message?"
+    suppress_reply_directly_below: "Don't show reply count on a post when there is a single reply directly below"
+    suppress_reply_directly_above: "Don't show in-reply-to on a post when there is a single reply directly above"
+
+    allow_index_in_robots_txt: "Site should be indexed by search engines (update robots.txt)"
+    email_domains_blacklist: "A pipe-delimited list of email domains that are not allowed. Example: mailinator.com|trashmail.net"
+    email_domains_whitelist: "A pipe-delimited list of email domains that users may register with. WARNING: Users with email domains other than those listed will not be allowed."
+    version_checks: "Ping the Discourse Hub for version updates and show version messages on the /admin dashboard"
+
+    port: "DEVELOPER ONLY! WARNING! Use this HTTP port rather than the default of port 80. Leave blank for default of 80."
+    force_hostname: "DEVELOPER ONLY! WARNING! Specify a hostname in the URL. Leave blank for default."
+
+    invite_expiry_days: "How long user invitation keys are valid, in days"
+
+    # TODO: perhaps we need a way of protecting these settings for hosted solution, global settings ...
+
+    invite_only: "Public registration is disabled, new users must be invited"
+
+    login_required: "Require authentication to read posts"
+
+    enable_local_logins: "Enable local authentication"
+    enable_local_account_create: "Enable local account creation"
+    enable_google_logins: "Enable Google authentication"
+    enable_yahoo_logins: "Enable Yahoo authentication"
+
+    enable_twitter_logins: "Enable Twitter authentication, requires twitter_consumer_key and twitter_consumer_secret"
+    twitter_consumer_key: "Consumer key for Twitter authentication, registered at http://dev.twitter.com"
+    twitter_consumer_secret: "Consumer secret for Twitter authentication, registered at http://dev.twitter.com"
+
+    enable_facebook_logins: "Enable Facebook authentication, requires facebook_app_id and facebook_app_secret"
+    facebook_app_id: "App id for Facebook authentication, registered at https://developers.facebook.com/apps"
+    facebook_app_secret: "App secret for Facebook authentication, registered at https://developers.facebook.com/apps"
+
+    enable_cas_logins: "Enable CAS authentication"
+    cas_hostname: "Hostname for cas server"
+    cas_domainname: "Domain name generated email addresses for cas server"
+
+    enable_github_logins: "Enable Github authentication, requires github_client_id and github_client_secret"
+    github_client_id: "Client id for Github authentication, registered at https://github.com/settings/applications"
+    github_client_secret: "Client secret for Github authentication, registered at https://github.com/settings/applications"
+
+    enable_persona_logins: "Enable email-based authentication with Mozilla Persona"
+
+    allow_import: "Allow import, which can replace ALL site data; leave false unless you plan to do data imports"
+
+    active_user_rate_limit_secs: "How frequently we update the 'last_seen_at' field, in seconds"
+    previous_visit_timeout_hours: "How long a visit lasts before we consider it the 'previous' visit, in hours"
+
+    uncategorized_name: "The default category for topics that have no category in the /categories page"
+    uncategorized_color: "The background color of the badge for the category with topics that have no category"
+    uncategorized_text_color: "The text color of the badge for the category with topics that have no category"
+
+    rate_limit_create_topic: "How many seconds, after creating a topic, before you can create another topic"
+    rate_limit_create_post: "How many seconds, after creating a post, before you can create another post"
+
+    max_likes_per_day: "Maximum number of likes per user per day"
+    max_flags_per_day: "Maximum number of flags per user per day"
+    max_bookmarks_per_day: "Maximum number of bookmarks per user per day"
+    max_edits_per_day: "Maximum number of edits per user per day"
+    max_favorites_per_day: "Maximum number of topics that can be favorited per user per day"
+    max_topics_per_day: "Maximum number of topics a user can create per day"
+    max_private_messages_per_day: "The maximum amount of private messages users can create per day"
+
+    suggested_topics: "The number of suggested topics shown at the bottom of a topic"
+
+    enable_s3_uploads: "Place uploads on Amazon S3"
+    s3_upload_bucket: "The Amazon S3 bucket name that files will be uploaded into. WARNING: must be lowercase (cf. http://docs.aws.amazon.com/AmazonS3/latest/dev/BucketRestrictions.html)"
+    s3_access_key_id: "The Amazon S3 access key id that will be used to upload images"
+    s3_secret_access_key: "The Amazon S3 secret access key that will be used to upload images"
+    s3_region: "The Amazon S3 region name that will be used to upload images"
+
+    enable_flash_video_onebox: "Enable embedding of swf and flv links in oneboxes (may introduce a security risk, caution advised)"
+
+    default_invitee_trust_level: "Default trust level (0-4) for invited users"
+    default_trust_level: "Default trust level (0-4) for users"
+
+    basic_requires_topics_entered: "How many topics a new user must enter before promotion to basic (1) trust level"
+    basic_requires_read_posts: "How many posts a new user must read before promotion to basic (1) trust level"
+    basic_requires_time_spent_mins: "How many minutes a new user must read posts before promotion to basic (1) trust level"
+
+    regular_requires_topics_entered: "How many topics a basic user must enter before promotion to regular (2) trust level"
+    regular_requires_read_posts: "How many posts a basic user must read before promotion to regular (2) trust level"
+    regular_requires_time_spent_mins: "How many minutes a basic user must read posts before promotion to regular (2) trust level"
+    regular_requires_days_visited: "How many days a basic user must visit the site before promotion to regular (2) trust level"
+    regular_requires_likes_received: "How many likes a basic user must receive before promotion to regular (2) trust level"
+    regular_requires_likes_given: "How many likes a basic user must cast before promotion to regular (2) trust level"
+    regular_requires_topic_reply_count: "How many topics a basic user must reply to before promotion to regular (2) trust level"
+
+    newuser_max_links: "How many links a new user can add to a post"
+    newuser_max_images: "How many images a new user can add to a post"
+    newuser_max_attachments: "How many attachments a new user can add to a post"
+    newuser_max_mentions_per_post: "Maximum number of @name notifications a new user can use in a post"
+    max_mentions_per_post: "Maximum number of @name notifications you can use in a post"
+
+    create_thumbnails: "Create thumbnails for lightboxed images"
+
+    email_time_window_mins: "How many minutes we wait before sending a user mail, to give them a chance to see it first"
+    email_posts_context: "How many posts to include in emails to show context"
+    flush_timings_secs: "How frequently we flush timing data to the server, in seconds"
+    max_word_length: "The maximum allowed word length, in characters, in a topic title"
+    title_min_entropy: "The minimum allowed entropy (unique characters, non-english count for more) required for a topic title"
+    body_min_entropy: "The minimum allowed entropy (unique characters, non-english count for more) required for a post body"
+
+    title_fancy_entities: "Convert common ASCII characters to fancy HTML entities in topic titles, ala SmartyPants http://daringfireball.net/projects/smartypants/"
+
+    min_title_similar_length: "The minimum length of a title before it will be checked for similar topics"
+    min_body_similar_length: "The minimum length of a post's body before it will be checked for similar topics"
+
+    category_colors: "A pipe (|) separated list of hexadecimal color values allowed for categories"
+    max_image_size_kb: "The maximum size of images we allow users to upload in kB - be sure to configure the limit in nginx (client_max_body_size) / apache or proxy as well."
+    max_attachment_size_kb: "The maximum size of files we allow users to upload in kB - be sure to configure the limit in nginx (client_max_body_size) / apache or proxy as well."
+    authorized_extensions: "A pipe (|) separated list of file extensions allowed for upload"
+    max_similar_results: "How many similar topics to show a user while they are composing a new topic"
+
+    title_prettify: "Prevent common title typos and errors, including all caps, lowercase first character, multiple ! and ?, extra . at end, etc."
+
+    topic_views_heat_low: "The number of views after which a topic's heat level is low."
+    topic_views_heat_medium: "The number of views after which a topic's heat level is medium."
+    topic_views_heat_high: "The number of views after which a topic's heat level is high."
+
+    faq_url: "If you have a FAQ hosted elsewhere that you want to use, provide the full URL here."
+    tos_url: "If you have a Terms of Service document hosted elsewhere that you want to use, provide the full URL here."
+    privacy_policy_url: "If you have a Privacy Policy document hosted elsewhere that you want to use, provide the full URL here."
+
+    newuser_spam_host_threshold: "How many times a new user can post a link to the same host within their `newuser_spam_host_posts` posts before being considered spam."
+    staff_like_weight: "Extra weighting factor given to likes when performed by staff."
+
+    reply_by_email_enabled: "Whether this forum supports reply by email"
+    reply_by_email_address: "Template for reply by email address in form, for example: %{reply_key}@reply.myforum.com"
+
+    pop3s_polling_enabled: "Whether to poll via POP3S for reply by email"
+    pop3s_polling_port: "The port to poll a POP3S account on"
+    pop3s_polling_host: "The host to poll for email via POP3S"
+    pop3s_polling_username: "The username for the POP3S account to poll for email"
+    pop3s_polling_password: "The password for the POP3S account to poll for email"
+
+    minimum_topics_similar: "How many topics need to exist in the database before similar topics are presented."
+
+    relative_date_duration: "Number of days after posting where post dates will be shown as relative instead of absolute. Examples: relative date: 7d, absolute date: 20 Feb"
+
+
+  notification_types:
+    mentioned: "%{display_username} mentioned you in %{link}"
+    liked: "%{display_username} liked your post in %{link}"
+    replied: "%{display_username} replied to your post in %{link}"
+    quoted: "%{display_username} quoted your post in %{link}"
+    edited: "%{display_username} edited your post in %{link}"
+    posted: "%{display_username} posted in %{link}"
+    moved_post: "%{display_username} moved your post to %{link}"
+    private_message: "%{display_username} sent you a private message: %{link}"
+    invited_to_private_message: "%{display_username} invited you to a private message: %{link}"
+    invitee_accepted: "%{display_username} accepted your invitation"
+
+  search:
+    types:
+      category: 'Categories'
+      topic: 'Topics'
+      user: 'Users'
+
+  original_poster: "Original Poster"
+  most_posts: "Most Posts"
+  most_recent_poster: "Most Recent Poster"
+  frequent_poster: "Frequent Poster"
+
+  move_posts:
+    new_topic_moderator_post:
+      one: "I moved a post to a new topic: %{topic_link}"
+      other: "I moved %{count} posts to a new topic: %{topic_link}"
+    existing_topic_moderator_post:
+      one: "I moved a post to an existing topic: %{topic_link}"
+      other: "I moved %{count} posts to an existing topic: %{topic_link}"
+
+  topic_statuses:
+    archived_enabled: "This topic is now archived. It is frozen and cannot be changed in any way."
+    archived_disabled: "This topic is now unarchived. It is no longer frozen, and can be changed."
+    closed_enabled: "This topic is now closed. New replies are no longer allowed."
+    closed_disabled: "This topic is now opened. New replies are allowed."
+    autoclosed_enabled:
+      zero: "This topic was automatically closed after 1 day. New replies are no longer allowed."
+      one: "This topic was automatically closed after 1 day. New replies are no longer allowed."
+      other: "This topic was automatically closed after %{count} days. New replies are no longer allowed."
+    autoclosed_disabled: "This topic is now opened. New replies are allowed."
+    pinned_enabled: "This topic is now pinned. It will appear at the top of its category until it is either unpinned by a moderator, or the Clear Pin button is pressed."
+    pinned_disabled: "This topic is now unpinned. It will no longer appear at the top of its category."
+    visible_enabled: "This topic is now visible. It will be displayed in topic lists."
+    visible_disabled: "This topic is now invisible. It will no longer be displayed in any topic lists. The only way to access this topic is via direct link."
+
+  login:
+    not_approved: "Your account hasn't been approved yet. You will be notified by email when you are ready to log in."
+    incorrect_username_email_or_password: "Incorrect username, email or password"
+    wait_approval: "Thanks for signing up. We will notify you when your account has been approved."
+    active: "Your account is active and ready."
+    activate_email: "You're almost done! We sent an activation email to <b>%{email}</b>. Please follow the instructions in the email to activate your account."
+    not_activated: "You can't log in yet. We sent an activation email to you. Please follow the instructions in the email to activate your account."
+    banned: "You can't log in until %{date}."
+    errors: "%{errors}"
+    not_available: "Not available. Try %{suggestion}?"
+    something_already_taken: "Something went wrong, perhaps the username or email is already registered. Try the forgot password link."
+    omniauth_error: "Sorry, there was an error authorizing your %{strategy} account. Perhaps you did not approve authorization?"
+    omniauth_error_unknown: "Something went wrong processing your log in, please try again."
+
+  user:
+    username:
+      short: "must be longer than %{min} characters"
+      long: "must be shorter than %{max} characters"
+      characters: "must only include numbers and letters"
+      unique: "must be unique"
+      blank: "must be present"
+      must_begin_with_alphanumeric: "must begin with a letter or number"
+    email:
+      not_allowed: "is not allowed from that email provider. Please use another email address."
+      blocked: "is not allowed."
+
+  invite_mailer:
+    subject_template: "[%{site_name}] %{invitee_name} invited you to join a discussion on %{site_name}"
+    text_body_template: |
+      %{invitee_name} invited you to the topic "%{topic_title}" at %{site_name}.
+
+      If you're interested, click the link below to visit the discussion:
+
+      [Visit %{site_name}][1]
+
+      You were invited by a trusted user, so you'll be able to post a reply immediately, without needing to log in.
+
+      [1]: %{invite_link}
+
+  test_mailer:
+    subject_template: "[%{site_name}] Email Deliverability Test"
+    text_body_template: |
+      This is a test email sent from your %{site_name} forum at:
+
+      [**%{base_url}**][0]
+
+      Email deliverability is complicated. Here are a few important things you should check first:
+
+      - Know how to view the *raw source of the email* in your mail client, so you can examine the email headers for important clues. in Gmail, it is the "show original" option in the drop-down menu on each mail.
+
+      - **IMPORTANT:** Does your ISP have a reverse DNS record entered to associate the domain names and IP addresses you send mail from? [Test your Reverse PTR record][2] here. If your ISP does not enter the proper reverse DNS pointer record, it's very unlikely any of your email will be delivered.
+
+      - Is your domain's SPF record correct? [Test your SPF record][1] here.
+
+      - Check to make sure the IPs of your mail server are [not on any email blacklists][4].
+
+      - Verify that your email server is *definitely* sending a fully-qualified hostname that resolves in DNS in its HELO message. If not, this will cause your email to be rejected by many mail services.
+
+      - Configure [DKIM email key signing][3] in your email software, and place the public DKIM key in your DNS records. This is not required, but will significantly improve email deliverability.
+
+      (The *easy* way is to [sign up for Mandrill][6], which has a generous free mailing plan and will be fine for small forums. You'll still need to set up the SPF and DKIM records in your DNS, though!)
+
+      We hope you received this email deliverability test OK!
+
+      Good luck,
+
+      Your friends at [Discourse](http://www.discourse.org)
+
+      :smile:
+
+      [0]: %{base_url}
+      [1]: http://www.kitterman.com/spf/validate.html
+      [2]: http://mxtoolbox.com/SuperTool.aspx
+      [3]: http://www.dkim.org/
+      [4]: http://whatismyipaddress.com/blacklist-check
+      [5]: %{base_url}/unsubscribe
+      [6]: http://mandrill.com
+
+      ----
+
+      <small>There should be an unsubscribe footer on every email you send, so let's mock one up. This email was sent by Name of Company, 55 Main Street, Anytown, USA 12345. If you would like to opt out of future emails, [click here to unsubscribe][5].</small>
+
+  system_messages:
+    post_hidden:
+      subject_template: "Post hidden due to community flagging"
+      text_body_template: |
+        Hello,
+
+        This is an automated message from %{site_name} to inform you that your post ...
+
+        %{base_url}%{url}
+
+        ... was hidden due to community flagging.
+
+        Keep in mind that multiple community members flagged this post before it was hidden, so **please consider how you might revise your post to reflect their feedback.** You can edit your post after %{edit_delay} minutes, and it will be automatically unhidden. This will increase your forum trust level.
+
+        However, if the post is hidden by the community a second time, the moderators will be notified -- and there may be further action, including the possible suspension of your account.
+
+        For additional guidance, please refer to our [FAQ](%{base_url}/faq).
+
+    usage_tips:
+      text_body_template: |
+        This private message has a few quick tips to get you started:
+
+        ### Keep scrolling
+
+        There are no next page buttons or page numbers – to read more, just keep scrolling down, and more content will load!
+
+        As new replies come in, they will appear automatically at the bottom of the topic. No need to refresh the page or re-enter the topic to see new posts.
+
+        ### How do I reply?
+
+        - To reply to a specific post, use the Reply button at the bottom of that post.
+
+        - If you want to reply to the overall *theme* of the topic, rather than any specific post in the topic, use the Reply button at the very bottom of the topic.
+
+        - If you want to take the conversation in a different direction, but keep them linked together, use Reply as New Topic to the right of the post.
+
+        ### Who is talking to me?
+
+        When someone replies to your post, quotes you, or mentions your @username, a notification ➀ will appear at the top of the page. Click or tap that notification number to see who's talking to you, and where. Join the conversation!
+
+        - To mention someone's name, start typing `@` and an autocompleter will pop up.
+
+        - To quote just a section of a post, select it, then click the Reply button that appears over the highlight.
+
+        - To quote an entire post, use the Import Quote button on the composer toolbar.
+
+        ### Look at that post!
+
+        To let someone know that you enjoyed their post, click the like ♥ button at the bottom of the post. If you see a problem with a post, don't hesitate to click the flag button and let the moderators – and your fellow community members – know about it.
+
+        ### Where am I?
+
+        - To get back to the home page at any time, **click the logo at the upper left** or use the back ← button on your browser.
+
+        - For search, your user page, or the sitemap, click on the icons at the upper right.
+
+        - While reading a topic, move to the top ↑ by clicking its title at the top of the page. To reach the *bottom* ↓, click the down arrow on the topic progress indicator at the bottom of the page, or click the last post field on the topic summary under the first post.
+
+    welcome_user:
+      subject_template: "Welcome to %{site_name}!"
+      text_body_template: |
+        Thanks for joining %{site_name}, and welcome to our discussion forum!
+
+        %{new_user_tips}
+
+        We believe in [civilized community behavior](%{base_url}/faq) at all times.
+
+        Enjoy your stay!
+
+    welcome_invite:
+      subject_template: "Welcome to %{site_name}!"
+      text_body_template: |
+        Thanks for accepting your invitation to %{site_name}, and welcome to our discussion forum!
+
+        We've automatically generated a username for you: **%{username}**, but you can change that any time by visiting [your user profile][prefs].
+
+        To log in again, either:
+
+        1. Use Facebook, Google, Twitter, or many other supported credentials -- but that credential must resolve to the **same email address** that you received your original invitation email at. Otherwise we won't be able to tell it is you!
+
+        2. Create a unique password for %{site_name} on [your user profile][prefs], then log in with that.
+
+        %{site_password}
+
+        %{new_user_tips}
+
+        We believe in [civilized community behavior](%{base_url}/faq) at all times.
+
+        Enjoy your stay!
+
+        [prefs]: %{user_preferences_url}
+
+    export_succeeded:
+      subject_template: "Export completed successfully"
+      text_body_template: "The export was successful."
+
+    import_succeeded:
+      subject_template: "Import completed successfully"
+      text_body_template: "The import was successful."
+
+    too_many_spam_flags:
+      subject_template: "New account blocked"
+      text_body_template: |
+        Hello,
+
+        This is an automated message from %{site_name} to inform you that your posts have been automatically hidden because they were flagged by the community.
+
+        As a precautionary measure, your new account has been blocked from creating new replies or topics until a staff member can review your account.
+
+        For additional guidance, please refer to our [FAQ](%{base_url}/faq).
+
+    blocked_by_staff:
+      subject_template: "Account blocked"
+      text_body_template: |
+        Hello,
+
+        This is an automated message from %{site_name} to inform you that your account has been blocked by a staff member.
+
+        For additional guidance, please refer to our [FAQ](%{base_url}/faq).
+
+    user_automatically_blocked:
+      subject_template: "New user %{username} was automatically blocked"
+      text_body_template: |
+        This is an automated message to inform you that the new user [%{username}](%{user_url}) was automatically blocked because multiple users flagged %{username}'s post(s).
+
+        Please [review the flags](/admin/flags). If %{username} was incorrectly blocked from posting, click the unblock button on [the admin page for this user](%{user_url}).
+
+    spam_post_blocked:
+      subject_template: "Spam was detected in a post by %{username}"
+      text_body_template: |
+        This is an automated message to inform you that [%{username}](%{user_url}) tried to make a post with links, but it was stopped as spam based on the newuser_spam_host_threshold site setting.
+
+        Please [review the user](%{user_url}).
+
+    unblocked:
+      subject_template: "Account unblocked"
+      text_body_template: |
+        Hello,
+
+        This is an automated message from %{site_name} to inform you that your account has been unblocked after staff review.
+
+        You can now create new replies and topics again.
+
+  unsubscribe_link: "To unsubscribe from these emails, visit your [user preferences](%{user_preferences_url})."
+
+  user_notifications:
+    previous_discussion: "Previous discussion"
+    unsubscribe:
+      title: "Unsubscribe"
+      description: "Not interested in getting these emails? No problem! Click below to unsubscribe instantly:"
+
+    reply_by_email: "To respond, reply to this email or visit %{base_url}%{url} in your browser."
+    visit_link_to_respond: "To respond, visit %{base_url}%{url} in your browser."
+
+    posted_by: "Posted by %{username} on %{post_date}"
+
+    user_invited_to_private_message:
+      subject_template: "[%{site_name}] %{username} invited you to a private message '%{topic_title}'"
+      text_body_template: |
+        %{username} invited you to a private message '%{topic_title}' on %{site_name}:
+
+        Please visit this link to view the topic: %{base_url}%{url}
+
+    user_replied:
+      subject_template: "[%{site_name}] new reply to your post in '%{topic_title}'"
+      text_body_template: |
+        %{message}
+
+        %{context}
+
+        ---
+        %{respond_instructions}
+
+    user_quoted:
+      subject_template: "[%{site_name}] %{username} quoted you in '%{topic_title}'"
+      text_body_template: |
+        %{message}
+
+        %{context}
+
+        ---
+        %{respond_instructions}
+
+    user_mentioned:
+      subject_template: "[%{site_name}] %{username} mentioned you in '%{topic_title}'"
+      text_body_template: |
+        %{message}
+
+        %{context}
+
+        ---
+        %{respond_instructions}
+
+    user_posted:
+      subject_template: "[%{site_name}] new post in '%{topic_title}'"
+      text_body_template: |
+        %{message}
+
+        %{context}
+
+        ---
+        %{respond_instructions}
+
+    digest:
+      why: "Here's a brief summary of the discussion on %{site_link} since we last saw you on %{last_seen_at}."
+      subject_template: "[%{site_name}] Forum Activity for %{date}"
+      new_activity: "New activity on your topics and posts:"
+      top_topics: "Recent posts the community enjoyed:"
+      unsubscribe: "This summary email is sent as a courtesy notification from %{site_link} when we haven't seen you in a while.\nTo turn it off or change your email preferences, %{unsubscribe_link}."
+      click_here: "click here"
+      from: "%{site_name} digest"
+      read_more: "Read More"
+
+    private_message:
+      subject_template: "[%{site_name}] %{subject_prefix}%{topic_title}"
+      text_body_template: |
+        %{private_message_from} just sent you a private message
+
+        %{message}
+
+        ---
+        %{respond_instructions}
+
+    forgot_password:
+      subject_template: "[%{site_name}] Password reset"
+      text_body_template: |
+        Somebody asked to reset your password on [%{site_name}](%{base_url}).
+
+        If it was not you, you can safely ignore this email.
+
+        Click the following link to choose a new password:
+        %{base_url}/users/password-reset/%{email_token}
+
+    authorize_email:
+      subject_template: "[%{site_name}] Confirm your new email address"
+      text_body_template: |
+        Confirm your new email address for %{site_name} by clicking on the following link:
+
+        %{base_url}/users/authorize-email/%{email_token}
+
+    signup_after_approval:
+      subject_template: "You've been approved on %{site_name}!"
+      text_body_template: |
+        Welcome to %{site_name}!
+
+        You're approved to join %{site_name}, welcome to our discussion forum!
+
+        Click the following link to confirm and activate your new account:
+        %{base_url}/users/activate-account/%{email_token}
+
+        If the above link is not clickable, try copying and pasting it into the address bar of your web browser.
+
+        %{new_user_tips}
+
+        We believe in [civilized community behavior](%{base_url}/faq) at all times.
+
+        Enjoy your stay!
+
+    signup:
+      subject_template: "[%{site_name}] Activate your new account"
+      text_body_template: |
+        Welcome to %{site_name}!
+
+        Click the following link to confirm and activate your new account:
+        %{base_url}/users/activate-account/%{email_token}
+
+        If the above link is not clickable, try copying and pasting it into the address bar of your web browser.
+
+  discourse_hub:
+    access_token_problem: "Tell an admin: Please update the site settings to include the correct discourse_org_access_key."
+
+  page_not_found:
+    title: "The page you requested doesn't exist or may have been deleted by a moderator."
+    popular_topics: "Popular topics"
+    recent_topics: "Recent topics"
+    see_more: "See More"
+    search_title: "Search for this topic"
+    search_google: "Search Google"
+
+  login_required:
+    welcome_message: |
+      #[Welcome to %{title}](#welcome)
+      This discussion forum requires an account to view %{title}. Please create an account or login to continue.
+
+  terms_of_service:
+    user_content_license: |
+      User contributions are licensed under a [Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-nc-sa/3.0/deed.en_US). Without limiting any of those representations or warranties, %{company_short_name} has the right (though not the obligation) to, in %{company_short_name}’s sole discretion (i) refuse or remove any content that, in %{company_short_name}’s reasonable opinion, violates any %{company_short_name} policy or is in any way harmful or objectionable, or (ii) terminate or deny access to and use of the Website to any individual or entity for any reason, in %{company_short_name}’s sole discretion. %{company_short_name} will have no obligation to provide a refund of any amounts previously paid.
+    miscellaneous: "This Agreement constitutes the entire agreement between %{company_short_name} and you concerning the subject matter hereof, and they may only be modified by a written amendment signed by an authorized executive of %{company_short_name}, or by the posting by %{company_short_name} of a revised version. Except to the extent applicable law, if any, provides otherwise, this Agreement, any access to or use of the Website will be governed by the laws of the state of California, U.S.A., excluding its conflict of law provisions, and the proper venue for any disputes arising out of or relating to any of the same will be the state and federal courts located in San Francisco County, California. Except for claims for injunctive or equitable relief or claims regarding intellectual property rights (which may be brought in any competent court without the posting of a bond), any dispute arising under this Agreement shall be finally settled in accordance with the Comprehensive Arbitration Rules of the Judicial Arbitration and Mediation Service, Inc. (“JAMS”) by three arbitrators appointed in accordance with such Rules. The arbitration shall take place in San Francisco, California, in the English language and the arbitral decision may be enforced in any court. The prevailing party in any action or proceeding to enforce this Agreement shall be entitled to costs and attorneys’ fees. If any part of this Agreement is held invalid or unenforceable, that part will be construed to reflect the parties’ original intent, and the remaining portions will remain in full force and effect. A waiver by either party of any term or condition of this Agreement or any breach thereof, in any one instance, will not waive such term or condition or any subsequent breach thereof. You may assign your rights under this Agreement to any party that consents to, and agrees to be bound by, its terms and conditions; %{company_short_name} may assign its rights under this Agreement without condition. This Agreement will be binding upon and will inure to the benefit of the parties, their successors and permitted assigns."
+
+  deleted: 'deleted'
+
+  upload:
+    unauthorized: "Sorry, the file you are trying to upload is not authorized (authorized extensions: %{authorized_extensions})."
+    pasted_image_filename: "Pasted image"
+    attachments:
+      too_large: "Sorry, the file you are trying to upload is too big (maximum size is %{max_size_kb}%kb)."
+    images:
+      too_large: "Sorry, the image you are trying to upload is too big (maximum size is %{max_size_kb}%kb), please resize it and try again."
+      fetch_failure: "Sorry, there has been an error while fetching the image."
+      unknown_image_type: "Sorry, but the file you tried to upload doesn't appear to be an image."
+      size_not_found: "Sorry, but we couldn't determine the size of the image. Maybe your image is corrupted?"
+
+
+===== FILE db/migrate/20130724201552_create_blocked_emails.rb (after PR) =====
+class CreateBlockedEmails < ActiveRecord::Migration
+  def change
+    create_table :blocked_emails do |t|
+      t.string :email, null: false
+      t.integer :action_type, null: false
+      t.integer :match_count, null: false, default: 0
+      t.datetime :last_match_at
+      t.timestamps
+    end
+    add_index :blocked_emails, :email, unique: true
+  end
+end
+
+
+===== FILE lib/validators/email_validator.rb (after PR) =====
+class EmailValidator < ActiveModel::EachValidator
+
+  def validate_each(record, attribute, value)
+    if (setting = SiteSetting.email_domains_whitelist).present?
+      unless email_in_restriction_setting?(setting, value)
+        record.errors.add(attribute, I18n.t(:'user.email.not_allowed'))
+      end
+    elsif (setting = SiteSetting.email_domains_blacklist).present?
+      if email_in_restriction_setting?(setting, value)
+        record.errors.add(attribute, I18n.t(:'user.email.not_allowed'))
+      end
+    end
+    if record.errors[attribute].blank? and BlockedEmail.should_block?(value)
+      record.errors.add(attribute, I18n.t(:'user.email.blocked'))
+    end
+  end
+
+  def email_in_restriction_setting?(setting, value)
+    domains = setting.gsub('.', '\.')
+    regexp = Regexp.new("@(#{domains})", true)
+    value =~ regexp
+  end
+
+end
+
+===== FILE spec/components/validators/email_validator_spec.rb (after PR) =====
+require 'spec_helper'
+
+describe EmailValidator do
+
+  let(:record) { Fabricate.build(:user, email: "bad@spamclub.com") }
+  let(:validator) { described_class.new({attributes: :email}) }
+  subject(:validate) { validator.validate_each(record,:email,record.email) }
+
+  context "blocked email" do
+    it "doesn't add an error when email doesn't match a blocked email" do
+      BlockedEmail.stubs(:should_block?).with(record.email).returns(false)
+      validate
+      record.errors[:email].should_not be_present
+    end
+
+    it "adds an error when email matches a blocked email" do
+      BlockedEmail.stubs(:should_block?).with(record.email).returns(true)
+      validate
+      record.errors[:email].should be_present
+    end
+  end
+
+end
+
+
+===== FILE spec/fabricators/blocked_email_fabricator.rb (after PR) =====
+Fabricator(:blocked_email) do
+  email { sequence(:email) { |n| "bad#{n}@spammers.org" } }
+  action_type BlockedEmail.actions[:block]
+end
+
+
+===== FILE spec/models/blocked_email_spec.rb (after PR) =====
+require 'spec_helper'
+
+describe BlockedEmail do
+
+  let(:email) { 'block@spamfromhome.org' }
+
+  describe "new record" do
+    it "sets a default action_type" do
+      BlockedEmail.create(email: email).action_type.should == BlockedEmail.actions[:block]
+    end
+
+    it "last_match_at is null" do
+      # If we manually load the table with some emails, we can see whether those emails
+      # have ever been blocked by looking at last_match_at.
+      BlockedEmail.create(email: email).last_match_at.should be_nil
+    end
+  end
+
+  describe "#should_block?" do
+    subject { BlockedEmail.should_block?(email) }
+
+    it "returns false if a record with the email doesn't exist" do
+      subject.should be_false
+    end
+
+    shared_examples "when a BlockedEmail record matches" do
+      it "updates statistics" do
+        Timecop.freeze(Time.zone.now) do
+          expect { subject }.to change { blocked_email.reload.match_count }.by(1)
+          blocked_email.last_match_at.should be_within_one_second_of(Time.zone.now)
+        end
+      end
+    end
+
+    context "action_type is :block" do
+      let!(:blocked_email) { Fabricate(:blocked_email, email: email, action_type: BlockedEmail.actions[:block]) }
+      it { should be_true }
+      include_examples "when a BlockedEmail record matches"
+    end
+
+    context "action_type is :do_nothing" do
+      let!(:blocked_email) { Fabricate(:blocked_email, email: email, action_type: BlockedEmail.actions[:do_nothing]) }
+      it { should be_false }
+      include_examples "when a BlockedEmail record matches"
+    end
+  end
+
+end

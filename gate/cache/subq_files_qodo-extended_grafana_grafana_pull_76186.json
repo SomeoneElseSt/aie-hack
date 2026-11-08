@@ -1,0 +1,1 @@
+{"TestLogger.FromContext returns a brand-new disconnected TestLogger via NewTestLogger() instead of the receiver, causing any test injecting a TestLogger to silently lose all log output to an ephemeral instance, making log assertions always see zero recorded logs": 0.9641980528831482}

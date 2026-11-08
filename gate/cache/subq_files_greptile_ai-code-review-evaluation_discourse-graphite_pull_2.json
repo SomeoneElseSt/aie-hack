@@ -1,0 +1,1 @@
+{"nil check missing - `find_by` can return nil if no TopicUser record exists, causing `save!` to crash": 0.9639406800270081, "typo: 'Notificiations' should be 'Notifications'": 0.6952794790267944, "XSS vulnerability - triple braces `{{{...}}}` render unescaped HTML, allowing malicious topic titles to inject scripts": 0.7668724656105042}

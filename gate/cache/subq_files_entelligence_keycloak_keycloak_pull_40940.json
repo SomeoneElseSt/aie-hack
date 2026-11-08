@@ -1,0 +1,1 @@
+{"Returning null for getSubGroupsCount violates the expected behavior of a count method and causes NullPointerException in callers that unbox the result": 0.7736800909042358, "If the model is missing, should throw IllegalStateException to maintain consistency with the established error handling in this class (e.g., in isUpdated)": 0.5759108662605286}

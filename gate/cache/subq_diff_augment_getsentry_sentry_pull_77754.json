@@ -1,0 +1,1 @@
+{"queued field is initialized with timezone.now() at import time, so every AssignmentSource created without an explicit value will share the same timestamp, defeating the intent of recording when the source was queued": 0.6897027492523193}

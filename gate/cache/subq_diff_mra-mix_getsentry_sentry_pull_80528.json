@@ -1,0 +1,1 @@
+{"Typo in docstring: 'humam' should be 'human' in 'Builds a humam readible string'": 0.0442558154463768, "Docstring doesn't accurately document that the function now accepts MonitorCheckIn model instances instead of dictionaries (SimpleCheckIn with id/date_added/status keys)": 0.020399803295731544}

@@ -1,0 +1,1 @@
+{"RECREATE_UPGRADE_EXIT_CODE was changed from 4 to 3 and FEATURE_DISABLED now uses exit code 4, which breaks backward compatibility for existing automation that checks for exit code 4 to determine 'recreate upgrade needed' - they will now incorrectly interpret a 'feature disabled' response as a recreate signal, leading to wrong deployment decisions": 0.5997246503829956}

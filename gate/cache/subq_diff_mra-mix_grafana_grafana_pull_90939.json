@@ -1,0 +1,1 @@
+{"Double-check locking pattern (RLock, check, unlock, then Lock) is untested for race conditions where multiple goroutines hit the function simultaneously during initial load": 0.22062337398529053}

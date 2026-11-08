@@ -1,0 +1,1 @@
+{"The rejection check for blocked emails is case-sensitive, allowing users to bypass the block by changing email casing (e.g., 'User@a.com' vs 'user@a.com'). The comparison should be case-insensitive by normalizing emails before comparing or storing them normalized.": 0.9307601451873779}

@@ -1,0 +1,1 @@
+{"Incorrect null check - line 73 validates grantType instead of rawTokenId, causing grantType to be checked twice while rawTokenId validation is missing, allowing null values to be stored in rawTokenId field": 0.9725171327590942}

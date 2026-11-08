@@ -1,0 +1,1 @@
+{"Incomplete domain matching logic drops the URL path when a user's website is a subdomain of the Discourse instance's domain. The logic correctly handles when the instance is a subdomain of the website, but not the reverse, leading to inconsistent and less useful link text on user profiles.": 0.7986529469490051}

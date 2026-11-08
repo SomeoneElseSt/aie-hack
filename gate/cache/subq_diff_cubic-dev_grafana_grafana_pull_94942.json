@@ -1,0 +1,1 @@
+{"`enableSqlExpressions` always returns `false` regardless of the feature flag value. The `!` negation on `IsEnabledGlobally` is inverted from the expected logic, and both the `if` branch and the fallthrough return `false`, making the feature toggle check dead code.": 0.9931970834732056}

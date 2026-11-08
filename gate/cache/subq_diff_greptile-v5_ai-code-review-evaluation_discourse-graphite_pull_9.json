@@ -1,0 +1,1 @@
+{"When a mailer, job, or other non-controller path translates a key that is missing from the active locale, the new fallback backend can look in SiteSetting.default_locale or :en without those locale files being loaded, causing missing translations instead of the intended fallback": 0.9344193935394287}

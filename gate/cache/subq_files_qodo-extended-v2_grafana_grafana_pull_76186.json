@@ -1,0 +1,1 @@
+{"TestLogger.FromContext returns a brand-new disconnected TestLogger instance via NewTestLogger() instead of returning the receiver, causing log output from LoggerMiddleware.logRequest to go to a throwaway logger that no test code holds a reference to, silently breaking log assertions on the original TestLogger": 0.9823037981987}

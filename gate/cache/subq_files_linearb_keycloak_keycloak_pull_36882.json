@@ -1,0 +1,1 @@
+{"Exit code for RECREATE_UPGRADE_EXIT_CODE is changing from 4 to 3, which is a breaking change for external scripts or automation that check for exit code 4 to determine if a recreate upgrade is needed": 0.699377715587616}

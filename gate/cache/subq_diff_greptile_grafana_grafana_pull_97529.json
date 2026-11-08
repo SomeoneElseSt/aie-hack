@@ -1,0 +1,1 @@
+{"Existing race condition in getOrCreateIndex (noted in TODO comments) - not introduced by this PR but still present": 0.032445911318063736, "Eager initialization means startup failures will be more visible, need to verify in production that startup time is acceptable": 0.0903673768043518}

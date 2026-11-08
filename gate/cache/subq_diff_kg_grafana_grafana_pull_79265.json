@@ -1,0 +1,1 @@
+{"Potential race condition between counting devices and performing update/insert operations. Multiple concurrent requests could allow exceeding the configured device limit. Consider performing the count check and device operation within a single database transaction to ensure atomicity.": 0.9010927677154541}

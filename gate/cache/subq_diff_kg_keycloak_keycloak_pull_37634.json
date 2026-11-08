@@ -1,0 +1,1 @@
+{"Incorrect null check allows null rawTokenId in AccessTokenContext.java at line 73": 0.9280130863189697, "Inverted logic in matcher causing incorrect test failures in AssertEvents.java at line 483": 0.9697004556655884, "Typo in variable name 'requestedAucienceClients' in TokenManager.java at line 861": 0.1288575381040573}

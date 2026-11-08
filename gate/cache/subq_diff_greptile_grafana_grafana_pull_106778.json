@@ -1,0 +1,1 @@
+{"When only promRule is provided (list view), rule is undefined, but SilenceGrafanaRuleDrawer requires RulerGrafanaRuleDTO. The silence action will be enabled by abilities check but will fail at runtime when triggered. Should SilenceGrafanaRuleDrawer be updated to accept promRule.uid directly, or should the silence action be disabled when rule is undefined?": 0.8200790286064148}

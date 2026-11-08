@@ -1,0 +1,1 @@
+{"No-ember header loses right panel - The server-rendered header places .panel inside a .row that is not a flex container, but the PR removes the old float: right layout and replaces it with flex-only margin-left: auto/order, causing the login panel to no longer align right on no_ember and noscript render paths": 0.3948891758918762}

@@ -1,0 +1,1 @@
+{"When APP_CREDENTIAL_SHARING_ENABLED is true, the minimumTokenResponseSchema uses [z.string().toString()] which creates invalid computed property names (like 'function String() { [native code] }'), causing every real token response to fail safeParse and throwing 'Invalid refreshed tokens were returned'": 0.7219622731208801}

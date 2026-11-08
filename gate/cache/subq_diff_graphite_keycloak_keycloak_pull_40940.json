@@ -1,0 +1,1 @@
+{"Race condition: Test doesn't wait for reader thread to complete before asserting. After deletedAll.set(true), the test immediately checks caughtExceptions, but the reader thread may still be executing and could add exceptions after the assertion, making the test unreliable and potentially flaky.": 0.9481557607650757}

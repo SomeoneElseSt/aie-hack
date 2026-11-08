@@ -1,0 +1,1 @@
+{"`promResponse.data.groups.at(0)?.rules.map(...)` can throw if `groups.at(0)` is undefined - should guard with `?.rules?.map` or render an empty state": 0.3085734248161316, "`Pause/Delete` menu items are still gated on `rulerRule` instead of using `canPause`/`canDelete` which properly OR the ruler and grafana abilities": 0.14320941269397736}

@@ -1,0 +1,1 @@
+{"The optional returned by the recovery credential lookup is dereferenced with `get()` without checking if a value is present, so if the user has no recovery credential (or it cannot be found) this will throw a `NoSuchElementException` and break the login flow instead of failing in a controlled way": 0.9376007318496704}

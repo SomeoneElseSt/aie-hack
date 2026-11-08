@@ -1,0 +1,1 @@
+{"The assertion `stats[\"total_items\"] > 0` is inherently racy because worker threads can drain the queues between the submissions and the `get_stats()` call, making `total_items` legitimately zero and causing an intermittent test failure": 0.8586589097976685}

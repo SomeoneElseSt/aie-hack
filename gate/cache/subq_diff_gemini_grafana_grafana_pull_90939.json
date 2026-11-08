@@ -1,0 +1,1 @@
+{"Double-checked locking implementation is flawed - when multiple goroutines call the function with an empty cache, they all pass the initial read-lock check, and after one populates the cache and releases the lock, subsequent goroutines will acquire the write lock and perform the same expensive work again": 0.9025838375091553}

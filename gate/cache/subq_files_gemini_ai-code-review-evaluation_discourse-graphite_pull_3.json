@@ -1,0 +1,1 @@
+{"Race condition when updating match_count - concurrent requests could read the same value, increment in memory, and overwrite each other's changes, leading to incorrect counts. Should use atomic update operation instead.": 0.8159405589103699, "Missing newline at end of file - Ruby convention and style guide recommends source files end with a newline": 0.07274888455867767}

@@ -1,0 +1,1 @@
+{"Delete condition removes any WorkflowReminder with retryCount > 1 regardless of method type, but retryCount is only incremented for SMS reminders - should add method: WorkflowMethods.SMS to the second OR condition to avoid unintended deletions": 0.5708250999450684}

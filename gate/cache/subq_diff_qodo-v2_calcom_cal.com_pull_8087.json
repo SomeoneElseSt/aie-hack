@@ -1,0 +1,1 @@
+{"The TRPC reschedule flow uses forEach with async callback to trigger external calendar/video deletions but doesn't await the deletion promises, making deletions fire-and-forget where failures won't be caught and the route continues to send emails/webhooks without guaranteeing external deletions completed": 0.7824524641036987}

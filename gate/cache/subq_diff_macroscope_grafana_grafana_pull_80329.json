@@ -1,0 +1,1 @@
+{"r.log.Error is used for normal operational logging at lines 534, 537, 554, and 557, causing non-error messages like 'Annotations to clean by time' to appear in error logs during every cleanup cycle. Should use r.log.Debug or r.log.Info instead to avoid polluting error logs.": 0.8982331156730652}

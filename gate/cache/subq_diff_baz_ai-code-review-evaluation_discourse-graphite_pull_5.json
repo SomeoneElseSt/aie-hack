@@ -1,0 +1,1 @@
+{".panel uses margin-left:auto and @include order as if it were a flex item, but .panel lives inside .contents > .row which never becomes display:flex, so .panel is never a flex child": 0.29264721274375916, "The clearfix forces the login panel below .title for logged-out users instead of being right-aligned": 0.07423782348632812}

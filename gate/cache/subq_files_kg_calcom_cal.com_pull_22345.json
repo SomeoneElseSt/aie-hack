@@ -1,0 +1,1 @@
+{"Breaking API change - The findMany method has been removed from InsightsBookingService, replaced by getBaseConditions which returns a Prisma.Sql object. Existing code using findMany will break.": 0.889731764793396}

@@ -1,0 +1,1 @@
+{"enableSqlExpressions function has dead code - the feature flag check `enabled := !h.features.IsEnabledGlobally(featuremgmt.FlagSqlExpressions)` and the `if enabled` check are never used since both branches return false unconditionally": 0.8124849200248718}

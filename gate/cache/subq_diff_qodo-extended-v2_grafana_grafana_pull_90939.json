@@ -1,0 +1,1 @@
+{"Double-checked locking pattern is incomplete - after acquiring the write lock at line 48, the code does not re-check whether entryPointAssetsCache was already populated by another goroutine, causing redundant file I/O and cache overwrites when multiple goroutines queue on the write lock during cold start": 0.8524705767631531}

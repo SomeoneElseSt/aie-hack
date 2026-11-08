@@ -1,0 +1,1433 @@
+===== FILE src/sentry/integrations/mixins/issues.py (after PR) =====
+from __future__ import annotations
+
+import enum
+import logging
+from abc import ABC, abstractmethod
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from copy import deepcopy
+from operator import attrgetter
+from typing import Any, ClassVar
+
+from sentry.eventstore.models import GroupEvent
+from sentry.integrations.base import IntegrationInstallation
+from sentry.integrations.models.external_issue import ExternalIssue
+from sentry.integrations.services.assignment_source import AssignmentSource
+from sentry.integrations.services.integration import integration_service
+from sentry.integrations.tasks.sync_status_inbound import (
+    sync_status_inbound as sync_status_inbound_task,
+)
+from sentry.integrations.utils import where_should_sync
+from sentry.issues.grouptype import GroupCategory
+from sentry.models.group import Group
+from sentry.models.grouplink import GroupLink
+from sentry.models.project import Project
+from sentry.notifications.utils import get_notification_group_title
+from sentry.silo.base import all_silo_function
+from sentry.users.models.user import User
+from sentry.users.services.user import RpcUser
+from sentry.users.services.user_option import get_option_from_list, user_option_service
+from sentry.utils.http import absolute_uri
+from sentry.utils.safe import safe_execute
+
+logger = logging.getLogger("sentry.integrations.issues")
+MAX_CHAR = 50
+
+
+class ResolveSyncAction(enum.Enum):
+    """
+    When an issue's state changes, we may have to sync the state based on the
+    "done" states we get from the API. This enum encapsulates the three options
+    we have: "resolve", "unresolve", or "do nothing".
+    """
+
+    NOOP = 0
+    RESOLVE = 1
+    UNRESOLVE = 2
+
+    @classmethod
+    def from_resolve_unresolve(
+        cls, should_resolve: bool, should_unresolve: bool
+    ) -> ResolveSyncAction:
+        if should_resolve and should_unresolve:
+            logger.warning("sync-config-conflict")
+            return ResolveSyncAction.NOOP
+
+        if should_resolve:
+            return ResolveSyncAction.RESOLVE
+
+        if should_unresolve:
+            return ResolveSyncAction.UNRESOLVE
+
+        return ResolveSyncAction.NOOP
+
+
+class IssueBasicIntegration(IntegrationInstallation, ABC):
+    def should_sync(self, attribute, sync_source: AssignmentSource | None = None):
+        return False
+
+    def get_group_title(self, group, event, **kwargs):
+        return get_notification_group_title(group, event, **kwargs)
+
+    @abstractmethod
+    def get_issue_url(self, key: str) -> str:
+        """
+        Given the key of the external_issue return the external issue link.
+        """
+        raise NotImplementedError
+
+    def get_group_body(self, group, event, **kwargs):
+        result = []
+        for interface in event.interfaces.values():
+            output = safe_execute(interface.to_string, event)
+            if output:
+                result.append(output)
+        return "\n\n".join(result)
+
+    def get_feedback_issue_body(self, event: GroupEvent) -> str:
+        messages = []
+        others = []
+        if event.occurrence:
+            for evidence in event.occurrence.evidence_display:
+                if evidence.name == "message":
+                    messages.append(evidence)
+                else:
+                    others.append(evidence)
+
+        body = ""
+        for message in messages:
+            body += message.value
+            body += "\n\n"
+
+        body += "|  |  |\n"
+        body += "| ------------- | --------------- |\n"
+        for evidence in sorted(others, key=attrgetter("important"), reverse=True):
+            body += f"| **{evidence.name}** | {evidence.value} |\n"
+
+        return body.rstrip("\n")  # remove the last new line
+
+    def get_group_link(self, group, **kwargs):
+        params = {}
+        if kwargs.get("link_referrer"):
+            params["referrer"] = kwargs.get("link_referrer")
+
+        if group.issue_category == GroupCategory.FEEDBACK:
+            return [
+                "Sentry Feedback: [{}]({})\n".format(
+                    group.qualified_short_id, absolute_uri(group.get_absolute_url(params=params))
+                )
+            ]
+
+        return [
+            "Sentry Issue: [{}]({})".format(
+                group.qualified_short_id, absolute_uri(group.get_absolute_url(params=params))
+            )
+        ]
+
+    def get_group_description(self, group, event, **kwargs):
+        output = self.get_group_link(group, **kwargs)
+        if (
+            event
+            and isinstance(event, GroupEvent)
+            and event.occurrence is not None
+            and group.issue_category == GroupCategory.FEEDBACK
+        ):
+            body = ""
+            body = self.get_feedback_issue_body(event)
+            output.extend([body])
+        else:
+            body = self.get_group_body(group, event)
+            if body:
+                output.extend(["", "```", body, "```"])
+        return "\n".join(output)
+
+    @all_silo_function
+    def get_create_issue_config(
+        self, group: Group | None, user: User, **kwargs
+    ) -> list[dict[str, Any]]:
+        """
+        These fields are used to render a form for the user,
+        and are then passed in the format of:
+
+        >>>{'title': 'TypeError: Object [object Object] has no method "updateFrom"'}
+
+        to `create_issue`, which handles creation of the issue
+        in Jira, VSTS, GitHub, etc
+        """
+        if not group:
+            return []
+
+        event = group.get_latest_event()
+
+        return [
+            {
+                "name": "title",
+                "label": "Title",
+                "default": self.get_group_title(group, event, **kwargs),
+                "type": "string",
+                "required": True,
+            },
+            {
+                "name": "description",
+                "label": "Description",
+                "default": self.get_group_description(group, event, **kwargs),
+                "type": "textarea",
+                "autosize": True,
+                "maxRows": 10,
+            },
+        ]
+
+    def get_link_issue_config(self, group, **kwargs):
+        """
+        Used by the `GroupIntegrationDetailsEndpoint` to create an
+        `ExternalIssue` using title/description obtained from calling
+        `get_issue` described below.
+        """
+        return [{"name": "externalIssue", "label": "Issue", "default": "", "type": "string"}]
+
+    @abstractmethod
+    def get_persisted_default_config_fields(self) -> Sequence[str]:
+        """
+        Returns a list of field names that should have their last used values
+        persisted on a per-project basis.
+        """
+        return []
+
+    def get_persisted_user_default_config_fields(self):
+        """
+        Returns a list of field names that should have their last used values
+        persisted on a per-project, per-user basis.
+        """
+        return []
+
+    def store_issue_last_defaults(self, project: Project, user: RpcUser, data):
+        """
+        Stores the last used field defaults on a per-project basis. This
+        accepts a dict of values that will be filtered to keys returned by
+        ``get_persisted_default_config_fields`` which will automatically be
+        merged into the associated field config object as the default.
+
+        >>> integ.store_issue_last_defaults(project, user, {'externalProject': 2})
+
+        When the integration is serialized these values will automatically be
+        merged into the field configuration objects.
+
+        NOTE: These are currently stored for both link and create issue, no
+              differentiation is made between the two field configs.
+        """
+        persisted_fields = self.get_persisted_default_config_fields()
+        if persisted_fields and self.org_integration:
+            project_defaults = {k: v for k, v in data.items() if k in persisted_fields}
+            new_config = deepcopy(self.org_integration.config)
+            new_config.setdefault("project_issue_defaults", {}).setdefault(
+                str(project.id), {}
+            ).update(project_defaults)
+            self.org_integration = integration_service.update_organization_integration(
+                org_integration_id=self.org_integration.id,
+                config=new_config,
+            )
+
+        user_persisted_fields = self.get_persisted_user_default_config_fields()
+        if user_persisted_fields:
+            user_defaults = {k: v for k, v in data.items() if k in user_persisted_fields}
+            user_option_key = dict(key="issue:defaults", project_id=project.id)
+            options = user_option_service.get_many(
+                filter={"user_ids": [user.id], **user_option_key}
+            )
+            new_user_defaults = get_option_from_list(options, default={}, key="issue:defaults")
+            new_user_defaults.setdefault(self.model.provider, {}).update(user_defaults)
+            if user_defaults != new_user_defaults:
+                user_option_service.set_option(
+                    user_id=user.id, value=new_user_defaults, **user_option_key
+                )
+
+    def get_defaults(self, project: Project, user: User):
+        project_defaults = (
+            {}
+            if not self.org_integration
+            else self.org_integration.config.get("project_issue_defaults", {}).get(
+                str(project.id), {}
+            )
+        )
+
+        user_option_value = get_option_from_list(
+            user_option_service.get_many(
+                filter={"user_ids": [user.id], "keys": ["issue:defaults"], "project_id": project.id}
+            ),
+            key="issue:defaults",
+            default={},
+        )
+
+        user_defaults = user_option_value.get(self.model.provider, {})
+
+        defaults = {}
+        defaults.update(project_defaults)
+        defaults.update(user_defaults)
+
+        return defaults
+
+    @abstractmethod
+    def create_issue(self, data, **kwargs):
+        """
+        Create an issue via the provider's API and return the issue key,
+        title and description.
+
+        Should also handle API client exceptions and reraise as an
+        IntegrationError (using the `message_from_error` helper).
+
+        >>> def create_issue(self, data, **kwargs):
+        >>>     resp = self.get_client().create_issue(data)
+        >>>     return {
+        >>>         'key': resp['id'],
+        >>>         'title': resp['title'],
+        >>>         'description': resp['description'],
+        >>>     }
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_issue(self, issue_id, **kwargs):
+        """
+        Get an issue via the provider's API and return the issue key,
+        title and description.
+
+        Should also handle API client exceptions and reraise as an
+        IntegrationError (using the `message_from_error` helper).
+
+        >>> def get_issue(self, data, **kwargs):
+        >>>     resp = self.get_client().get_issue(issue_id)
+        >>>     return {
+        >>>         'key': resp['id'],
+        >>>         'title': resp['title'],
+        >>>         'description': resp['description'],
+        >>>     }
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def search_issues(self, query: str | None, **kwargs) -> list[dict[str, Any]] | dict[str, Any]:
+        raise NotImplementedError
+
+    def after_link_issue(self, external_issue, **kwargs):
+        """
+        Takes the external issue that has been linked via `get_issue`.
+
+        Does anything needed after an issue has been linked, i.e. creating
+        a comment for a linked issue.
+        """
+
+    def make_external_key(self, data):
+        """
+        Takes result of `get_issue` or `create_issue` and returns the formatted key
+        """
+        return data["key"]
+
+    def get_issue_display_name(self, external_issue):
+        """
+        Returns the display name of the issue.
+
+        This is not required but helpful for integrations whose external issue key
+        does not match the desired display name.
+        """
+        return ""
+
+    def get_annotations_for_group_list(self, group_list):
+        group_links = GroupLink.objects.filter(
+            group_id__in=[group.id for group in group_list],
+            project_id__in=list({group.project.id for group in group_list}),
+            linked_type=GroupLink.LinkedType.issue,
+            relationship=GroupLink.Relationship.references,
+        )
+
+        external_issues = ExternalIssue.objects.filter(
+            id__in=[group_link.linked_id for group_link in group_links],
+            integration_id=self.model.id,
+        )
+
+        # group annotations by group id
+        annotations_by_group_id = defaultdict(list)
+        for group_link in group_links:
+            issues_for_group = filter(lambda x: x.id == group_link.linked_id, external_issues)
+            annotations = self.map_external_issues_to_annotations(issues_for_group)
+            annotations_by_group_id[group_link.group_id].extend(annotations)
+
+        return annotations_by_group_id
+
+    def map_external_issues_to_annotations(self, external_issues):
+        annotations = []
+        for ei in external_issues:
+            link = self.get_issue_url(ei.key)
+            label = self.get_issue_display_name(ei) or ei.key
+            annotations.append({"url": link, "displayName": label})
+
+        return annotations
+
+    def get_comment_id(self, comment):
+        return comment["id"]
+
+    def create_comment(self, issue_id, user_id, group_note):
+        pass
+
+    def update_comment(self, issue_id, user_id, group_note):
+        pass
+
+
+class IssueSyncIntegration(IssueBasicIntegration, ABC):
+    comment_key: ClassVar[str | None] = None
+    outbound_status_key: ClassVar[str | None] = None
+    inbound_status_key: ClassVar[str | None] = None
+    outbound_assignee_key: ClassVar[str | None] = None
+    inbound_assignee_key: ClassVar[str | None] = None
+
+    def should_sync(self, attribute: str, sync_source: AssignmentSource | None = None) -> bool:
+        key = getattr(self, f"{attribute}_key", None)
+        if key is None or self.org_integration is None:
+            return False
+
+        # Check that the assignment source isn't this same integration in order to
+        # prevent sync-cycles from occurring. This should still allow other
+        # integrations to propagate changes outward.
+        if sync_source and sync_source.integration_id == self.org_integration.integration_id:
+            return False
+
+        value: bool = self.org_integration.config.get(key, False)
+        return value
+
+    @abstractmethod
+    def sync_assignee_outbound(
+        self,
+        external_issue: ExternalIssue,
+        user: RpcUser | None,
+        assign: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Propagate a sentry issue's assignee to a linked issue's assignee.
+        If assign=True, we're assigning the issue. Otherwise, deassign.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def sync_status_outbound(
+        self,
+        external_issue,
+        is_resolved,
+        project_id,
+        assignment_source: AssignmentSource | None = None,
+        **kwargs,
+    ):
+        """
+        Propagate a sentry issue's status to a linked issue's status.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_resolve_sync_action(self, data: Mapping[str, Any]) -> ResolveSyncAction:
+        """
+        Given webhook data, check whether the status category changed FROM
+        "done" to something else, meaning the Sentry issue should be marked as
+        unresolved or if the status category changed TO "done" from something
+        else, meaning the sentry issue should be marked as resolved.
+
+        Because checking the "done" states can rely on an API call, this function
+        should calculate both "resolve" and "unresolve" to save a round trip.
+        """
+        raise NotImplementedError
+
+    def sync_status_inbound(self, issue_key: str, data: Mapping[str, Any]) -> None:
+        if not where_should_sync(self.model, "inbound_status", self.organization_id):
+            return None
+
+        sync_status_inbound_task.apply_async(
+            kwargs={
+                "integration_id": self.model.id,
+                "organization_id": self.organization_id,
+                "issue_key": issue_key,
+                "data": data,
+            }
+        )
+
+    def migrate_issues(self):
+        """
+        Migrate the corresponding plugin's issues to the integration and disable the plugins.
+        """
+        pass
+
+
+===== FILE src/sentry/integrations/services/assignment_source.py (after PR) =====
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+from django.utils import timezone
+
+if TYPE_CHECKING:
+    from sentry.integrations.models import Integration
+    from sentry.integrations.services.integration import RpcIntegration
+
+
+@dataclass(frozen=True)
+class AssignmentSource:
+    source_name: str
+    integration_id: int
+    queued: datetime = timezone.now()
+
+    @classmethod
+    def from_integration(cls, integration: Integration | RpcIntegration) -> AssignmentSource:
+        return AssignmentSource(
+            source_name=integration.name,
+            integration_id=integration.id,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, input_dict: dict[str, Any]) -> AssignmentSource | None:
+        try:
+            return cls(**input_dict)
+        except (ValueError, TypeError):
+            return None
+
+
+===== FILE src/sentry/integrations/tasks/sync_assignee_outbound.py (after PR) =====
+from typing import Any
+
+from sentry import analytics, features
+from sentry.integrations.models.external_issue import ExternalIssue
+from sentry.integrations.models.integration import Integration
+from sentry.integrations.services.assignment_source import AssignmentSource
+from sentry.integrations.services.integration import integration_service
+from sentry.models.organization import Organization
+from sentry.silo.base import SiloMode
+from sentry.tasks.base import instrumented_task, retry
+from sentry.users.models.user import User
+from sentry.users.services.user.service import user_service
+
+
+@instrumented_task(
+    name="sentry.integrations.tasks.sync_assignee_outbound",
+    queue="integrations",
+    default_retry_delay=60 * 5,
+    max_retries=5,
+    silo_mode=SiloMode.REGION,
+)
+@retry(
+    exclude=(
+        ExternalIssue.DoesNotExist,
+        Integration.DoesNotExist,
+        User.DoesNotExist,
+        Organization.DoesNotExist,
+    )
+)
+def sync_assignee_outbound(
+    external_issue_id: int,
+    user_id: int | None,
+    assign: bool,
+    assignment_source_dict: dict[str, Any] | None = None,
+) -> None:
+    # Sync Sentry assignee to an external issue.
+    external_issue = ExternalIssue.objects.get(id=external_issue_id)
+
+    organization = Organization.objects.get(id=external_issue.organization_id)
+    has_issue_sync = features.has("organizations:integrations-issue-sync", organization)
+    if not has_issue_sync:
+        return
+    integration = integration_service.get_integration(integration_id=external_issue.integration_id)
+    if not integration:
+        return
+
+    installation = integration.get_installation(organization_id=external_issue.organization_id)
+    if not (
+        hasattr(installation, "should_sync") and hasattr(installation, "sync_assignee_outbound")
+    ):
+        return
+
+    parsed_assignment_source = (
+        AssignmentSource.from_dict(assignment_source_dict) if assignment_source_dict else None
+    )
+    if installation.should_sync("outbound_assignee", parsed_assignment_source):
+        # Assume unassign if None.
+        user = user_service.get_user(user_id) if user_id else None
+        installation.sync_assignee_outbound(
+            external_issue, user, assign=assign, assignment_source=parsed_assignment_source
+        )
+        analytics.record(
+            "integration.issue.assignee.synced",
+            provider=integration.provider,
+            id=integration.id,
+            organization_id=external_issue.organization_id,
+        )
+
+
+===== FILE src/sentry/integrations/utils/sync.py (after PR) =====
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
+
+from sentry import features
+from sentry.integrations.services.assignment_source import AssignmentSource
+from sentry.integrations.services.integration import integration_service
+from sentry.integrations.tasks.sync_assignee_outbound import sync_assignee_outbound
+from sentry.models.group import Group
+from sentry.models.groupassignee import GroupAssignee
+from sentry.models.organization import Organization
+from sentry.models.project import Project
+from sentry.silo.base import region_silo_function
+from sentry.users.services.user.service import user_service
+
+if TYPE_CHECKING:
+    from sentry.integrations.services.integration import RpcIntegration
+
+
+@region_silo_function
+def where_should_sync(
+    integration: RpcIntegration,
+    key: str,
+    organization_id: int | None = None,
+) -> Sequence[Organization]:
+    """
+    Given an integration, get the list of organizations where the sync type in
+    `key` is enabled. If an optional `organization_id` is passed, then only
+    check the integration for that organization.
+    """
+    kwargs = dict()
+    if organization_id is not None:
+        kwargs["id"] = organization_id
+        ois = integration_service.get_organization_integrations(
+            integration_id=integration.id, organization_id=organization_id
+        )
+    else:
+        ois = integration_service.get_organization_integrations(integration_id=integration.id)
+
+    organizations = Organization.objects.filter(id__in=[oi.organization_id for oi in ois])
+
+    return [
+        organization
+        for organization in organizations.filter(**kwargs)
+        if features.has("organizations:integrations-issue-sync", organization)
+        and integration.get_installation(organization_id=organization.id).should_sync(key)
+    ]
+
+
+def get_user_id(projects_by_user: Mapping[int, Sequence[int]], group: Group) -> int | None:
+    user_ids = [
+        user_id
+        for user_id, project_ids in projects_by_user.items()
+        for project_id in project_ids
+        if group.project_id == project_id
+    ]
+    if not user_ids:
+        return None
+    return user_ids[0]
+
+
+@region_silo_function
+def sync_group_assignee_inbound(
+    integration: RpcIntegration,
+    email: str | None,
+    external_issue_key: str,
+    assign: bool = True,
+) -> Sequence[Group]:
+    """
+    Given an integration, user email address and an external issue key,
+    assign linked groups to matching users. Checks project membership.
+    Returns a list of groups that were successfully assigned.
+    """
+
+    logger = logging.getLogger(f"sentry.integrations.{integration.provider}")
+
+    orgs_with_sync_enabled = where_should_sync(integration, "inbound_assignee")
+    affected_groups = Group.objects.get_groups_by_external_issue(
+        integration,
+        orgs_with_sync_enabled,
+        external_issue_key,
+    )
+    log_context = {
+        "integration_id": integration.id,
+        "email": email,
+        "issue_key": external_issue_key,
+    }
+    if not affected_groups:
+        logger.info("no-affected-groups", extra=log_context)
+        return []
+
+    if not assign:
+        for group in affected_groups:
+            GroupAssignee.objects.deassign(
+                group,
+                assignment_source=AssignmentSource.from_integration(integration),
+            )
+
+        return affected_groups
+
+    users = user_service.get_many_by_email(emails=[email], is_verified=True)
+    users_by_id = {user.id: user for user in users}
+    projects_by_user = Project.objects.get_by_users(users)
+
+    groups_assigned = []
+    for group in affected_groups:
+        user_id = get_user_id(projects_by_user, group)
+        user = users_by_id.get(user_id)
+        if user:
+            GroupAssignee.objects.assign(
+                group,
+                user,
+                assignment_source=AssignmentSource.from_integration(integration),
+            )
+            groups_assigned.append(group)
+        else:
+            logger.info("assignee-not-found-inbound", extra=log_context)
+    return groups_assigned
+
+
+def sync_group_assignee_outbound(
+    group: Group,
+    user_id: int | None,
+    assign: bool = True,
+    assignment_source: AssignmentSource | None = None,
+) -> None:
+    from sentry.models.grouplink import GroupLink
+
+    external_issue_ids = GroupLink.objects.filter(
+        project_id=group.project_id, group_id=group.id, linked_type=GroupLink.LinkedType.issue
+    ).values_list("linked_id", flat=True)
+
+    for external_issue_id in external_issue_ids:
+        sync_assignee_outbound.apply_async(
+            kwargs={
+                "external_issue_id": external_issue_id,
+                "user_id": user_id,
+                "assign": assign,
+                "assignment_source_dict": assignment_source.to_dict()
+                if assignment_source
+                else None,
+            }
+        )
+
+
+===== FILE src/sentry/models/groupassignee.py (after PR) =====
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from django.conf import settings
+from django.db import models, router, transaction
+from django.utils import timezone
+
+from sentry import features
+from sentry.backup.scopes import RelocationScope
+from sentry.db.models import FlexibleForeignKey, Model, region_silo_model, sane_repr
+from sentry.db.models.fields.hybrid_cloud_foreign_key import HybridCloudForeignKey
+from sentry.db.models.manager.base import BaseManager
+from sentry.integrations.services.assignment_source import AssignmentSource
+from sentry.models.grouphistory import GroupHistoryStatus, record_group_history
+from sentry.models.groupowner import GroupOwner
+from sentry.models.groupsubscription import GroupSubscription
+from sentry.notifications.types import GroupSubscriptionReason
+from sentry.signals import issue_assigned, issue_unassigned
+from sentry.types.activity import ActivityType
+from sentry.types.actor import Actor, ActorType
+from sentry.utils import metrics
+
+if TYPE_CHECKING:
+    from sentry.models.group import Group
+    from sentry.models.team import Team
+    from sentry.users.models.user import User
+    from sentry.users.services.user import RpcUser
+
+logger = logging.getLogger(__name__)
+
+
+class GroupAssigneeManager(BaseManager["GroupAssignee"]):
+    def get_assigned_to_data(
+        self, assigned_to: Team | RpcUser, assignee_type: str, extra: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        data = {
+            "assignee": str(assigned_to.id),
+            "assigneeEmail": getattr(assigned_to, "email", None),
+            "assigneeType": assignee_type,
+        }
+        if extra:
+            data.update(extra)
+
+        return data
+
+    def get_assignee_data(self, assigned_to: Team | RpcUser) -> tuple[str, str, str]:
+        from sentry.models.team import Team
+        from sentry.users.models.user import User
+        from sentry.users.services.user import RpcUser
+
+        if isinstance(assigned_to, (User, RpcUser)):
+            assignee_type = "user"
+            assignee_type_attr = "user_id"
+            other_type = "team"
+        elif isinstance(assigned_to, Team):
+            assignee_type = "team"
+            assignee_type_attr = "team_id"
+            other_type = "user_id"
+        else:
+            raise AssertionError(f"Invalid type to assign to: {type(assigned_to)}")
+
+        return (assignee_type, assignee_type_attr, other_type)
+
+    def remove_old_assignees(
+        self,
+        group: Group,
+        previous_assignee: GroupAssignee | None,
+        new_assignee_id: int | None = None,
+        new_assignee_type: str | None = None,
+    ) -> None:
+        from sentry.models.team import Team
+
+        if not previous_assignee:
+            return
+
+        if (
+            features.has("organizations:team-workflow-notifications", group.organization)
+            and previous_assignee.team
+        ):
+            GroupSubscription.objects.filter(
+                group=group,
+                project=group.project,
+                team=previous_assignee.team,
+                reason=GroupSubscriptionReason.assigned,
+            ).delete()
+            logger.info(
+                "groupassignee.remove",
+                extra={"group_id": group.id, "team_id": previous_assignee.team.id},
+            )
+        elif previous_assignee.team:
+            team_members = list(previous_assignee.team.member_set.values_list("user_id", flat=True))
+            if (
+                new_assignee_type
+                and new_assignee_type == "user"
+                and new_assignee_id in team_members
+            ):
+                team_members.remove(new_assignee_id)
+
+            GroupSubscription.objects.filter(
+                group=group,
+                project=group.project,
+                user_id__in=team_members,
+                reason=GroupSubscriptionReason.assigned,
+            ).delete()
+            logger.info(
+                "groupassignee.remove",
+                extra={"group_id": group.id, "team_id": previous_assignee.team.id},
+            )
+        else:
+            # if the new assignee is a team that the old assignee (a user) is in, don't remove them
+            if new_assignee_type == "team":
+                team = Team.objects.get(id=new_assignee_id)
+                team_members = list(team.member_set.values_list("user_id", flat=True))
+                if previous_assignee.user_id in team_members:
+                    return
+
+            GroupSubscription.objects.filter(
+                group=group,
+                project=group.project,
+                user_id=previous_assignee.user_id,
+                reason=GroupSubscriptionReason.assigned,
+            ).delete()
+            logger.info(
+                "groupassignee.remove",
+                extra={"group_id": group.id, "user_id": previous_assignee.user_id},
+            )
+
+    def assign(
+        self,
+        group: Group,
+        assigned_to: Team | RpcUser,
+        acting_user: User | None = None,
+        create_only: bool = False,
+        extra: dict[str, str] | None = None,
+        force_autoassign: bool = False,
+        assignment_source: AssignmentSource | None = None,
+    ):
+        from sentry.integrations.utils import sync_group_assignee_outbound
+        from sentry.models.activity import Activity
+        from sentry.models.groupsubscription import GroupSubscription
+
+        GroupSubscription.objects.subscribe_actor(
+            group=group, actor=assigned_to, reason=GroupSubscriptionReason.assigned
+        )
+
+        assigned_to_id = assigned_to.id
+        assignee_type, assignee_type_attr, other_type = self.get_assignee_data(assigned_to)
+
+        now = timezone.now()
+        assignee, created = self.get_or_create(
+            group=group,
+            defaults={
+                "project": group.project,
+                assignee_type_attr: assigned_to_id,
+                "date_added": now,
+            },
+        )
+        if not created:
+            affected = not create_only and (
+                self.filter(group=group)
+                .exclude(**{assignee_type_attr: assigned_to_id})
+                .update(**{assignee_type_attr: assigned_to_id, other_type: None, "date_added": now})
+                or force_autoassign
+            )
+        else:
+            affected = True
+
+        if affected:
+            transaction.on_commit(
+                lambda: issue_assigned.send_robust(
+                    project=group.project, group=group, user=acting_user, sender=self.__class__
+                ),
+                router.db_for_write(GroupAssignee),
+            )
+            data = self.get_assigned_to_data(assigned_to, assignee_type, extra)
+
+            Activity.objects.create_group_activity(
+                group,
+                ActivityType.ASSIGNED,
+                user=acting_user,
+                data=data,
+            )
+            record_group_history(group, GroupHistoryStatus.ASSIGNED, actor=acting_user)
+
+            metrics.incr("group.assignee.change", instance="assigned", skip_internal=True)
+            # sync Sentry assignee to external issues
+            if assignee_type == "user" and features.has(
+                "organizations:integrations-issue-sync", group.organization, actor=acting_user
+            ):
+                sync_group_assignee_outbound(
+                    group, assigned_to.id, assign=True, assignment_source=assignment_source
+                )
+
+            if not created:  # aka re-assignment
+                self.remove_old_assignees(group, assignee, assigned_to_id, assignee_type)
+
+        return {"new_assignment": created, "updated_assignment": bool(not created and affected)}
+
+    def deassign(
+        self,
+        group: Group,
+        acting_user: User | RpcUser | None = None,
+        assigned_to: Team | RpcUser | None = None,
+        extra: dict[str, str] | None = None,
+        assignment_source: AssignmentSource | None = None,
+    ) -> None:
+        from sentry.integrations.utils import sync_group_assignee_outbound
+        from sentry.models.activity import Activity
+        from sentry.models.projectownership import ProjectOwnership
+
+        try:
+            previous_groupassignee = self.get(group=group)
+        except GroupAssignee.DoesNotExist:
+            previous_groupassignee = None
+
+        affected = self.filter(group=group)[:1].count()
+        self.filter(group=group).delete()
+
+        if affected > 0:
+            Activity.objects.create_group_activity(group, ActivityType.UNASSIGNED, user=acting_user)
+
+            record_group_history(group, GroupHistoryStatus.UNASSIGNED, actor=acting_user)
+
+            # Clear ownership cache for the deassigned group
+            ownership = ProjectOwnership.get_ownership_cached(group.project.id)
+            if not ownership:
+                ownership = ProjectOwnership(project_id=group.project.id)
+            GroupOwner.invalidate_assignee_exists_cache(group.project.id, group.id)
+            GroupOwner.invalidate_debounce_issue_owners_evaluation_cache(group.project.id, group.id)
+
+            metrics.incr("group.assignee.change", instance="deassigned", skip_internal=True)
+            # sync Sentry assignee to external issues
+            if features.has(
+                "organizations:integrations-issue-sync", group.organization, actor=acting_user
+            ):
+                sync_group_assignee_outbound(
+                    group, None, assign=False, assignment_source=assignment_source
+                )
+
+            issue_unassigned.send_robust(
+                project=group.project, group=group, user=acting_user, sender=self.__class__
+            )
+            self.remove_old_assignees(group, previous_groupassignee)
+
+
+@region_silo_model
+class GroupAssignee(Model):
+    """
+    Identifies an assignment relationship between a user/team and an
+    aggregated event (Group).
+    """
+
+    __relocation_scope__ = RelocationScope.Excluded
+
+    objects: ClassVar[GroupAssigneeManager] = GroupAssigneeManager()
+
+    project = FlexibleForeignKey("sentry.Project", related_name="assignee_set")
+    group = FlexibleForeignKey("sentry.Group", related_name="assignee_set", unique=True)
+    user_id = HybridCloudForeignKey(settings.AUTH_USER_MODEL, on_delete="CASCADE", null=True)
+    team = FlexibleForeignKey("sentry.Team", related_name="sentry_assignee_set", null=True)
+    date_added = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        app_label = "sentry"
+        db_table = "sentry_groupasignee"
+        unique_together = [("project", "group")]
+
+    __repr__ = sane_repr("group_id", "user_id", "team_id")
+
+    def save(self, *args, **kwargs):
+        assert not (self.user_id is not None and self.team_id is not None) and not (
+            self.user_id is None and self.team_id is None
+        ), "Must have Team or User, not both"
+        super().save(*args, **kwargs)
+
+    def assigned_actor(self) -> Actor:
+        if self.user_id is not None:
+            return Actor(
+                id=self.user_id,
+                actor_type=ActorType.USER,
+            )
+        if self.team_id is not None:
+            return Actor(id=self.team_id, actor_type=ActorType.TEAM)
+
+        raise NotImplementedError("Unknown Assignee")
+
+
+===== FILE tests/sentry/integrations/services/test_assignment_source.py (after PR) =====
+from typing import Any
+
+from sentry.integrations.services.assignment_source import AssignmentSource
+from sentry.testutils.cases import TestCase
+
+
+class TestAssignmentSource(TestCase):
+    def test_from_dict_empty_array(self):
+        data: dict[str, Any] = {}
+        result = AssignmentSource.from_dict(data)
+        assert result is None
+
+    def test_from_dict_inalid_data(self):
+        data = {
+            "foo": "bar",
+        }
+
+        result = AssignmentSource.from_dict(data)
+        assert result is None
+
+    def test_from_dict_valid_data(self):
+        data = {"source_name": "foo-source", "integration_id": 123}
+
+        result = AssignmentSource.from_dict(data)
+        assert result is not None
+        assert result.source_name == "foo-source"
+        assert result.integration_id == 123
+
+    def test_to_dict(self):
+        source = AssignmentSource(
+            source_name="foo-source",
+            integration_id=123,
+        )
+
+        result = source.to_dict()
+        assert result.get("queued") is not None
+        assert result.get("source_name") == "foo-source"
+        assert result.get("integration_id") == 123
+
+
+===== FILE tests/sentry/models/test_groupassignee.py (after PR) =====
+from unittest import mock
+
+import pytest
+
+from sentry.integrations.example.integration import ExampleIntegration
+from sentry.integrations.models.external_issue import ExternalIssue
+from sentry.integrations.services.assignment_source import AssignmentSource
+from sentry.integrations.utils import sync_group_assignee_inbound
+from sentry.models.activity import Activity
+from sentry.models.groupassignee import GroupAssignee
+from sentry.models.grouplink import GroupLink
+from sentry.testutils.cases import TestCase
+from sentry.testutils.skips import requires_snuba
+from sentry.types.activity import ActivityType
+from sentry.users.services.user.service import user_service
+
+pytestmark = requires_snuba
+
+
+class GroupAssigneeTestCase(TestCase):
+    def test_constraints(self):
+        # Can't both be assigned
+        with pytest.raises(AssertionError):
+            GroupAssignee.objects.create(
+                group=self.group, project=self.group.project, user_id=self.user.id, team=self.team
+            )
+
+        # Can't have nobody assigned
+        with pytest.raises(AssertionError):
+            GroupAssignee.objects.create(
+                group=self.group, project=self.group.project, user_id=None, team=None
+            )
+
+    def test_assign_user(self):
+        GroupAssignee.objects.assign(self.group, self.user)
+
+        assert GroupAssignee.objects.filter(
+            project=self.group.project, group=self.group, user_id=self.user.id, team__isnull=True
+        ).exists()
+
+        activity = Activity.objects.get(
+            project=self.group.project, group=self.group, type=ActivityType.ASSIGNED.value
+        )
+
+        assert activity.data["assignee"] == str(self.user.id)
+        assert activity.data["assigneeEmail"] == self.user.email
+        assert activity.data["assigneeType"] == "user"
+
+    def test_assign_team(self):
+        GroupAssignee.objects.assign(self.group, self.team)
+
+        assert GroupAssignee.objects.filter(
+            project=self.group.project, group=self.group, team=self.team, user_id__isnull=True
+        ).exists()
+
+        activity = Activity.objects.get(
+            project=self.group.project, group=self.group, type=ActivityType.ASSIGNED.value
+        )
+
+        assert activity.data["assignee"] == str(self.team.id)
+        assert activity.data["assigneeEmail"] is None
+        assert activity.data["assigneeType"] == "team"
+
+    def test_create_only(self):
+        result = GroupAssignee.objects.assign(self.group, self.user)
+        assert result == {"new_assignment": True, "updated_assignment": False}
+
+        assert GroupAssignee.objects.filter(
+            project=self.group.project, group=self.group, user_id=self.user.id, team__isnull=True
+        ).exists()
+        activity = Activity.objects.get(
+            project=self.group.project, group=self.group, type=ActivityType.ASSIGNED.value
+        )
+        assert activity.data["assignee"] == str(self.user.id)
+        assert activity.data["assigneeEmail"] == self.user.email
+        assert activity.data["assigneeType"] == "user"
+
+        other_user = self.create_user()
+        result = GroupAssignee.objects.assign(self.group, other_user, create_only=True)
+        assert result == {"new_assignment": False, "updated_assignment": False}
+        # Assignee should not have changed
+        assert GroupAssignee.objects.filter(
+            project=self.group.project, group=self.group, user_id=self.user.id, team__isnull=True
+        ).exists()
+        # Should be no new activity rows
+        activity = Activity.objects.get(
+            project=self.group.project, group=self.group, type=ActivityType.ASSIGNED.value
+        )
+        assert activity.data["assignee"] == str(self.user.id)
+        assert activity.data["assigneeEmail"] == self.user.email
+        assert activity.data["assigneeType"] == "user"
+
+    def test_reassign_user_to_team(self):
+        GroupAssignee.objects.assign(self.group, self.user)
+
+        assert GroupAssignee.objects.filter(
+            project=self.group.project, group=self.group, user_id=self.user.id, team__isnull=True
+        ).exists()
+
+        GroupAssignee.objects.assign(self.group, self.team)
+
+        assert GroupAssignee.objects.filter(
+            project=self.group.project, group=self.group, team=self.team, user_id__isnull=True
+        ).exists()
+
+        activity = list(
+            Activity.objects.filter(
+                project=self.group.project, group=self.group, type=ActivityType.ASSIGNED.value
+            ).order_by("id")
+        )
+
+        assert activity[0].data["assignee"] == str(self.user.id)
+        assert activity[0].data["assigneeEmail"] == self.user.email
+        assert activity[0].data["assigneeType"] == "user"
+
+        assert activity[1].data["assignee"] == str(self.team.id)
+        assert activity[1].data["assigneeEmail"] is None
+        assert activity[1].data["assigneeType"] == "team"
+
+    @mock.patch.object(ExampleIntegration, "sync_assignee_outbound")
+    def test_assignee_sync_outbound_assign(self, mock_sync_assignee_outbound):
+        group = self.group
+        integration = self.create_integration(
+            organization=group.organization,
+            external_id="123456",
+            provider="example",
+            oi_params={
+                "config": {
+                    "sync_comments": True,
+                    "sync_status_outbound": True,
+                    "sync_status_inbound": True,
+                    "sync_assignee_outbound": True,
+                    "sync_assignee_inbound": True,
+                }
+            },
+        )
+
+        external_issue = ExternalIssue.objects.create(
+            organization_id=group.organization.id, integration_id=integration.id, key="APP-123"
+        )
+
+        GroupLink.objects.create(
+            group_id=group.id,
+            project_id=group.project_id,
+            linked_type=GroupLink.LinkedType.issue,
+            linked_id=external_issue.id,
+            relationship=GroupLink.Relationship.references,
+        )
+
+        with self.feature({"organizations:integrations-issue-sync": True}):
+            with self.tasks():
+                GroupAssignee.objects.assign(
+                    self.group,
+                    self.user,
+                )
+
+                mock_sync_assignee_outbound.assert_called_with(
+                    external_issue,
+                    user_service.get_user(self.user.id),
+                    assign=True,
+                    assignment_source=None,
+                )
+
+                assert GroupAssignee.objects.filter(
+                    project=self.group.project,
+                    group=self.group,
+                    user_id=self.user.id,
+                    team__isnull=True,
+                ).exists()
+
+                activity = Activity.objects.get(
+                    project=self.group.project, group=self.group, type=ActivityType.ASSIGNED.value
+                )
+
+                assert activity.data["assignee"] == str(self.user.id)
+                assert activity.data["assigneeEmail"] == self.user.email
+                assert activity.data["assigneeType"] == "user"
+
+    @mock.patch.object(ExampleIntegration, "sync_assignee_outbound")
+    def test_assignee_sync_outbound_assign_with_matching_source_integration(
+        self, mock_sync_assignee_outbound
+    ):
+        group = self.group
+        integration = self.create_integration(
+            organization=group.organization,
+            external_id="123456",
+            provider="example",
+            oi_params={
+                "config": {
+                    "sync_comments": True,
+                    "sync_status_outbound": True,
+                    "sync_status_inbound": True,
+                    "sync_assignee_outbound": True,
+                    "sync_assignee_inbound": True,
+                }
+            },
+        )
+
+        external_issue = ExternalIssue.objects.create(
+            organization_id=group.organization.id, integration_id=integration.id, key="APP-123"
+        )
+
+        GroupLink.objects.create(
+            group_id=group.id,
+            project_id=group.project_id,
+            linked_type=GroupLink.LinkedType.issue,
+            linked_id=external_issue.id,
+            relationship=GroupLink.Relationship.references,
+        )
+
+        with self.feature({"organizations:integrations-issue-sync": True}):
+            with self.tasks():
+                # Assert that we don't perform an outbound assignment if
+                # the source of the assignment is the same target integration
+                GroupAssignee.objects.assign(
+                    self.group,
+                    self.user,
+                    assignment_source=AssignmentSource.from_integration(integration),
+                )
+
+                mock_sync_assignee_outbound.assert_not_called()
+
+                assert GroupAssignee.objects.filter(
+                    project=self.group.project,
+                    group=self.group,
+                    user_id=self.user.id,
+                    team__isnull=True,
+                ).exists()
+
+                activity = Activity.objects.get(
+                    project=self.group.project, group=self.group, type=ActivityType.ASSIGNED.value
+                )
+
+                assert activity.data["assignee"] == str(self.user.id)
+                assert activity.data["assigneeEmail"] == self.user.email
+                assert activity.data["assigneeType"] == "user"
+
+    @mock.patch.object(ExampleIntegration, "sync_assignee_outbound")
+    def test_assignee_sync_outbound_unassign(self, mock_sync_assignee_outbound):
+        group = self.group
+
+        integration = self.create_integration(
+            organization=group.organization,
+            external_id="123456",
+            provider="example",
+            oi_params={
+                "config": {
+                    "sync_comments": True,
+                    "sync_status_outbound": True,
+                    "sync_status_inbound": True,
+                    "sync_assignee_outbound": True,
+                    "sync_assignee_inbound": True,
+                }
+            },
+        )
+
+        external_issue = ExternalIssue.objects.create(
+            organization_id=group.organization.id, integration_id=integration.id, key="APP-123"
+        )
+
+        GroupLink.objects.create(
+            group_id=group.id,
+            project_id=group.project_id,
+            linked_type=GroupLink.LinkedType.issue,
+            linked_id=external_issue.id,
+            relationship=GroupLink.Relationship.references,
+        )
+
+        GroupAssignee.objects.assign(self.group, self.user)
+
+        with self.feature({"organizations:integrations-issue-sync": True}):
+            with self.tasks():
+                GroupAssignee.objects.deassign(self.group)
+                mock_sync_assignee_outbound.assert_called_with(
+                    external_issue, None, assign=False, assignment_source=None
+                )
+
+                assert not GroupAssignee.objects.filter(
+                    project=self.group.project,
+                    group=self.group,
+                    user_id=self.user.id,
+                    team__isnull=True,
+                ).exists()
+
+                assert Activity.objects.filter(
+                    project=self.group.project, group=self.group, type=ActivityType.UNASSIGNED.value
+                ).exists()
+
+    def test_assignee_sync_inbound_assign(self):
+        group = self.group
+        user_no_access = self.create_user()
+        user_w_access = self.user
+
+        integration = self.create_integration(
+            organization=group.organization,
+            external_id="123456",
+            provider="example",
+            oi_params={
+                "config": {
+                    "sync_comments": True,
+                    "sync_status_outbound": True,
+                    "sync_status_inbound": True,
+                    "sync_assignee_outbound": True,
+                    "sync_assignee_inbound": True,
+                }
+            },
+        )
+
+        external_issue = ExternalIssue.objects.create(
+            organization_id=group.organization.id, integration_id=integration.id, key="APP-123"
+        )
+
+        GroupLink.objects.create(
+            group_id=group.id,
+            project_id=group.project_id,
+            linked_type=GroupLink.LinkedType.issue,
+            linked_id=external_issue.id,
+            relationship=GroupLink.Relationship.references,
+        )
+
+        with self.feature("organizations:integrations-issue-sync"):
+            # no permissions
+            groups_updated = sync_group_assignee_inbound(
+                integration, user_no_access.email, "APP-123"
+            )
+
+            assert not groups_updated
+
+            # w permissions
+            groups_updated = sync_group_assignee_inbound(
+                integration, user_w_access.email, "APP-123"
+            )
+
+            assert groups_updated[0] == group
+            assert GroupAssignee.objects.filter(
+                project=group.project, group=group, user_id=user_w_access.id, team__isnull=True
+            ).exists()
+
+            # confirm capitalization doesn't affect syncing
+            groups_updated = sync_group_assignee_inbound(
+                integration, user_w_access.email.title(), "APP-123"
+            )
+
+            assert groups_updated[0] == group
+            assert GroupAssignee.objects.filter(
+                project=group.project, group=group, user_id=user_w_access.id, team__isnull=True
+            ).exists()
+
+    def test_assignee_sync_inbound_deassign(self):
+        group = self.group
+        integration = self.create_integration(
+            organization=group.organization,
+            external_id="123456",
+            provider="example",
+            oi_params={
+                "config": {
+                    "sync_comments": True,
+                    "sync_status_outbound": True,
+                    "sync_status_inbound": True,
+                    "sync_assignee_outbound": True,
+                    "sync_assignee_inbound": True,
+                }
+            },
+        )
+
+        external_issue = ExternalIssue.objects.create(
+            organization_id=group.organization.id, integration_id=integration.id, key="APP-123"
+        )
+
+        GroupLink.objects.create(
+            group_id=group.id,
+            project_id=group.project_id,
+            linked_type=GroupLink.LinkedType.issue,
+            linked_id=external_issue.id,
+            relationship=GroupLink.Relationship.references,
+        )
+
+        GroupAssignee.objects.assign(group, self.user)
+
+        with self.feature("organizations:integrations-issue-sync"):
+            groups_updated = sync_group_assignee_inbound(
+                integration, self.user.email, "APP-123", assign=False
+            )
+
+            assert groups_updated[0] == group
+            assert not GroupAssignee.objects.filter(
+                project=group.project, group=group, user_id=self.user.id, team__isnull=True
+            ).exists()

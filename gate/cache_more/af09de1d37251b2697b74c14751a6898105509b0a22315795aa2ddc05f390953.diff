@@ -1,0 +1,1305 @@
+diff --git a/.DS_Store b/.DS_Store
+index 423b5e3fe..e26b1ad48 100644
+Binary files a/.DS_Store and b/.DS_Store differ
+diff --git a/.github/.DS_Store b/.github/.DS_Store
+index 4757454c4..25acd8aae 100644
+Binary files a/.github/.DS_Store and b/.github/.DS_Store differ
+diff --git a/database/.DS_Store b/database/.DS_Store
+index bbdc46b55..7d2d2ed63 100644
+Binary files a/database/.DS_Store and b/database/.DS_Store differ
+diff --git a/lang/.DS_Store b/lang/.DS_Store
+index 3e5d35c4d..dbabd22ff 100644
+Binary files a/lang/.DS_Store and b/lang/.DS_Store differ
+diff --git a/resources/.DS_Store b/resources/.DS_Store
+index d9862d3b6..8448403cf 100644
+Binary files a/resources/.DS_Store and b/resources/.DS_Store differ
+diff --git a/resources/views/livewire/chat/partials/body.blade.php b/resources/views/livewire/chat/partials/body.blade.php
+index 85807ab4b..b9d44a667 100644
+--- a/resources/views/livewire/chat/partials/body.blade.php
++++ b/resources/views/livewire/chat/partials/body.blade.php
+@@ -1,113 +1,247 @@
++<main
++    x-ref="main-chat-body"
++    x-data="{
++        el: null,
+ 
+-<main x-data="{
+-    height: 0,
+-    previousHeight: 0,
+-    booting: true,
+-    scrollToBottom() {
+-        this.height = $el.scrollHeight;
+-        $el.scrollTop = this.height;
+-    },
+-    waitForMedia() {
+-        const media = $el.querySelectorAll('img, video');
+-        if (media.length === 0) {
+-            return Promise.resolve();
+-        }
+-
+-        return Promise.all(Array.from(media).map((el) => {
+-            return new Promise((resolve) => {
+-                if (el.tagName === 'IMG') {
+-                    if (el.complete) {
+-                        resolve();
+-                        return;
+-                    }
+-                    el.addEventListener('load', resolve, { once: true });
+-                    el.addEventListener('error', resolve, { once: true });
++        // paging guards
++        loadingOlder: false,
++        loadingNewer: false,
++        pendingPrependRestore: false,
++
++        // prepend anchor
++        anchorId: null,
++        anchorOffset: 0,
++
++        // jump target (only valid for a short time)
++        jumpTargetId: null,
++        jumpLockUntil: 0,
++
++        // cancels old retries
++        jumpSeq: 0,
++
++        // prevent infinite spam on load events
++        mediaFixQueued: false,
++
++        // manual scroll detection
++        lastScrollTop: 0,
++
++        // initial load guard
++        initializing: true,
++
++        captureAnchor() {
++            const container = this.el;
++            if (!container) return;
++
++            const containerTop = container.getBoundingClientRect().top;
++            const nodes = container.querySelectorAll('[data-message-id]');
++
++            for (const node of nodes) {
++                const rect = node.getBoundingClientRect();
++                if (rect.bottom >= containerTop + 1) {
++                    this.anchorId = node.getAttribute('data-message-id');
++                    this.anchorOffset = rect.top - containerTop;
+                     return;
+                 }
++            }
++
++            this.anchorId = null;
++            this.anchorOffset = 0;
++        },
++
++        restoreToAnchor() {
++            const container = this.el;
++            if (!container || !this.anchorId) return;
++
++            const containerTop = container.getBoundingClientRect().top;
++            const node = container.querySelector(`[data-message-id='${this.anchorId}']`);
++            if (!node) return;
++
++            const rect = node.getBoundingClientRect();
++            const newOffset = rect.top - containerTop;
++
++            container.scrollTop += (newOffset - this.anchorOffset);
++        },
++
++        restoreAfterOlderLoaded() {
++            if (!this.pendingPrependRestore) return;
++            this.pendingPrependRestore = false;
++            this.loadingOlder = false;
++
++            requestAnimationFrame(() => {
++                this.restoreToAnchor();
++                requestAnimationFrame(() => this.restoreToAnchor());
++            });
++        },
++
++        isNearTop() {
++            const c = this.el;
++            return c && c.scrollTop <= 10 && !this.loadingOlder && !this.pendingPrependRestore;
++        },
++
++        isNearBottom() {
++            const c = this.el;
++            return c && (c.scrollHeight - (c.scrollTop + c.clientHeight)) <= 30 && !this.loadingNewer;
++        },
++
++        async loadOlderWithStableScroll() {
++            if (this.loadingOlder || this.pendingPrependRestore) return;
++            if (!$wire.canLoadOlder) return;
++
++            this.jumpTargetId = null;
++            this.jumpLockUntil = 0;
++            this.loadingOlder = true;
++            this.captureAnchor();
++            this.pendingPrependRestore = true;
++
++            try {
++                await $wire.loadOlder();
++
++                if (!this.pendingPrependRestore) {
++                    this.loadingOlder = false;
++                }
++            } catch (error) {
++                this.pendingPrependRestore = false;
++                this.loadingOlder = false;
++            }
++        },
++
++        loadNewerIfNeeded() {
++            if (this.loadingNewer) return;
++            if (!$wire.canLoadNewer) return;
++
++            this.loadingNewer = true;
++
++            $wire.loadNewer().finally(() => {
++                this.loadingNewer = false;
++            });
++        },
++
++        scrollToMessageCenter(id) {
++            const container = this.el;
++            if (!container) return false;
++
++            const node = container.querySelector(`[data-message-id='${id}']`);
++            if (!node) return false;
++
++            const nodeTop = node.offsetTop;
++            const nodeH = node.offsetHeight;
++            const cH = container.clientHeight;
++
++            const target = Math.max(0, nodeTop - (cH / 2) + (nodeH / 2));
++            container.scrollTop = target;
+ 
+-                if (el.readyState >= 2) {
+-                    resolve();
++            node.classList.add('ring-2', 'ring-offset-2', 'ring-primary-500');
++            setTimeout(() => node.classList.remove('ring-2', 'ring-offset-2', 'ring-primary-500'), 1200);
++
++            return true;
++        },
++
++        scrollToMessageCenterWithRetry(id, tries = 40) {
++            this.jumpSeq++;
++            const seq = this.jumpSeq;
++
++            this.jumpTargetId = id;
++            this.jumpLockUntil = Date.now() + 1200;
++
++            const tick = () => {
++                if (seq !== this.jumpSeq) return;
++
++                if (this.scrollToMessageCenter(id)) return;
++                if (tries <= 0) return;
++
++                tries--;
++                requestAnimationFrame(tick);
++            };
++
++            requestAnimationFrame(tick);
++        },
++
++        onAnyMediaLoad() {
++            if (this.mediaFixQueued) return;
++            this.mediaFixQueued = true;
++
++            requestAnimationFrame(() => {
++                this.mediaFixQueued = false;
++
++                if (this.pendingPrependRestore || this.loadingOlder) {
++                    this.restoreToAnchor();
++                    requestAnimationFrame(() => this.restoreToAnchor());
++                    return;
++                }
++
++                if (this.initializing) {
++                    this.scrollToBottom();
++                    requestAnimationFrame(() => this.scrollToBottom());
+                     return;
+                 }
+-                el.addEventListener('loadeddata', resolve, { once: true });
+-                el.addEventListener('error', resolve, { once: true });
++
++                if (this.jumpTargetId && Date.now() < this.jumpLockUntil) {
++                    this.scrollToMessageCenter(this.jumpTargetId);
++                    requestAnimationFrame(() => this.scrollToMessageCenter(this.jumpTargetId));
++                }
+             });
+-        }));
+-    },
+-    updateScrollPosition: function() {
+-        // Calculate the difference in height
++        },
+ 
+-        newHeight = $el.scrollHeight;
++        scrollToBottom() {
++            if (!this.el) return;
++            this.el.scrollTop = this.el.scrollHeight;
++            this.lastScrollTop = this.el.scrollTop;
++        },
+ 
+-        {{-- console.log('old height' + height);
+-        console.log('new height' + document.getElementById('conversation').scrollHeight); --}}
+-        heightDifference = newHeight - height;
++        onScroll() {
++            const c = this.el;
++            if (!c) return;
+ 
+-        {{-- console.log('conversationElement.scrollTop ' + conversationElement.scrollTop);
+-        console.log('heightDifference' + heightDifference); --}}
++            const currentTop = c.scrollTop;
++            const delta = Math.abs(currentTop - this.lastScrollTop);
+ 
+-        $el.scrollTop += heightDifference;
+-        // Update the previous height to the new height
+-        height = newHeight;
++            if (delta > 8) {
++                this.jumpTargetId = null;
++                this.jumpLockUntil = 0;
++            }
+ 
+-    }
++            this.lastScrollTop = currentTop;
+ 
++            if (this.isNearTop()) this.loadOlderWithStableScroll();
++            if (this.isNearBottom()) this.loadNewerIfNeeded();
++        },
+     }"
+         x-init="
+-        $nextTick(() => {
+-            scrollToBottom();
+-            waitForMedia().then(() => {
+-                requestAnimationFrame(() => {
+-                    scrollToBottom();
+-                    booting = false;
+-                });
+-            });
+-            setTimeout(() => {
+-                scrollToBottom();
+-                booting = false;
+-            }, 400);
+-        });
+-        "
+-    @scroll ="
+-        scrollTop= $el.scrollTop;
+-        if((scrollTop<=0) && $wire.canLoadMore){
++        el = $el;
++        lastScrollTop = el.scrollTop;
+ 
+-            $wire.loadMore();
++        setTimeout(() => {
++            requestAnimationFrame(() => {
++                scrollToBottom();
++            });
++        }, 100);
+ 
+-        }
+-     "
+-    @update-height.window="
+-        requestAnimationFrame(() => {
+-            updateScrollPosition();
+-          });
++        setTimeout(() => {
++            initializing = false;
++        }, 220);
+         "
++    @scroll="onScroll()"
++    x-on:load.capture="$data.onAnyMediaLoad()"
++    x-on:error.capture="$data.onAnyMediaLoad()"
+ 
+         @scroll-bottom.window="
+         requestAnimationFrame(() => {
+-            {{-- overflow-y: hidden; is used to hide the vertical scrollbar initially. --}}
+-            $el.style.overflowY='hidden';
+-
+-
+-
+-            {{-- scroll the element down --}}
+-            $el.scrollTop = $el.scrollHeight;
+-
+-            {{-- After updating the chat height, overflowY is set back to 'auto',
+-                which allows the browser to determine whether to display the scrollbar
+-                based on the content height.  --}}
+-               $el.style.overflowY='auto';
++            el.style.overflowY = 'hidden';
++            scrollToBottom();
++            el.style.overflowY = 'auto';
+         });
+     "
+ 
++        @scroll-to-message.window="$data.scrollToMessageCenterWithRetry($event.detail.id)"
++        @older-loaded.window="$data.restoreAfterOlderLoaded()"
+ 
+     x-cloak
+-    x-bind:class="{'opacity-0 pointer-events-none': booting}"
+-     class='flex flex-col h-full transition-opacity duration-150 relative gap-2 gap-y-4 p-4 md:p-5 lg:p-8  grow  overscroll-contain overflow-x-hidden w-full my-auto'
+-    style="contain: content" >
++    x-bind:class="{'opacity-0 pointer-events-none': initializing}"
++     class='flex flex-col h-full transition-opacity duration-150 relative gap-2 gap-y-4 p-4 md:p-5 lg:p-8 grow overscroll-contain overflow-x-hidden w-full my-auto'
++    style="contain: layout paint"
++>
+ 
+-
+-
+-    <div x-cloak wire:loading.delay.class.remove="invisible" wire:target="loadMore" class="invisible transition-all duration-300 ">
++    <div x-cloak wire:loading.delay.class.remove="invisible" wire:target="loadOlder" class="invisible transition-all duration-300 ">
+         <x-wirechat::loading-spin />
+     </div>
+ 
+@@ -122,7 +256,7 @@ class='flex flex-col h-full transition-opacity duration-150 relative gap-2 gap-y
+         @foreach ($loadedMessages as $date => $messageGroup)
+ 
+             {{-- Date  --}}
+-            <div  class="sticky top-0 uppercase p-2 shadow-xs px-2.5 z-50 rounded-xl border dark:border-[var(--wc-dark-primary)] border-[var(--wc-light-primary)] text-sm flex text-center justify-center  bg-[var(--wc-light-secondary)] dark:bg-[var(--wc-dark-secondary)] dark:text-white  w-28 mx-auto ">
++            <div wire:key="group-{{ md5($date) }}"  class="sticky top-0 uppercase p-2 shadow-xs px-2.5 z-50 rounded-xl border dark:border-[var(--wc-dark-primary)] border-[var(--wc-light-primary)] text-sm flex text-center justify-center  bg-[var(--wc-light-secondary)] dark:bg-[var(--wc-dark-secondary)] dark:text-white  w-28 mx-auto ">
+                 {{ $date }}
+             </div>
+ 
+@@ -145,9 +279,12 @@ class='flex flex-col h-full transition-opacity duration-150 relative gap-2 gap-y
+                     // Get the next message
+                     $nextMessage = $key < $messageGroup->count() - 1 ? $messageGroup->get($key + 1) : null;
+                 @endphp
+-
+-
+-                <div class="flex gap-2" wire:key="message-{{ $key }}"  >
++                <div
++                    class="flex gap-2"
++                    data-message-id="{{ $message->id }}"
++                    id="message-{{ $message->id }}"
++                    wire:key="msg-{{ $message->id }}"
++                >
+ 
+                     {{-- Message user Avatar --}}
+                     {{-- Hide avatar if message belongs to auth --}}
+diff --git a/resources/views/livewire/chats/chats.blade.php b/resources/views/livewire/chats/chats.blade.php
+index 30871899a..7d75568dd 100644
+--- a/resources/views/livewire/chats/chats.blade.php
++++ b/resources/views/livewire/chats/chats.blade.php
+@@ -4,12 +4,15 @@
+     $chatsShellStyles = $this->getUiStyles();
+ @endphp
+ <div
+-    x-data="{ selectedConversationId: '{{ request()->conversation ?? $selectedConversationId }}' }"
++    x-data="{ selectedConversationId: @js(request()->conversation ?? $selectedConversationId) }"
+      x-on:open-chat.window="selectedConversationId = $event.detail.conversation; $wire.selectedConversationId = $event.detail.conversation;"
++     x-on:chat-opened.window="selectedConversationId = $event.detail.conversation"
++     x-on:chat-closed.window="selectedConversationId = null"
+      x-init="
+         const container = document.getElementById('wirechat-chats-scrollable-container');
+ 
+         function scrollToConversation(attempts = 10, delay = 200) {
++            requestAnimationFrame(() => {
+             const el = document.getElementById('conversation-' + selectedConversationId);
+             if (!container || !el || !selectedConversationId) {
+                 if (attempts > 0) {
+@@ -31,7 +34,7 @@ function scrollToConversation(attempts = 10, delay = 200) {
+             const finalScroll = Math.max(0, Math.min(scrollOffset, maxScroll));
+ 
+             // Animate scroll
+-            requestAnimationFrame(() => {
++        
+                 container.scrollTo({ top: finalScroll, behavior: 'smooth' });
+             });
+         }
+@@ -78,6 +81,7 @@ class="{{ $chatsShellClass }}"
+             }
+             "
+           id="wirechat-chats-scrollable-container"
++          wire:navigate:scroll
+         class=" overflow-y-auto py-2  wc-scrollbar-theme  grow  h-full relative " style="contain:content">
+ 
+         {{-- loading indicator --}}
+diff --git a/resources/views/livewire/chats/partials/list.blade.php b/resources/views/livewire/chats/partials/list.blade.php
+index f82d2b690..d3ab63b63 100644
+--- a/resources/views/livewire/chats/partials/list.blade.php
++++ b/resources/views/livewire/chats/partials/list.blade.php
+@@ -20,6 +20,9 @@
+     $hasUnreadMessages = $unreadIndicatorType === UnreadIndicatorType::Count
+         ? $unreadIndicatorCount > 0
+         : (bool) $conversation->getAttribute('has_unread_messages');
++    $unreadIndicatorKey = $unreadIndicatorType === UnreadIndicatorType::Count
++        ? $unreadIndicatorCount
++        : (int) $hasUnreadMessages;
+     $showUnreadStatus = $this->panel()->hasUnreadIndicator()
+         && $lastMessage != null
+         && $hasUnreadMessages
+@@ -30,30 +33,21 @@
+ 
+     <li x-data="{
+         conversationID: @js($conversation->id),
+-        showUnreadStatus: @js($showUnreadStatus),
+         handleChatOpened(event) {
+-            // Hide unread dot
+             if (event.detail.conversation== this.conversationID) {
+-                this.showUnreadStatus= false;
++                selectedConversationId = event.detail.conversation;
+             }
+-            //update this so that the the selected conversation highlighter can be updated
+             $wire.selectedConversationId= event.detail.conversation;
+         },
+         handleChatClosed(event) {
+-                // Clear the globally selected conversation.
+-                $wire.selectedConversationId = null;
+-                selectedConversationId = null;
+-        },
+-        handleOpenChat(event) {
+-            // Clear the globally selected conversation.
+-            if (this.showUnreadStatus==  event.detail.conversation== this.conversationID) {
+-                this.showUnreadStatus= false;
+-            }
+-    }
++            $wire.selectedConversationId = null;
++            selectedConversationId = null;
++        }
+     }"
++    data-show-unread-status="{{ $showUnreadStatus ? '1' : '0' }}"
+ 
+     id="conversation-{{ $conversation->id }}"
+-        wire:key="conversation-em-{{ $conversation->id }}-{{ $conversation->updated_at->timestamp }}"
++        wire:key="conversation-em-{{ $conversation->id }}-{{ $lastMessage?->id ?? 'none' }}-{{ $unreadIndicatorKey }}"
+         x-on:chat-opened.window="handleChatOpened($event)"
+         x-on:chat-closed.window="handleChatClosed($event)">
+         <a @if ($widget) tabindex="0"
+@@ -101,7 +95,7 @@ class="col-span-10 border-b pb-2 border-[var(--wc-light-border)] dark:border-[va
+                 {{-- Only show if AUTH is NOT onwer of message --}}
+                 @if ($showUnreadStatus)
+                     @if ($unreadIndicatorType === UnreadIndicatorType::Count)
+-                        <div x-show="showUnreadStatus" dusk="unreadMessagesCount" class="col-span-2 flex flex-col text-center my-auto items-end">
++                        <div x-show="selectedConversationId != conversationID" dusk="unreadMessagesCount" class="col-span-2 flex flex-col text-center my-auto items-end">
+                             <span class="sr-only">unread messages count</span>
+                             <span
+                                 @style(['background-color:var(--wc-brand-primary)'])
+@@ -111,7 +105,7 @@ class="inline-flex min-w-6 items-center justify-center rounded-full px-2 py-1 te
+                             </span>
+                         </div>
+                     @else
+-                        <div x-show="showUnreadStatus" dusk="unreadMessagesDot" class=" col-span-2 flex flex-col text-center my-auto">
++                        <div x-show="selectedConversationId != conversationID" dusk="unreadMessagesDot" class=" col-span-2 flex flex-col text-center my-auto">
+                             {{-- Dots icon --}}
+                             <span dusk="unreadDotItem" class="sr-only">unread dot</span>
+                             <svg @style(['color:var(--wc-brand-primary)']) xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+diff --git a/resources/views/livewire/chats/partials/message-body.blade.php b/resources/views/livewire/chats/partials/message-body.blade.php
+index b5c668b69..7d8d6c917 100644
+--- a/resources/views/livewire/chats/partials/message-body.blade.php
++++ b/resources/views/livewire/chats/partials/message-body.blade.php
+@@ -14,9 +14,10 @@
+     <p
+         dusk="messagePreviewBody"
+         class="truncate text-sm dark:text-white gap-2 items-center"
+-        :class="showUnreadStatus && !@js($belongsToAuth)
+-            ? 'font-semibold text-black'
+-            : 'font-normal text-gray-600'"
++        @class([
++            'font-semibold text-black' => $showUnreadStatus && ! $belongsToAuth,
++            'font-normal text-gray-600' => ! ($showUnreadStatus && ! $belongsToAuth),
++        ])
+     >
+         {{ $lastMessage->body != '' ? $lastMessage->body : ($lastMessage->isAttachment() ? '📎 '.__('wirechat::chats.labels.attachment') : '') }}
+     </p>
+@@ -24,9 +25,10 @@ class="truncate text-sm dark:text-white gap-2 items-center"
+     <span
+         dusk="messagePreviewTime"
+         class="px-1 text-xs shrink-0 dark:text-gray-50"
+-        :class="showUnreadStatus && !@js($belongsToAuth)
+-            ? 'font-medium text-gray-800'
+-            : 'font-normal text-gray-500'"
++        @class([
++            'font-medium text-gray-800' => $showUnreadStatus && ! $belongsToAuth,
++            'font-normal text-gray-500' => ! ($showUnreadStatus && ! $belongsToAuth),
++        ])
+     >
+         @if ($lastMessage->created_at->diffInMinutes(now()) < 1)
+           @lang('wirechat::chats.labels.now')
+diff --git a/resources/views/livewire/widgets/wire-chat.blade.php b/resources/views/livewire/widgets/wire-chat.blade.php
+index a97a9bce7..cba8b4b05 100644
+--- a/resources/views/livewire/widgets/wire-chat.blade.php
++++ b/resources/views/livewire/widgets/wire-chat.blade.php
+@@ -103,6 +103,9 @@
+                         if (this.activeWidgetComponent === false) {
+                             this.activeWidgetComponent = id
+                             this.showActiveComponent = true;
++                            this.$nextTick(() => {
++                                this.dispatchScrollBottom();
++                            });
+                         } else {
+ 
+                             this.showActiveComponent = false;
+@@ -111,6 +114,9 @@
+                             setTimeout(() => {
+                                 this.activeWidgetComponent = id;
+                                 this.showActiveComponent = true;
++                                this.$nextTick(() => {
++                                    this.dispatchScrollBottom();
++                                });
+                             }, 300);
+                         }
+ 
+@@ -132,6 +138,11 @@
+                             }
+                         });
+                     },
++                    dispatchScrollBottom() {
++                        requestAnimationFrame(() => {
++                            window.dispatchEvent(new CustomEvent('scroll-bottom'));
++                        });
++                    },
+ 
+                     setShowPropertyTo(show) {
+                         this.show = show;
+diff --git a/resources/views/pages/chat.blade.php b/resources/views/pages/chat.blade.php
+index 13bee3f01..274ce63d5 100644
+--- a/resources/views/pages/chat.blade.php
++++ b/resources/views/pages/chat.blade.php
+@@ -4,7 +4,7 @@
+ 
+     <div  class="w-full flex min-h-full h-full rounded-lg" >
+         <aside class="hidden md:grid">
+-            <div x-persist="chats"  class=" bg-inherit border-r border-[var(--wc-light-border)] dark:border-[var(--wc-dark-border)]   dark:bg-inherit  relative w-full h-full md:w-[360px] lg:w-[400px] xl:w-[500px]  shrink-0 overflow-y-auto  ">
++            <div class=" bg-inherit border-r border-[var(--wc-light-border)] dark:border-[var(--wc-dark-border)]   dark:bg-inherit  relative w-full h-full md:w-[360px] lg:w-[400px] xl:w-[500px]  shrink-0 overflow-y-auto  ">
+                 <livewire:wirechat.chats :panel="$panel" />
+             </div>
+         </aside>
+diff --git a/resources/views/pages/chats.blade.php b/resources/views/pages/chats.blade.php
+index b291cf4e2..c2c059d1f 100644
+--- a/resources/views/pages/chats.blade.php
++++ b/resources/views/pages/chats.blade.php
+@@ -3,7 +3,7 @@
+ @section('content')
+     <div class="w-full h-full min-h-full flex rounded-lg" >
+ 
+-        <div x-persist="chats" class="relative  w-full h-full  border-r  border-[var(--wc-light-border)] dark:border-[var(--wc-dark-border)]  md:w-[360px] lg:w-[400px] xl:w-[500px] shrink-0 overflow-y-auto  ">
++        <div class="relative  w-full h-full  border-r  border-[var(--wc-light-border)] dark:border-[var(--wc-dark-border)]  md:w-[360px] lg:w-[400px] xl:w-[500px] shrink-0 overflow-y-auto  ">
+             <livewire:wirechat.chats :panel="$panel" />
+         </div>
+ 
+diff --git a/src/.DS_Store b/src/.DS_Store
+index 5acb908d2..e08faa9d2 100644
+Binary files a/src/.DS_Store and b/src/.DS_Store differ
+diff --git a/src/Livewire/Chat/Chat.php b/src/Livewire/Chat/Chat.php
+index 916e51c69..3c91bdf13 100644
+--- a/src/Livewire/Chat/Chat.php
++++ b/src/Livewire/Chat/Chat.php
+@@ -3,6 +3,7 @@
+ namespace Wirechat\Wirechat\Livewire\Chat;
+ 
+ use Composer\InstalledVersions;
++use Illuminate\Database\Eloquent\Builder;
+ use Illuminate\Database\Eloquent\Model;
+ use Illuminate\Support\Facades\Log;
+ use Illuminate\Support\Facades\RateLimiter;
+@@ -59,10 +60,26 @@ class Chat extends Component
+ 
+     public $loadedMessages;
+ 
++    public int $chunk = 10;
++
+     public int $paginate_var = 10;
+ 
+     public bool $canLoadMore;
+ 
++    public bool $canLoadOlder = false;
++
++    public bool $canLoadNewer = false;
++
++    public ?string $olderCreatedAt = null;
++
++    public ?int $olderId = null;
++
++    public ?string $newerCreatedAt = null;
++
++    public ?int $newerId = null;
++
++    public ?int $anchorId = null;
++
+     #[Locked]
+     public $totalMessageCount;
+ 
+@@ -90,6 +107,7 @@ public function getListeners()
+ 
+         $listeners = [
+             'refresh' => '$refresh',
++            'open-attachment' => 'jumpToMessage',
+         ];
+ 
+         if ($this->panel() == null) {
+@@ -632,6 +650,95 @@ private function pushMessage(Message $message)
+ 
+         // Use tap to create a new group if it doesn’t exist, then push the message
+         $this->loadedMessages->put($groupKey, $this->loadedMessages->get($groupKey, collect())->push($message));
++
++        $flat = $this->flattenLoadedMessages();
++        $this->syncCursorsFromFlat($flat);
++        $this->syncCanLoadFlags();
++    }
++
++    private function setLoadedMessagesFromFlat($messages): void
++    {
++        $this->loadedMessages = collect($messages)
++            ->groupBy(fn (Message $message) => $this->messageGroupKey($message))
++            ->map->values();
++    }
++
++    private function flattenLoadedMessages()
++    {
++        return collect($this->loadedMessages)->flatten(1)->values();
++    }
++
++    private function syncCursorsFromFlat($messages): void
++    {
++        $messages = collect($messages);
++        $oldest = $messages->first();
++        $newest = $messages->last();
++
++        if (! $oldest || ! $newest) {
++            $this->olderCreatedAt = null;
++            $this->olderId = null;
++            $this->newerCreatedAt = null;
++            $this->newerId = null;
++
++            return;
++        }
++
++        $this->olderCreatedAt = $oldest->created_at->toDateTimeString();
++        $this->olderId = $oldest->id;
++        $this->newerCreatedAt = $newest->created_at->toDateTimeString();
++        $this->newerId = $newest->id;
++    }
++
++    private function syncCanLoadFlags(): void
++    {
++        $flat = $this->flattenLoadedMessages();
++        $oldest = $flat->first();
++        $newest = $flat->last();
++
++        if (! $oldest || ! $newest) {
++            $this->canLoadOlder = false;
++            $this->canLoadNewer = false;
++            $this->canLoadMore = false;
++
++            return;
++        }
++
++        $this->canLoadOlder = $this->conversation->messages()
++            ->where(function (Builder $query) use ($oldest): void {
++                $query->where('created_at', '<', $oldest->created_at)
++                    ->orWhere(function (Builder $query) use ($oldest): void {
++                        $query->where('created_at', '=', $oldest->created_at)
++                            ->where('id', '<', $oldest->id);
++                    });
++            })
++            ->exists();
++
++        $this->canLoadNewer = $this->conversation->messages()
++            ->where(function (Builder $query) use ($newest): void {
++                $query->where('created_at', '>', $newest->created_at)
++                    ->orWhere(function (Builder $query) use ($newest): void {
++                        $query->where('created_at', '=', $newest->created_at)
++                            ->where('id', '>', $newest->id);
++                    });
++            })
++            ->exists();
++
++        $this->canLoadMore = $this->canLoadOlder;
++    }
++
++    public function loadLatestWindow(): void
++    {
++        $messages = $this->conversation->messages()
++            ->with('participant.participantable', 'parent.participant.participantable', 'attachment')
++            ->orderBy('created_at', 'desc')
++            ->orderBy('id', 'desc')
++            ->take($this->chunk)
++            ->get()
++            ->reverse();
++
++        $this->setLoadedMessagesFromFlat($messages);
++        $this->syncCursorsFromFlat($messages);
++        $this->syncCanLoadFlags();
+     }
+ 
+     /**
+@@ -668,7 +775,9 @@ private function removeMessage(Message $message)
+                 $this->loadedMessages->forget($groupKey)->values();
+             }
+ 
+-            //  $this->loadedMessages;
++            $flat = $this->flattenLoadedMessages();
++            $this->syncCursorsFromFlat($flat);
++            $this->syncCanLoadFlags();
+         }
+     }
+ 
+@@ -741,41 +850,145 @@ public function sendLike()
+         $this->dispatchMessageCreatedEvent($message);
+     }
+ 
+-    // load more messages
+-    public function loadMore()
++    public function jumpToMessage(int $messageId): void
+     {
+-        // increment
+-        $this->paginate_var += 10;
+-        // call loadMessage
+-        $this->loadMessages();
++        abort_unless($this->auth->belongsToConversation($this->conversation), 403);
++
++        $flat = $this->flattenLoadedMessages();
++
++        if ($flat->contains(fn (Message $message) => $message->id === $messageId)) {
++            $this->anchorId = $messageId;
++            $this->dispatch('scroll-to-message', id: $messageId);
++
++            return;
++        }
++
++        /** @var Message $anchor */
++        $anchor = $this->conversation->messages()
++            ->with('participant.participantable', 'parent.participant.participantable', 'attachment')
++            ->whereKey($messageId)
++            ->firstOrFail();
+ 
+-        // dispatch event- update height
+-        $this->dispatch('update-height');
++        $before = $this->conversation->messages()
++            ->with('participant.participantable', 'parent.participant.participantable', 'attachment')
++            ->where(function (Builder $query) use ($anchor): void {
++                $query->where('created_at', '<', $anchor->created_at)
++                    ->orWhere(function (Builder $query) use ($anchor): void {
++                        $query->where('created_at', '=', $anchor->created_at)
++                            ->where('id', '<', $anchor->id);
++                    });
++            })
++            ->orderBy('created_at', 'desc')
++            ->orderBy('id', 'desc')
++            ->take($this->chunk)
++            ->get()
++            ->reverse();
++
++        $after = $this->conversation->messages()
++            ->with('participant.participantable', 'parent.participant.participantable', 'attachment')
++            ->where(function (Builder $query) use ($anchor): void {
++                $query->where('created_at', '>', $anchor->created_at)
++                    ->orWhere(function (Builder $query) use ($anchor): void {
++                        $query->where('created_at', '=', $anchor->created_at)
++                            ->where('id', '>', $anchor->id);
++                    });
++            })
++            ->orderBy('created_at', 'asc')
++            ->orderBy('id', 'asc')
++            ->take($this->chunk)
++            ->get();
++
++        $messages = $before->concat([$anchor])->concat($after);
++
++        $this->anchorId = $anchor->id;
++
++        $this->setLoadedMessagesFromFlat($messages);
++        $this->syncCursorsFromFlat($messages);
++        $this->syncCanLoadFlags();
++
++        $this->dispatch('scroll-to-message', id: $anchor->id);
+     }
+ 
+-    public function loadMessages()
++    public function loadOlder(): void
+     {
+-        // Get total message count
++        if (! $this->canLoadOlder || ! $this->olderCreatedAt || ! $this->olderId) {
++            return;
++        }
+ 
+-        // Fetch paginated messages
+-        /* @var Message $message */
+-        $messages = $this->conversation->messages()
++        $older = $this->conversation->messages()
+             ->with('participant.participantable', 'parent.participant.participantable', 'attachment')
+-            ->orderBy('created_at', 'asc')
+-            ->skip($this->totalMessageCount - $this->paginate_var)
+-            ->take($this->paginate_var)
+-            ->get();  // Fetch messages as Eloquent collection
+-
+-        // Calculate whether more messages can be loaded
+-        // Group the messages
+-        $this->loadedMessages = $messages
+-            ->groupBy(function ($message) {
+-                /** @var \Wirechat\Wirechat\Models\Message $message */
+-                return $this->messageGroupKey($message);
++            ->where(function (Builder $query): void {
++                $query->where('created_at', '<', $this->olderCreatedAt)
++                    ->orWhere(function (Builder $query): void {
++                        $query->where('created_at', '=', $this->olderCreatedAt)
++                            ->where('id', '<', $this->olderId);
++                    });
+             })
+-            ->map->values();  // Re-index each group
++            ->orderBy('created_at', 'desc')
++            ->orderBy('id', 'desc')
++            ->take($this->chunk)
++            ->get()
++            ->reverse();
++
++        if ($older->isEmpty()) {
++            $this->canLoadOlder = false;
++            $this->canLoadMore = false;
++            $this->dispatch('older-loaded');
++
++            return;
++        }
++
++        $all = $older->concat($this->flattenLoadedMessages());
+ 
+-        $this->canLoadMore = $this->totalMessageCount > $messages->count();
++        $this->setLoadedMessagesFromFlat($all);
++        $this->syncCursorsFromFlat($all);
++        $this->syncCanLoadFlags();
++        $this->dispatch('older-loaded');
++    }
++
++    public function loadNewer(): void
++    {
++        if (! $this->canLoadNewer || ! $this->newerCreatedAt || ! $this->newerId) {
++            return;
++        }
++
++        $newer = $this->conversation->messages()
++            ->with('participant.participantable', 'parent.participant.participantable', 'attachment')
++            ->where(function (Builder $query): void {
++                $query->where('created_at', '>', $this->newerCreatedAt)
++                    ->orWhere(function (Builder $query): void {
++                        $query->where('created_at', '=', $this->newerCreatedAt)
++                            ->where('id', '>', $this->newerId);
++                    });
++            })
++            ->orderBy('created_at', 'asc')
++            ->orderBy('id', 'asc')
++            ->take($this->chunk)
++            ->get();
++
++        if ($newer->isEmpty()) {
++            $this->canLoadNewer = false;
++
++            return;
++        }
++
++        $all = $this->flattenLoadedMessages()->concat($newer);
++
++        $this->setLoadedMessagesFromFlat($all);
++        $this->syncCursorsFromFlat($all);
++        $this->syncCanLoadFlags();
++    }
++
++    // Legacy alias kept for backward compatibility.
++    public function loadMore()
++    {
++        $this->loadOlder();
++    }
++
++    // Legacy alias kept for backward compatibility.
++    public function loadMessages()
++    {
++        $this->loadLatestWindow();
+ 
+         return $this->loadedMessages;
+     }
+@@ -790,7 +1003,7 @@ public function mount($conversation = null)
+         $this->initializeConversation($conversation);
+         $this->initializeParticipants();
+         $this->finalizeConversationState();
+-        $this->loadMessages();
++        $this->loadLatestWindow();
+     }
+ 
+     private function initializeConversation($conversation)
+@@ -867,6 +1080,10 @@ public function finalizeConversationState()
+ 
+         $this->conversation->markAsRead();
+ 
++        if ($this->isWidget()) {
++            $this->dispatch('refresh')->to(Chats::class);
++        }
++
+         if ($this->authParticipant) {
+ 
+             $this->authParticipant->update(['last_active_at' => now()]);
+diff --git a/src/WirechatServiceProvider.php b/src/WirechatServiceProvider.php
+index 14b455592..75587c991 100644
+--- a/src/WirechatServiceProvider.php
++++ b/src/WirechatServiceProvider.php
+@@ -237,6 +237,9 @@ protected function loadAssets(): void
+ 
+                                     Echo.private(`{$panelId}.participant.{$encodedType}.{$userId}`)
+                                         .listen('.Wirechat\\\\Wirechat\\\\Events\\\\NotifyParticipant', (e) => {
++                                            if (window.Livewire) {
++                                                window.Livewire.dispatch('refresh-chats');
++                                            }
+ 
+                                             if (e.redirect_url !== window.location.href) {
+                                                 if (Notification.permission === 'granted') {
+diff --git a/tests/.DS_Store b/tests/.DS_Store
+index 246c0fa9c..7423fc475 100644
+Binary files a/tests/.DS_Store and b/tests/.DS_Store differ
+diff --git a/tests/Feature/ChatTest.php b/tests/Feature/ChatTest.php
+index 6de7db9d8..7d4cfd76c 100644
+--- a/tests/Feature/ChatTest.php
++++ b/tests/Feature/ChatTest.php
+@@ -55,12 +55,145 @@
+     $html = $response->html();
+ 
+     preg_match_all('/class="[^"]*chat-shell-test[^"]*"/', $html, $classMatches);
+-    preg_match_all('/style="contain:content; min-height: 24rem;"/', $html, $styleMatches);
++    preg_match_all('/style="[^"]*min-height: 24rem;[^"]*"/', $html, $styleMatches);
+ 
+     expect($classMatches[0])->toHaveCount(1)
+         ->and($styleMatches[0])->toHaveCount(1);
+ });
+ 
++test('it renders stable message anchors for scroll restoration', function () {
++    $auth = User::factory()->create(['name' => 'Test']);
++    $conversation = $auth->createConversationWith(User::factory()->create(), 'hello');
++    $message = $conversation->messages()->firstOrFail();
++
++    $html = Livewire::actingAs($auth)->test(ChatBox::class, ['conversation' => $conversation->id])->html();
++
++    expect($html)
++        ->toContain('x-ref="main-chat-body"')
++        ->toContain('data-message-id="'.$message->id.'"')
++        ->toContain('id="message-'.$message->id.'"')
++        ->toContain('wire:key="msg-'.$message->id.'"');
++});
++
++test('it loads older messages from the top using the pro-style older window', function () {
++    $auth = User::factory()->create(['name' => 'Test']);
++    $receiver = User::factory()->create(['name' => 'John']);
++    $conversation = $auth->createConversationWith($receiver, 'Message 1');
++
++    foreach (range(2, 15) as $index) {
++        $auth->sendMessageTo($conversation, "Message {$index}");
++    }
++
++    $component = Livewire::actingAs($auth)->test(ChatBox::class, ['conversation' => $conversation->id]);
++
++    $initialMessages = collect($component->instance()->loadedMessages)->flatten(1);
++
++    expect($initialMessages)->toHaveCount(10)
++        ->and($component->instance()->canLoadOlder)->toBeTrue();
++
++    $component->call('loadOlder');
++
++    $loadedMessages = collect($component->instance()->loadedMessages)->flatten(1);
++
++    expect($loadedMessages)->toHaveCount(15)
++        ->and($component->instance()->canLoadOlder)->toBeFalse();
++});
++
++test('it dispatches older-loaded when a stale older cursor returns no messages', function () {
++    $auth = User::factory()->create(['name' => 'Test']);
++    $receiver = User::factory()->create(['name' => 'John']);
++    $conversation = $auth->createConversationWith($receiver, 'Message 1');
++
++    foreach (range(2, 15) as $index) {
++        $auth->sendMessageTo($conversation, "Message {$index}");
++    }
++
++    $oldestMessage = $conversation->messages()
++        ->orderBy('created_at', 'asc')
++        ->orderBy('id', 'asc')
++        ->firstOrFail();
++
++    $component = Livewire::actingAs($auth)->test(ChatBox::class, ['conversation' => $conversation->id]);
++
++    $component
++        ->set('canLoadOlder', true)
++        ->set('olderCreatedAt', $oldestMessage->created_at->toDateTimeString())
++        ->set('olderId', $oldestMessage->id)
++        ->call('loadOlder')
++        ->assertDispatched('older-loaded');
++
++    expect($component->instance()->canLoadOlder)->toBeFalse()
++        ->and($component->instance()->canLoadMore)->toBeFalse();
++});
++
++test('it rebuilds the loaded window around the requested message when jumping', function () {
++    $auth = User::factory()->create(['name' => 'Test']);
++    $receiver = User::factory()->create(['name' => 'John']);
++    $conversation = $auth->createConversationWith($receiver, 'Message 1');
++
++    foreach (range(2, 30) as $index) {
++        $auth->sendMessageTo($conversation, "Message {$index}");
++    }
++
++    $orderedMessages = $conversation->messages()
++        ->orderBy('created_at', 'asc')
++        ->orderBy('id', 'asc')
++        ->get()
++        ->values();
++
++    $targetMessage = $orderedMessages->get(11);
++    $expectedWindowIds = $orderedMessages->slice(1, 21)->pluck('id')->all();
++
++    $component = Livewire::actingAs($auth)->test(ChatBox::class, ['conversation' => $conversation->id]);
++
++    expect(collect($component->instance()->loadedMessages)->flatten(1)->pluck('id')->all())
++        ->not->toContain($targetMessage->id);
++
++    $component
++        ->call('jumpToMessage', $targetMessage->id)
++        ->assertDispatched('scroll-to-message');
++
++    $loadedIds = collect($component->instance()->loadedMessages)->flatten(1)->pluck('id')->all();
++
++    expect($component->instance()->anchorId)->toBe($targetMessage->id)
++        ->and($loadedIds)->toBe($expectedWindowIds)
++        ->and($component->instance()->canLoadOlder)->toBeTrue()
++        ->and($component->instance()->canLoadNewer)->toBeTrue();
++});
++
++test('it loads newer messages after jumping to an older window', function () {
++    $auth = User::factory()->create(['name' => 'Test']);
++    $receiver = User::factory()->create(['name' => 'John']);
++    $conversation = $auth->createConversationWith($receiver, 'Message 1');
++
++    foreach (range(2, 30) as $index) {
++        $auth->sendMessageTo($conversation, "Message {$index}");
++    }
++
++    $orderedMessages = $conversation->messages()
++        ->orderBy('created_at', 'asc')
++        ->orderBy('id', 'asc')
++        ->get()
++        ->values();
++
++    $targetMessage = $orderedMessages->get(11);
++    $expectedIdsAfterLoadNewer = $orderedMessages->slice(1)->pluck('id')->all();
++
++    $component = Livewire::actingAs($auth)->test(ChatBox::class, ['conversation' => $conversation->id]);
++
++    $component->call('jumpToMessage', $targetMessage->id);
++
++    expect($component->instance()->canLoadNewer)->toBeTrue();
++
++    $component->call('loadNewer');
++
++    $loadedIds = collect($component->instance()->loadedMessages)->flatten(1)->pluck('id')->all();
++
++    expect($loadedIds)->toBe($expectedIdsAfterLoadNewer)
++        ->and($component->instance()->canLoadNewer)->toBeFalse()
++        ->and($component->instance()->canLoadOlder)->toBeTrue();
++});
++
+ test('returns 404 if conversation is not found', function () {
+     $auth = User::factory()->create();
+ 
+@@ -377,6 +510,20 @@
+             ->assertNotDispatched('refresh');
+     });
+ 
++    test('When Widget it dispatches "refresh" event after succesfully loading chat', function () {
++        $auth = User::factory()->create();
++        $user = User::factory()->create();
++
++        $conversation = $auth->createConversationWith($user, 'hi');
++        $user->sendMessageTo($auth, 'new unread');
++
++        $request = Livewire::actingAs($auth)->test(ChatBox::class, ['conversation' => $conversation->id, 'widget' => true]);
++
++        $request
++            ->assertStatus(200)
++            ->assertDispatched('refresh');
++    });
++
+     // test('When Widget it dispatches "refresh" event after succesfully loading chat', function () {
+     test('because event is fired in blade x-init so it\'s not testable so we just check it\'s presence ', function () {
+         $auth = User::factory()->create();
+diff --git a/tests/Feature/ChatsTest.php b/tests/Feature/ChatsTest.php
+index 9516497e2..a5c6fed4d 100644
+--- a/tests/Feature/ChatsTest.php
++++ b/tests/Feature/ChatsTest.php
+@@ -586,6 +586,7 @@
+         // dd($conversations,$messages);
+ 
+         Livewire::actingAs($auth)->test(Chatlist::class)
++            ->assertSeeHtml('data-show-unread-status="1"')
+             ->assertSeeHtml('dusk="unreadMessagesDot"')
+             ->assertDontSeeHtml('dusk="unreadMessagesCount"');
+     });
+@@ -659,6 +660,66 @@
+             ->and($loadedConversation?->getAttribute('unread_messages_count'))->toBe(2);
+     });
+ 
++    it('refreshes unread dot when refresh-chats event is dispatched after a new incoming message', function () {
++
++        $auth = User::factory()->create();
++        $user1 = User::factory()->create(['name' => 'iam user 1']);
++
++        $auth->createConversationWith($user1, message: 'How are you doing');
++
++        $component = Livewire::actingAs($auth)->test(Chatlist::class)
++            ->assertSeeHtml('data-show-unread-status="0"');
++
++        sleep(1);
++        $user1->sendMessageTo($auth, message: 'I am good');
++
++        $component->dispatch('refresh-chats')
++            ->assertSeeHtml('data-show-unread-status="1"')
++            ->assertSeeHtml('dusk="unreadMessagesDot"');
++    });
++
++    it('refreshes unread count badge when refresh-chats event is dispatched after a new incoming message', function () {
++
++        testPanelProvider()->unreadIndicator(type: UnreadIndicatorType::Count);
++
++        $auth = User::factory()->create();
++        $user1 = User::factory()->create(['name' => 'iam user 1']);
++
++        $auth->createConversationWith($user1, message: 'How are you doing');
++
++        $component = Livewire::actingAs($auth)->test(Chatlist::class)
++            ->assertSeeHtml('data-show-unread-status="0"');
++
++        sleep(1);
++        $user1->sendMessageTo($auth, message: 'I am good');
++
++        $component->dispatch('refresh-chats')
++            ->assertSeeHtml('data-show-unread-status="1"')
++            ->assertSeeHtml('dusk="unreadMessagesCount"')
++            ->assertSee('1');
++    });
++
++    it('shows unread indicator for another conversation while one chat is selected', function () {
++
++        $auth = User::factory()->create();
++        $userA = User::factory()->create(['name' => 'iam user a']);
++        $userB = User::factory()->create(['name' => 'iam user b']);
++
++        $conversationA = $auth->createConversationWith($userA, message: 'How are you doing');
++        $conversationB = $auth->createConversationWith($userB, message: 'You there?');
++
++        $component = Livewire::actingAs($auth)->test(Chatlist::class)
++            ->set('selectedConversationId', (string) $conversationA->id)
++            ->assertSeeHtml('data-show-unread-status="0"');
++
++        sleep(1);
++        $userB->sendMessageTo($auth, message: 'I am good');
++
++        $component->dispatch('refresh-chats')
++            ->assertSeeHtml('data-show-unread-status="1"')
++            ->assertSeeHtml('dusk="unreadMessagesDot"');
++    });
++
+     it('keeps the unread dot visible when unread messages remain after auth sends the latest message', function () {
+ 
+         $auth = User::factory()->create();
+@@ -713,9 +774,9 @@
+         expect($html)
+             ->toContain('dusk="messagePreviewBody"')
+             ->toContain('dusk="messagePreviewTime"')
+-            ->toContain('showUnreadStatus && !false')
+             ->toContain('font-semibold text-black')
+-            ->toContain('font-normal text-gray-600');
++            ->toContain('font-medium text-gray-800')
++            ->not->toContain('showUnreadStatus && !false');
+     });
+     it('Doesnt show unread message Dot if message does not belong to Auth and is Read', function () {
+ 
+@@ -737,7 +798,7 @@
+         $conversation->markAsRead($auth);
+ 
+         Livewire::actingAs($auth)->test(Chatlist::class)
+-            ->assertDontSeeHtml('dusk="unreadMessagesDot"');
++            ->assertSeeHtml('data-show-unread-status="0"');
+     });
+ 
+     it('still shows unread message Dot even if message belongs to Participant of Different Model', function () {
+@@ -757,6 +818,7 @@
+         // dd($conversations,$messages);
+ 
+         Livewire::actingAs($auth)->test(Chatlist::class)
++            ->assertSeeHtml('data-show-unread-status="1"')
+             ->assertSeeHtml('dusk="unreadMessagesDot"');
+     });
+ 
+@@ -784,7 +846,7 @@
+         $unreadCount = $conversation->getUnreadCountFor($auth);
+ 
+         Livewire::actingAs($auth)->test(Chatlist::class)
+-            ->assertDontSeeHtml('dusk="unreadMessagesDot"');
++            ->assertSeeHtml('data-show-unread-status="0"');
+     });
+ 
+     it('shows message time AS "now"  if less than a minute old', function () {
+diff --git a/tests/Feature/IndexTest.php b/tests/Feature/IndexTest.php
+index 647e280db..1e430dc69 100644
+--- a/tests/Feature/IndexTest.php
++++ b/tests/Feature/IndexTest.php
+@@ -54,3 +54,11 @@
+     $response->assertSee('Select a conversation to start messaging');
+ 
+ });
++
++test('it does not persist the chats sidebar shell on the chats index page', function () {
++    $auth = User::factory()->create();
++
++    $this->actingAs($auth)->get(testPanelProvider()->chatsRoute())
++        ->assertStatus(200)
++        ->assertDontSee('x-persist="chats"', false);
++});
+diff --git a/tests/Feature/ViewTest.php b/tests/Feature/ViewTest.php
+index 7b0d913a8..b93593f8e 100644
+--- a/tests/Feature/ViewTest.php
++++ b/tests/Feature/ViewTest.php
+@@ -86,3 +86,53 @@
+     expect($auth->getUnReadCount())->toBe(0);
+ 
+ });
++
++test('it does not mark messages as read when only the chats index is refreshed', function () {
++    $auth = User::factory()->create();
++
++    $receiver = User::factory()->create(['name' => 'John']);
++    $conversation = Conversation::factory()->withParticipants([$auth, $receiver])->create();
++
++    $receiver->sendMessageTo($auth, message: 'how is it going');
++    $receiver->sendMessageTo($auth, message: 'i am good thanks');
++
++    expect($conversation->fresh()->getUnreadCountFor($auth))->toBe(2);
++
++    $this->actingAs($auth)->get(testPanelProvider()->chatsRoute())
++        ->assertStatus(200);
++
++    expect($conversation->fresh()->getUnreadCountFor($auth))->toBe(2);
++});
++
++test('it does not mark a different conversation as read when another chat is open', function () {
++    $auth = User::factory()->create();
++
++    $userA = User::factory()->create(['name' => 'John']);
++    $userB = User::factory()->create(['name' => 'Jane']);
++
++    $conversationA = Conversation::factory()->withParticipants([$auth, $userA])->create();
++    $conversationB = Conversation::factory()->withParticipants([$auth, $userB])->create();
++
++    $userA->sendMessageTo($auth, message: 'message 1');
++    $userA->sendMessageTo($auth, message: 'message 2');
++
++    expect($conversationA->fresh()->getUnreadCountFor($auth))->toBe(2)
++        ->and($conversationB->fresh()->getUnreadCountFor($auth))->toBe(0);
++
++    $this->actingAs($auth)->get(testPanelProvider()->chatRoute($conversationB->id))
++        ->assertStatus(200);
++
++    expect($conversationA->fresh()->getUnreadCountFor($auth))->toBe(2)
++        ->and($conversationB->fresh()->getUnreadCountFor($auth))->toBe(0);
++});
++
++test('it does not persist the chats sidebar shell on the chat page', function () {
++    $auth = User::factory()->create();
++    $user = User::factory()->create();
++
++    $conversation = $auth->createConversationWith($user);
++
++    $this->actingAs($auth)->get(testPanelProvider()->chatRoute($conversation->id))
++        ->assertStatus(200)
++        ->assertDontSee('x-persist="chats"', false);
++});

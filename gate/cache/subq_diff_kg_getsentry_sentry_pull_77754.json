@@ -1,0 +1,1 @@
+{"Logic bug - using `timezone.now()` as default in dataclass sets the same timestamp for all instances. Should use `field(default_factory=timezone.now)` instead.": 0.9077680110931396}

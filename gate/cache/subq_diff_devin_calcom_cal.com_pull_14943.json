@@ -1,0 +1,1 @@
+{"The second OR clause in the deleteMany query filters only on retryCount > 1 without any method constraint, causing the SMS cron job to delete all WorkflowReminder rows across all methods (EMAIL, WHATSAPP, SMS) that have retryCount > 1, not just SMS reminders. The fix is to add method: WorkflowMethods.SMS to the second OR branch.": 0.993770182132721}

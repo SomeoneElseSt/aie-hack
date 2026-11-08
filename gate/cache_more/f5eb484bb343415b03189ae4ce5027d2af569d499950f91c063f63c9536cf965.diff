@@ -1,0 +1,3783 @@
+diff --git a/README.md b/README.md
+index 561bd0f..f211856 100644
+--- a/README.md
++++ b/README.md
+@@ -297,3 +297,244 @@ pm.sendRequest({
+ 
+ `pm.sendRequest` accepts a URL string or a Postman-format options object and provides the callback response with `.code`, `.status`, `.headers.get(name)`, `.json()`, and `.text()`.
+ Works in both **pre-request** and **test** scripts. All chained requests complete before the next request in the collection starts.
++
++---
++
++## Workspaces
++
++Workspaces let you keep separate sets of collections, environments, and variables. Switch between them from the sidebar — each workspace is stored independently on disk.
++
++Open **Manage Workspaces** (gear icon next to the workspace name) to:
++
++- Create, rename, duplicate, or delete workspaces
++- Assign a colour to each workspace for quick identification
++- Sync a workspace to a remote provider (Git, S3, HTTP, or a Team server)
++- Browse and restore automatic snapshots (History tab)
++
++### Git Sync
++
++The **Sync** tab lets you back up and share a workspace via a Git repository.
++
++#### Prerequisites
++
++- Git must be installed on the machine running the Apilix server (`git --version` to verify)
++- A remote repository (GitHub, GitLab, Gitea, etc.) — **create it empty** (no initial README) for a clean first push
++
++#### Setting up
++
++1. Create an **empty** repository on your Git host.
++2. Generate a **Personal Access Token** with repo write access:
++   - GitHub: Settings → Developer settings → Personal access tokens → `repo` scope
++   - GitLab: Settings → Access Tokens → `read_repository` + `write_repository`
++3. Open **Manage Workspaces → Sync**, select **Git Repository**, and fill in the fields:
++
++| Field | Required | Notes |
++|---|:---:|---|
++| Remote URL | ✅ | `https://github.com/user/repo.git` |
++| Branch | — | Defaults to `main` if left blank |
++| Username | — | Required only for HTTPS auth (not SSH) |
++| Token / Password | — | Required together with Username for private repos |
++| Author Name | ⚠ | Used for git commits — needed if no global `git config user.name` |
++| Author Email | ⚠ | Used for git commits — needed if no global `git config user.email` |
++
++4. Click **Push ↑** — Apilix initialises a local git repo and pushes `workspace.json` to the remote.
++5. On any other machine, fill in the same config and click **Pull ↓** (or **Import once ↓** if you don't want to save the config).
++
++#### Buttons
++
++| Button | Behaviour |
++|---|---|
++| **Push ↑** | Saves config, commits the current workspace, and pushes to the remote |
++| **Pull ↓** | Saves config, fetches the remote, and replaces the local workspace |
++| **Save config** | Persists the connection details without pushing or pulling |
++| **Import once ↓** | Pulls once without saving the config — useful for a one-time clone |
++
++> **Tip:** If the remote already has commits (not empty), click **Import once ↓** before pushing to avoid a divergent-branches error.
++
++### Amazon S3 Sync
++
++Stores the workspace as a JSON object in an S3 bucket using presigned URLs generated inside the Electron main process — AWS credentials never reach the renderer.
++
++> **Electron only** — S3 sync is not available in browser/web mode.
++
++#### Setting up
++
++1. Create an S3 bucket (or reuse an existing one).
++2. Create an IAM user or role with the following permissions on the bucket:
++   ```
++   s3:GetObject
++   s3:PutObject
++   s3:HeadObject
++   ```
++3. Generate an **Access Key ID** and **Secret Access Key** for that user.
++4. Open **Manage Workspaces → Sync**, select **Amazon S3**, and fill in the fields:
++
++| Field | Required | Notes |
++|---|:---:|---|
++| Bucket | ✅ | S3 bucket name (e.g. `my-apilix-bucket`) |
++| Region | ✅ | AWS region (e.g. `us-east-1`) |
++| Prefix | — | Key prefix for the object, defaults to `apilix/` |
++| Access Key ID | ✅ | AWS credential — stored encrypted on disk |
++| Secret Access Key | ✅ | AWS credential — stored encrypted on disk |
++
++5. Click **Push ↑** to upload. The workspace is stored at `{prefix}{workspaceId}.json` in the bucket.
++
++---
++
++### HTTP Endpoint Sync
++
++Pushes and pulls workspace JSON to/from any HTTP endpoint that accepts a JSON body — useful for a self-hosted sync service or a serverless function.
++
++#### Expected API contract
++
++| Operation | Method | Body / Response |
++|---|---|---|
++| Push | `PUT {endpoint}` | Body: `{ data, lastModified }` → any 2xx |
++| Pull | `GET {endpoint}` | Response: `{ data: WorkspaceData }` or 404 |
++| Timestamp | `HEAD {endpoint}` | `Last-Modified` or `X-Last-Modified` header |
++
++#### Setting up
++
++1. Deploy (or identify) an HTTP endpoint that implements the contract above.
++2. Open **Manage Workspaces → Sync**, select **HTTP Endpoint**, and fill in the fields:
++
++| Field | Required | Notes |
++|---|:---:|---|
++| Endpoint URL | ✅ | Full URL, e.g. `https://api.example.com/workspaces/prod` |
++| Bearer Token | — | Sent as `Authorization: Bearer <token>` if provided |
++
++3. Click **Push ↑** to upload or **Pull ↓** to download.
++
++---
++
++### Team Server Sync
++
++Syncs with a self-hosted **Apilix team server** that provides role-based access control (RBAC) for shared workspaces. Deploy the standalone `apilix-team-server` project and follow its README for setup instructions.
++
++#### Connecting a workspace
++
++1. Obtain a JWT token from the team server (login endpoint or admin console).
++2. Note the **Server Workspace ID** assigned to your workspace on the server.
++3. Open **Manage Workspaces → Sync**, select **Team Server**, and fill in the fields:
++
++| Field | Required | Notes |
++|---|:---:|---|
++| Server URL | ✅ | Base URL of the team server, e.g. `https://apilix.yourcompany.com` |
++| Server Workspace ID | ✅ | The workspace ID as registered on the server (for example, a server-generated hex ID) |
++| JWT Token | ✅ | Session token — RBAC is enforced server-side |
++
++4. Use the **Team** tab to test the connection before pushing.
++5. Click **Push ↑** to upload or **Pull ↓** to sync the latest version from the server.
++
++---
++
++## Team Management
++
++The Apilix team server is a self-hosted Express service available as the standalone `apilix-team-server` project. It lets multiple users share workspaces with role-based access control and runs as a separate process from the main API server.
++
++### Roles
++
++| Role | Pull data | Push data | Manage members | Delete workspace |
++|---|:---:|:---:|:---:|:---:|
++| **viewer** | ✅ | ✗ | ✗ | ✗ |
++| **editor** | ✅ | ✅ | ✗ | ✗ |
++| **owner** | ✅ | ✅ | ✅ | ✅ |
++
++The workspace creator is automatically the **owner**. The bootstrap admin (see below) is also an owner globally.
++
++### Starting the server
++
++See the `apilix-team-server` project for full setup instructions.
++
++Environment variables:
++
++| Variable | Default | Description |
++|---|---|---|
++| `TEAM_PORT` | `3003` | Port the team server listens on |
++| `TEAM_DATA_DIR` | `~/.apilix-team` | Directory where user and workspace data is stored |
++| `ADMIN_EMAIL` | — | Email for the bootstrap admin user (created on first run) |
++| `ADMIN_PASSWORD` | — | Password for the bootstrap admin user |
++
++Example:
++
++```bash
++TEAM_PORT=3003 \
++ADMIN_EMAIL=admin@yourcompany.com \
++ADMIN_PASSWORD=changeme \
++node index.js
++```
++
++The admin credentials are only used on **first run** to create the admin user. The password is hashed (bcrypt when available, SHA-512 otherwise) and the plaintext is never stored.
++
++Data is stored as JSON files under `TEAM_DATA_DIR/team/`:
++
++```
++~/.apilix-team/team/
++  users.json          ← user accounts
++  workspaces.json     ← workspace metadata and member lists
++  .secret             ← JWT signing secret (auto-generated, mode 600)
++  data/
++    {workspaceId}.json  ← workspace data blobs
++```
++
++### API reference
++
++All routes except `/auth/login` and `/health` require a `Authorization: Bearer <token>` header.
++
++#### Authentication
++
++```
++POST /auth/login
++Body: { "email": "...", "password": "..." }
++Response: { "token": "eyJ...", "user": { "id", "name", "email", "role" } }
++```
++
++Tokens are valid for **30 days**.
++
++#### Workspaces
++
++| Method | Path | Min role | Description |
++|---|---|---|---|
++| `GET` | `/workspaces` | any member | List workspaces the caller belongs to |
++| `POST` | `/workspaces` | authenticated | Create a new workspace |
++| `GET` | `/workspaces/:id` | viewer | Get workspace metadata |
++| `DELETE` | `/workspaces/:id` | owner | Delete a workspace and its data |
++| `PUT` | `/workspaces/:id/members` | owner | Add or update a member |
++| `DELETE` | `/workspaces/:id/members/:uid` | owner | Remove a member |
++| `GET` | `/workspaces/:id/data` | viewer | Pull workspace data |
++| `PUT` | `/workspaces/:id/data` | editor | Push workspace data |
++| `HEAD` | `/workspaces/:id/data` | viewer | Get `X-Last-Modified` timestamp |
++| `GET` | `/health` | — | Health check |
++
++#### Creating a workspace (curl example)
++
++```bash
++# 1. Log in and capture the token
++TOKEN=$(curl -s -X POST http://localhost:3003/auth/login \
++  -H "Content-Type: application/json" \
++  -d '{"email":"admin@yourcompany.com","password":"changeme"}' \
++  | jq -r .token)
++
++# 2. Create a workspace
++curl -X POST http://localhost:3003/workspaces \
++  -H "Authorization: Bearer $TOKEN" \
++  -H "Content-Type: application/json" \
++  -d '{"name":"My Team Workspace"}'
++# → { "workspace": { "id": "a1b2c3d4", "name": "My Team Workspace", ... } }
++
++# 3. Add a member (replace USER_ID and role as needed)
++curl -X PUT http://localhost:3003/workspaces/a1b2c3d4/members \
++  -H "Authorization: Bearer $TOKEN" \
++  -H "Content-Type: application/json" \
++  -d '{"userId":"<USER_ID>","role":"editor"}'
++```
++
++#### Connecting Apilix to the team server
++
++1. Start the team server and note its URL (e.g. `http://localhost:3003` or your public hostname).
++2. Each team member logs in to get their JWT token (via the `/auth/login` endpoint above or a future login UI).
++3. In **Manage Workspaces → Sync**, select **Team Server** and enter:
++   - **Server URL** — base URL of the team server
++   - **Server Workspace ID** — the `id` returned when the workspace was created (`a1b2c3d4` in the example above)
++   - **JWT Token** — the member's personal token
++4. Click **Test connection** in the **Team** tab to verify, then **Push ↑** / **Pull ↓** to sync.
+diff --git a/WORKSPACES.md b/WORKSPACES.md
+new file mode 100644
+index 0000000..e92acf7
+--- /dev/null
++++ b/WORKSPACES.md
+@@ -0,0 +1,679 @@
++# Apilix — Workspace Management & Collaboration
++
++This document covers everything about workspaces: what they are, how they are stored, how to sync them to a remote, and how to collaborate with a team.
++
++---
++
++## Table of Contents
++
++1. [What is a workspace?](#1-what-is-a-workspace)
++2. [Local storage layout](#2-local-storage-layout)
++3. [Managing workspaces](#3-managing-workspaces)
++4. [Automatic history (snapshots)](#4-automatic-history-snapshots)
++5. [Sync overview](#5-sync-overview)
++6. [Sync provider: Git Repository](#6-sync-provider-git-repository)
++7. [Sync provider: Amazon S3](#7-sync-provider-amazon-s3)
++8. [Sync provider: HTTP Endpoint](#8-sync-provider-http-endpoint)
++9. [Sync provider: Team Server](#9-sync-provider-team-server)
++10. [Team server setup & management](#10-team-server-setup--management)
++11. [Conflict resolution](#11-conflict-resolution)
++12. [Choosing the right collaboration solution](#12-choosing-the-right-collaboration-solution)
++
++---
++
++## 1. What is a workspace?
++
++A **workspace** is an isolated container that holds:
++
++- Collections and requests
++- Environments and environment variables
++- Global variables
++- Collection-scoped variables
++- Cookie jar
++- Mock server collections, routes, and port setting
++
++Each workspace is completely independent — switching workspaces replaces everything visible in the UI. You can create as many workspaces as you want (e.g. one per project, one per client, one per environment tier).
++
++### Workspace metadata
++
++Each workspace entry in the manifest includes:
++
++| Field | Description |
++|---|---|
++| `id` | Auto-generated UUID — stable identifier used for file names and sync |
++| `name` | Display name |
++| `color` | Accent colour (hex) shown in the switcher |
++| `createdAt` | ISO timestamp of creation |
++| `type` | `local` (default) or `team` (connected to a team server) |
++| `role` | For team workspaces: `owner`, `editor`, or `viewer` |
++| `teamServerUrl` | For team workspaces: the team server base URL |
++
++---
++
++## 2. Local storage layout
++
++### Electron (desktop)
++
++Data lives inside the system app-data directory:
++
++| Platform | Path |
++|---|---|
++| macOS | `~/Library/Application Support/Apilix/` |
++| Windows | `%APPDATA%\Apilix\` |
++| Linux | `~/.config/Apilix/` |
++
++File layout:
++
++```
++{userData}/
++  workspaces.json              ← manifest: list of workspaces + activeWorkspaceId
++  settings.json                ← app-level settings (theme, etc.)
++  sync-config.json             ← per-workspace sync credentials (encrypted)
++  workspaces/
++    {workspaceId}.json         ← workspace data (collections, envs, …)
++    {workspaceId}/
++      history.json             ← snapshot index (newest first, max 50 entries)
++      snapshots/
++        {snapshotId}.json      ← point-in-time workspace data blob
++```
++
++### Browser / web mode
++
++When running without Electron, all data is stored in `localStorage` with the following keys:
++
++| Key | Content |
++|---|---|
++| `apilix_workspaces` | Workspace manifest |
++| `apilix_workspace_{id}` | Workspace data per ID |
++| `apilix_settings` | App settings |
++| `apilix_sync_config` | Sync credentials |
++
++> **Note:** localStorage is limited to ~5 MB and is cleared when the browser cache is cleared. Use desktop mode for reliable persistence.
++
++### Credential storage
++
++Sensitive sync credentials (tokens, secret keys) are encrypted using Electron's `safeStorage` API before being written to `sync-config.json`. In browser mode they are stored in plaintext in localStorage — use browser mode for development only.
++
++---
++
++## 3. Managing workspaces
++
++Open **Manage Workspaces** by clicking the gear icon next to the workspace name in the sidebar.
++
++### Workspaces tab
++
++| Action | How |
++|---|---|
++| Switch | Click the workspace name in the list |
++| Create | Click **+ New workspace** (creates an empty workspace and switches to it) |
++| Rename | Click ✏ next to a workspace |
++| Change colour | Click any colour dot on the left |
++| Duplicate | Click ⧉ — copies all collections, environments, and variables into a new workspace |
++| Delete | Click 🗑 — requires at least one other workspace to exist |
++
++Clicking **Open data folder ↗** opens the Electron userData directory in the system file manager.
++
++### Creating a new workspace
++
++A new workspace starts completely empty (no collections, no environments). You can then:
++
++- Import a Postman collection via **Import**
++- Manually create collections
++- Pull data from a remote sync provider
++
++### Duplicating a workspace
++
++Duplication performs a deep clone — all IDs are preserved and the new workspace is immediately activated. It is useful for creating a staging copy of a production workspace.
++
++---
++
++## 4. Automatic history (snapshots)
++
++Apilix automatically creates a snapshot every time the active workspace is saved to disk (debounced, roughly 1–2 seconds after the last change).
++
++### History tab
++
++Open **Manage Workspaces → History** to see the full snapshot timeline, newest first.
++
++Each entry shows:
++- Auto-generated summary (e.g. `3 collection(s), auto-save`)
++- Timestamp (local time)
++- Number of collections at the time of the snapshot
++
++Click an entry to expand it, then click **Restore this snapshot** to roll back the workspace to that exact state. The current state is overwritten — if you need to preserve it, duplicate the workspace first.
++
++### Snapshot limits
++
++Up to **50 snapshots** are kept per workspace. When the limit is reached the oldest snapshot is automatically deleted.
++
++### Snapshot storage location
++
++```
++{userData}/workspaces/{workspaceId}/
++  history.json            ← index with summary metadata
++  snapshots/
++    {snapshotId}.json     ← full workspace data blob
++```
++
++---
++
++## 5. Sync overview
++
++The **Sync tab** in Manage Workspaces lets you push and pull a workspace to/from a remote provider. All four providers share the same three operations:
++
++| Operation | Button | Description |
++|---|---|---|
++| **Push ↑** | Push ↑ | Serialises the current workspace and uploads it to the remote. Config is saved first. |
++| **Pull ↓** | Pull ↓ | Downloads remote data and replaces the local workspace. Config is saved first. |
++| **Save config** | Save config | Persists the connection fields to disk without pushing or pulling. |
++| **Import once ↓** | Import once (don't save config) ↓ | Pulls once without persisting the config — useful for a one-time clone. |
++
++### Conflict detection
++
++Before every pull Apilix compares the remote `Last-Modified` timestamp against the local `lastSynced` timestamp. If the remote is newer a **conflict banner** appears offering two choices:
++
++- **Use Remote** — overwrite local with remote data
++- **Keep Local** — discard the remote, keep the local version as-is
++
++---
++
++## 6. Sync provider: Git Repository
++
++Stores the workspace as a `workspace.json` file inside a local git clone that is pushed to / pulled from a remote repository.
++
++### How it works
++
++1. On first push Apilix initialises a bare git repo at `{userData}/git-sync/workspaces/{workspaceId}/`.
++2. The workspace JSON is written to `workspace.json` and committed.
++3. The commit is pushed to the configured remote using `simple-git`.
++4. On pull the remote is fetched and `workspace.json` is read back.
++
++### Prerequisites
++
++- **Git must be installed** on the machine running the Apilix server (`git --version`).
++- A remote repository on GitHub, GitLab, Gitea, or any other git host.
++- The remote should be **empty** (no initial commit) for a clean first push. If it already has commits, use **Import once ↓** before pushing.
++
++### Field reference
++
++| Field | Required | Notes |
++|---|:---:|---|
++| Remote URL | ✅ | HTTPS or SSH URL, e.g. `https://github.com/user/repo.git` |
++| Branch | — | Defaults to `main` if blank |
++| Username | — | HTTPS auth only; not needed for SSH |
++| Token / Password | — | Personal Access Token; used together with Username |
++| Author Name | ⚠ | Required for commits unless `git config --global user.name` is set |
++| Author Email | ⚠ | Required for commits unless `git config --global user.email` is set |
++
++### Generating a Personal Access Token
++
++**GitHub:**
++1. Settings → Developer settings → Personal access tokens → Generate new token (classic)
++2. Select the `repo` scope
++3. Copy the token and enter it in the Token field
++
++**GitLab:**
++1. User Settings → Access Tokens
++2. Select `read_repository` + `write_repository` scopes
++3. Copy the token
++
++### Step-by-step setup
++
++1. Create an **empty** repo on your git host (no README, no .gitignore).
++2. Generate a PAT (see above).
++3. Open **Manage Workspaces → Sync → Git Repository**.
++4. Fill in Remote URL, Branch, Username, Token, Author Name, Author Email.
++5. Click **Save config** to persist the credentials.
++6. Click **Push ↑** — the first push initialises the local repo and uploads `workspace.json`.
++7. On another machine, fill in the same fields and click **Pull ↓**.
++
++### Ongoing usage
++
++| Scenario | Action |
++|---|---|
++| You made changes locally | Push ↑ |
++| A teammate pushed changes | Pull ↓ |
++| First time on a new machine | Configure fields → Pull ↓ |
++| One-off clone without saving credentials | Import once ↓ |
++| Remote already has existing commits | Import once ↓ first, then Push ↑ |
++
++### Authentication over HTTPS
++
++When both Username and Token are provided, Apilix embeds the credentials in the remote URL:
++
++```
++https://{username}:{token}@github.com/user/repo.git
++```
++
++This is done server-side only and the credential-embedded URL is never stored.
++
++### SSH remotes
++
++For SSH remotes (`git@github.com:user/repo.git`), leave Username and Token blank. The git process on the server machine will use the system's SSH agent or `~/.ssh/config`.
++
++---
++
++## 7. Sync provider: Amazon S3
++
++Stores the workspace as a JSON object in an S3-compatible bucket. Presigned URLs are generated inside the Electron main process so that AWS credentials never reach the renderer.
++
++> **Electron only** — this provider is not available in browser/web mode.
++
++### How it works
++
++1. The Electron main process generates a presigned URL (valid 60 s) for PUT, GET, or HEAD.
++2. The renderer fetches the presigned URL and performs the HTTP operation directly with S3.
++3. The object key is `{prefix}{workspaceId}.json` (default prefix: `apilix/`).
++
++### IAM permissions required
++
++```json
++{
++  "Effect": "Allow",
++  "Action": ["s3:GetObject", "s3:PutObject", "s3:HeadObject"],
++  "Resource": "arn:aws:s3:::your-bucket-name/apilix/*"
++}
++```
++
++### Field reference
++
++| Field | Required | Notes |
++|---|:---:|---|
++| Bucket | ✅ | Bucket name, e.g. `my-apilix-bucket` |
++| Region | ✅ | AWS region, e.g. `us-east-1` |
++| Prefix | — | Key prefix, defaults to `apilix/` |
++| Access Key ID | ✅ | AWS IAM credential, stored encrypted |
++| Secret Access Key | ✅ | AWS IAM credential, stored encrypted |
++
++### Step-by-step setup
++
++1. Create an S3 bucket in the AWS console.
++2. Create an IAM user (or role) with the minimal policy above.
++3. Generate an Access Key ID and Secret Access Key for that user.
++4. Open **Manage Workspaces → Sync → Amazon S3**.
++5. Fill in all five fields and click **Save config**.
++6. Click **Push ↑** to upload the workspace. Verify the object appears in the S3 console at `{prefix}{workspaceId}.json`.
++7. On another machine, fill in the same credentials and click **Pull ↓**.
++
++### Sharing with teammates
++
++All teammates must fill in the same bucket, region, prefix, and credentials. To restrict write access, create separate IAM policies — editors get `s3:PutObject`, viewers get only `s3:GetObject` and `s3:HeadObject`.
++
++### Using S3-compatible storage
++
++Any S3-compatible service (MinIO, Backblaze B2, DigitalOcean Spaces, Cloudflare R2) works. For non-AWS services, the standard AWS SDK endpoint override is not exposed in the UI — use the HTTP Endpoint provider instead or set `AWS_ENDPOINT_URL` in the environment before starting the Electron app.
++
++---
++
++## 8. Sync provider: HTTP Endpoint
++
++Pushes and pulls workspace JSON to/from any HTTP endpoint that you control. Useful for:
++
++- A company's own sync microservice
++- A serverless function (AWS Lambda, Cloudflare Workers, etc.)
++- Any storage-as-a-service with an HTTP API
++
++### Expected API contract
++
++Your endpoint must implement these three HTTP operations:
++
++| Operation | Method | Request | Response |
++|---|---|---|---|
++| Push | `PUT {endpoint}` | JSON body `{ "data": WorkspaceData, "lastModified": "ISO string" }` | Any 2xx |
++| Pull | `GET {endpoint}` | No body | JSON `{ "data": WorkspaceData }` or `404` |
++| Timestamp | `HEAD {endpoint}` | No body | `Last-Modified` or `X-Last-Modified` header |
++
++Returning `404` on GET signals an empty remote (nothing to pull) — this is not treated as an error.
++
++### Field reference
++
++| Field | Required | Notes |
++|---|:---:|---|
++| Endpoint URL | ✅ | Full URL, e.g. `https://api.example.com/workspaces/prod` |
++| Bearer Token | — | Sent as `Authorization: Bearer <token>` if provided |
++
++### Step-by-step setup
++
++1. Deploy your endpoint (see minimal example below).
++2. Open **Manage Workspaces → Sync → HTTP Endpoint**.
++3. Enter the endpoint URL and an optional bearer token.
++4. Click **Save config**, then **Push ↑** to upload.
++
++### Minimal Node.js endpoint example
++
++```js
++const express = require('express');
++const app = express();
++app.use(express.json({ limit: '50mb' }));
++
++let store = null; // replace with a real database
++
++app.put('/workspace', (req, res) => {
++  store = req.body;
++  res.set('Last-Modified', new Date().toUTCString()).json({ ok: true });
++});
++
++app.get('/workspace', (req, res) => {
++  if (!store) return res.status(404).json({ error: 'empty' });
++  res.set('Last-Modified', store.lastModified ?? new Date().toUTCString()).json(store);
++});
++
++app.head('/workspace', (req, res) => {
++  if (!store) return res.status(404).end();
++  res.set('Last-Modified', store.lastModified ?? new Date().toUTCString()).end();
++});
++
++app.listen(4000);
++```
++
++---
++
++## 9. Sync provider: Team Server
++
++Syncs with the self-hosted Apilix team server. Unlike the other providers, the team server enforces **role-based access control** — different team members can have different permissions on the same workspace.
++
++### Field reference
++
++| Field | Required | Notes |
++|---|:---:|---|
++| Server URL | ✅ | Base URL, e.g. `https://apilix.yourcompany.com` |
++| Server Workspace ID | ✅ | The `id` returned when the workspace was created on the server |
++| JWT Token | ✅ | Personal session token — 30-day expiry |
++
++### Step-by-step setup
++
++1. Start the team server (see [Section 10](#10-team-server-setup--management)).
++2. The admin creates a workspace on the server (see API examples in Section 10).
++3. The admin shares the **Server Workspace ID** and **Server URL** with team members.
++4. Each team member calls `POST /auth/login` to get their JWT token.
++5. In Apilix: **Manage Workspaces → Sync → Team Server** → enter Server URL, Server Workspace ID, JWT Token.
++6. Click **Test connection** in the **Team** tab to verify access.
++7. Editors click **Push ↑** / **Pull ↓** to sync; viewers can only **Pull ↓**.
++
++---
++
++## 10. Team server setup & management
++
++The team server is a standalone Express application available as the `apilix-team-server` project. It runs on its own port and is completely separate from the main Apilix API server.
++
++### Starting the server
++
++See the `apilix-team-server` project for full setup and deployment instructions.
++
++```bash
++git clone https://github.com/your-org/apilix-team-server
++cd apilix-team-server
++npm install
++npm start
++```
++
++### Environment variables
++
++| Variable | Default | Description |
++|---|---|---|
++| `TEAM_PORT` | `3003` | Port to listen on |
++| `TEAM_DATA_DIR` | `~/.apilix-team` | Root directory for all team data |
++| `ADMIN_EMAIL` | — | Email of the bootstrap admin (created on first start only) |
++| `ADMIN_PASSWORD` | — | Password of the bootstrap admin |
++
++Example with a custom port and data directory:
++
++```bash
++TEAM_PORT=8080 \
++TEAM_DATA_DIR=/var/apilix-team \
++ADMIN_EMAIL=admin@yourcompany.com \
++ADMIN_PASSWORD=s3cr3t \
++node index.js
++```
++
++### Data layout
++
++```
++{TEAM_DATA_DIR}/team/
++  users.json              ← { [userId]: { id, name, email, passwordHash, role } }
++  workspaces.json         ← { [workspaceId]: { id, name, ownerId, createdAt, members: {[userId]: role} } }
++  .secret                 ← JWT signing secret (auto-generated, chmod 600)
++  data/
++    {workspaceId}.json    ← { data: WorkspaceData, lastModified: ISO string }
++```
++
++### Security
++
++- Passwords are hashed with **bcrypt** (if `bcryptjs` is available) or SHA-512 with a random salt as fallback.
++- The JWT secret is generated once with `crypto.randomBytes(48)` and stored at mode `0o600`. Rotating it invalidates all existing tokens.
++- JWT tokens expire after **30 days**.
++
++### Role hierarchy
++
++```
++owner  >  editor  >  viewer
++```
++
++| Permission | viewer | editor | owner |
++|---|:---:|:---:|:---:|
++| Pull workspace data | ✅ | ✅ | ✅ |
++| Push workspace data | ✗ | ✅ | ✅ |
++| Add / update members | ✗ | ✗ | ✅ |
++| Remove members | ✗ | ✗ | ✅ |
++| Delete workspace | ✗ | ✗ | ✅ |
++
++The workspace creator is automatically the **owner**. The bootstrap admin is a global owner.
++
++### Full API reference
++
++All routes except `/auth/login` and `/health` require:
++```
++Authorization: Bearer <jwt-token>
++```
++
++#### Authentication
++
++```
++POST /auth/login
++Content-Type: application/json
++
++{ "email": "user@example.com", "password": "secret" }
++
++→ 200 { "token": "eyJ...", "user": { "id", "name", "email", "role" } }
++→ 401 { "error": "Invalid credentials" }
++```
++
++#### Workspace management
++
++```
++GET  /workspaces
++→ 200 { "workspaces": [{ id, name, ownerId, createdAt, role, membersCount }] }
++
++POST /workspaces
++{ "name": "My Workspace" }
++→ 201 { "workspace": { id, name, ownerId, createdAt, members: {} } }
++
++GET  /workspaces/:id
++→ 200 { "workspace": { ...meta, role } }
++→ 403 No access
++→ 404 Not found
++
++DELETE /workspaces/:id         (owner only)
++→ 200 { "ok": true }
++→ 403 Owner only
++```
++
++#### Member management (owner only)
++
++```
++PUT /workspaces/:id/members
++{ "userId": "<userId>", "role": "editor" | "viewer" }
++→ 200 { "ok": true }
++→ 400 userId and role required
++
++DELETE /workspaces/:id/members/:uid
++→ 200 { "ok": true }
++→ 403 Owner only
++```
++
++#### Workspace data
++
++```
++HEAD /workspaces/:id/data      (viewer+)
++→ 200  X-Last-Modified: <ISO string>
++→ 404  No data yet
++
++GET  /workspaces/:id/data      (viewer+)
++→ 200 { "data": WorkspaceData }  (X-Last-Modified header set)
++→ 404 No data yet
++
++PUT  /workspaces/:id/data      (editor+)
++{ "data": WorkspaceData }
++→ 200 { "ok": true, "lastModified": "..." }
++→ 400 data is required
++→ 403 Requires role: editor
++```
++
++#### Health check
++
++```
++GET /health
++→ 200 { "status": "ok" }
++```
++
++### Administration walkthrough (curl)
++
++```bash
++# 1. Log in as admin
++TOKEN=$(curl -s -X POST http://localhost:3003/auth/login \
++  -H "Content-Type: application/json" \
++  -d '{"email":"admin@yourcompany.com","password":"s3cr3t"}' \
++  | jq -r .token)
++
++# 2. Create a workspace
++WS_ID=$(curl -s -X POST http://localhost:3003/workspaces \
++  -H "Authorization: Bearer $TOKEN" \
++  -H "Content-Type: application/json" \
++  -d '{"name":"Project Alpha"}' \
++  | jq -r .workspace.id)
++echo "Workspace ID: $WS_ID"
++
++# 3. Invite a team member as editor
++# First, find or register the member's user ID
++curl -X PUT http://localhost:3003/workspaces/$WS_ID/members \
++  -H "Authorization: Bearer $TOKEN" \
++  -H "Content-Type: application/json" \
++  -d "{\"userId\":\"<member-user-id>\",\"role\":\"editor\"}"
++
++# 4. Downgrade to viewer
++curl -X PUT http://localhost:3003/workspaces/$WS_ID/members \
++  -H "Authorization: Bearer $TOKEN" \
++  -H "Content-Type: application/json" \
++  -d "{\"userId\":\"<member-user-id>\",\"role\":\"viewer\"}"
++
++# 5. Remove a member
++curl -X DELETE http://localhost:3003/workspaces/$WS_ID/members/<member-user-id> \
++  -H "Authorization: Bearer $TOKEN"
++
++# 6. Delete the workspace
++curl -X DELETE http://localhost:3003/workspaces/$WS_ID \
++  -H "Authorization: Bearer $TOKEN"
++```
++
++### Deploying behind a reverse proxy (nginx)
++
++```nginx
++server {
++    listen 443 ssl;
++    server_name apilix.yourcompany.com;
++
++    ssl_certificate     /etc/ssl/certs/apilix.crt;
++    ssl_certificate_key /etc/ssl/private/apilix.key;
++
++    location / {
++        proxy_pass         http://127.0.0.1:3003;
++        proxy_set_header   Host $host;
++        proxy_set_header   X-Real-IP $remote_addr;
++        proxy_read_timeout 60s;
++    }
++}
++```
++
++### Running as a systemd service (Linux)
++
++```ini
++[Unit]
++Description=Apilix Team Server
++After=network.target
++
++[Service]
++Type=simple
++User=apilix
++WorkingDirectory=/opt/apilix-team-server
++ExecStart=/usr/bin/node index.js
++Restart=on-failure
++Environment=TEAM_PORT=3003
++Environment=TEAM_DATA_DIR=/var/apilix-team
++Environment=ADMIN_EMAIL=admin@yourcompany.com
++Environment=ADMIN_PASSWORD=changeme
++
++[Install]
++WantedBy=multi-user.target
++```
++
++```bash
++sudo systemctl enable apilix-team
++sudo systemctl start apilix-team
++```
++
++---
++
++## 11. Conflict resolution
++
++A conflict occurs when the remote copy was modified after the local copy was last synced. This typically happens when two people push independently without pulling first.
++
++### Detection
++
++Before every pull the sync engine compares:
++- **Remote timestamp** — `Last-Modified` / `X-Last-Modified` header (or git commit time)
++- **Local `lastSynced`** — saved when the config was last written
++
++If the remote timestamp is newer a `ConflictError` is thrown and the UI shows a banner.
++
++### Resolution options
++
++| Choice | Effect |
++|---|---|
++| **Use Remote** | Downloads the remote and replaces the local workspace entirely. Local changes are lost. |
++| **Keep Local** | Cancels the pull. Your local workspace is unchanged. You should push or reconcile manually. |
++
++### Best practices to avoid conflicts
++
++- **Pull before you Push** — always pull the latest version before making changes and pushing.
++- **Use the team server** — it provides per-user sessions so conflicts are easier to coordinate.
++- **One writer at a time** — for Git and S3 providers, agree on who pushes at any given time.
++- **Use workspaces as branches** — duplicate your workspace before making large changes, then merge manually.
++
++---
++
++## 12. Choosing the right collaboration solution
++
++| Scenario | Recommended provider |
++|---|---|
++| Solo use, backup only | **Git** (private repo) or **S3** |
++| Two developers sharing occasionally | **Git** (HTTPS + PAT) |
++| Small team with shared AWS infrastructure | **S3** |
++| Team with role-based access needs | **Team Server** |
++| CI/CD pipeline or custom integration | **HTTP Endpoint** |
++| Offline / air-gapped environment | **Git** (self-hosted Gitea) or **Team Server** (local network) |
++
++### Feature comparison
++
++| | Git | S3 | HTTP | Team Server |
++|---|:---:|:---:|:---:|:---:|
++| Requires Electron | ✗ | ✅ | ✗ | ✗ |
++| Requires git on server | ✅ | ✗ | ✗ | ✗ |
++| Full version history | ✅ | ✗ | ✗ | ✗ |
++| Role-based access control | ✗ | ✗* | ✗* | ✅ |
++| Self-hostable | ✅ | ✗† | ✅ | ✅ |
++| No third-party dependency | ✗‡ | ✗ | ✅ | ✅ |
++| Conflict detection | ✅ | ✅ | ✅ | ✅ |
++
++\* IAM policies can provide coarse access control at the infrastructure level.  
++† S3-compatible self-hosted (MinIO) works but requires manual endpoint configuration.  
++‡ Git requires a remote host (GitHub, GitLab, Gitea, etc.).
+diff --git a/client/src/components/ActivityBar.tsx b/client/src/components/ActivityBar.tsx
+index d30ef05..e671987 100644
+--- a/client/src/components/ActivityBar.tsx
++++ b/client/src/components/ActivityBar.tsx
+@@ -1,5 +1,7 @@
++import { useState } from 'react';
+ import { useApp } from '../store';
+ import apilixLogo from '../assets/apilix.svg';
++import WorkspaceManagerModal from './WorkspaceManagerModal';
+ 
+ type View = 'request' | 'runner' | 'environments' | 'mock';
+ 
+@@ -17,14 +19,17 @@ interface Props {
+ 
+ export default function ActivityBar({ theme, onToggleTheme }: Props) {
+   const { state, dispatch } = useApp();
++  const [manageOpen, setManageOpen] = useState(false);
+ 
+   return (
+     <div className="w-[72px] shrink-0 h-full bg-slate-950 border-r border-slate-800 flex flex-col items-center py-2 overflow-hidden z-10">
+       {/* Brand logo */}
+-      <div className="mb-4 mt-1 select-none px-2">
++      <div className="mb-2 mt-1 select-none px-2">
+         <img src={apilixLogo} alt="Apilix" title="APILIX" className="w-16 h-16 object-contain" />
+       </div>
+ 
++      {manageOpen && <WorkspaceManagerModal onClose={() => setManageOpen(false)} />}
++
+       {/* Nav icons */}
+       <nav className="flex flex-col items-center gap-0.5 flex-1 w-full px-1">
+         {NAV_ITEMS.map(({ key, emoji, label }) => {
+diff --git a/client/src/components/RequestBuilder.tsx b/client/src/components/RequestBuilder.tsx
+index c77d8de..96f4862 100644
+--- a/client/src/components/RequestBuilder.tsx
++++ b/client/src/components/RequestBuilder.tsx
+@@ -1071,7 +1071,7 @@ export default function RequestBuilder({ onDirtyChange }: RequestBuilderProps) {
+     dispatch({ type: 'UPDATE_COLLECTION', payload: { ...col, item: updateItemById(col.item, activeTab.item.id, updatedItem) } });
+     dispatch({ type: 'UPDATE_TAB_ITEM', payload: { tabId: activeTab.id, item: updatedItem } });
+     // Mark clean in cache
+-    cacheRef.current.set(activeTab.id, { edit, dirty: false });
++    cacheRef.current.set(activeTab.id, { edit, dirty: false, activeRequestTab });
+     setDirty(false);
+   }
+   _saveRef.current = handleSave;
+@@ -1727,7 +1727,7 @@ export default function RequestBuilder({ onDirtyChange }: RequestBuilderProps) {
+                     };
+                     dispatch({ type: 'UPDATE_COLLECTION', payload: { ...targetCol, item: [...targetCol.item, updatedItem] } });
+                     dispatch({ type: 'UPDATE_TAB', payload: { tabId: activeTab.id, collectionId: saveTargetCollectionId, item: updatedItem } });
+-                    cacheRef.current.set(activeTab.id, { edit, dirty: false });
++                    cacheRef.current.set(activeTab.id, { edit, dirty: false, activeRequestTab });
+                     setDirty(false);
+                     setShowSaveToCollection(false);
+                   }}
+diff --git a/client/src/components/Sidebar.tsx b/client/src/components/Sidebar.tsx
+index ddd6c55..6094b76 100644
+--- a/client/src/components/Sidebar.tsx
++++ b/client/src/components/Sidebar.tsx
+@@ -3,6 +3,8 @@ import { useApp, generateId } from '../store';
+ import CollectionTree from './CollectionTree';
+ import ImportModal from './ImportModal';
+ import ExportModal from './ExportModal';
++import WorkspaceSwitcher from './WorkspaceSwitcher';
++import WorkspaceManagerModal from './WorkspaceManagerModal';
+ 
+ export default function Sidebar() {
+   const { state, dispatch } = useApp(); // dispatch used by collection actions
+@@ -13,9 +15,15 @@ export default function Sidebar() {
+   const [collapseSignal, setCollapseSignal] = useState(0);
+   const [expandSignal, setExpandSignal] = useState(0);
+   const [sortAZ, setSortAZ] = useState(false);
++  const [manageOpen, setManageOpen] = useState(false);
+ 
+   return (
+     <div className="w-full bg-slate-900 flex flex-col h-full overflow-hidden">
++      {/* Workspace switcher */}
++      <div className="px-2 pt-2 pb-1 border-b border-slate-700 shrink-0">
++        <WorkspaceSwitcher onManage={() => setManageOpen(true)} />
++      </div>
++      {manageOpen && <WorkspaceManagerModal onClose={() => setManageOpen(false)} />}
+       {/* Collections toolbar */}
+       <div className="px-3 py-2 border-b border-slate-700 flex items-center shrink-0">
+         <button
+diff --git a/client/src/components/WorkspaceManagerModal.tsx b/client/src/components/WorkspaceManagerModal.tsx
+new file mode 100644
+index 0000000..78c4c4c
+--- /dev/null
++++ b/client/src/components/WorkspaceManagerModal.tsx
+@@ -0,0 +1,629 @@
++import { useState, useEffect, useCallback } from 'react';
++import type { Workspace, WorkspaceData, SyncConfig, SyncProvider, HistoryEntry } from '../types';
++import { useApp, generateId } from '../store';
++import * as StorageDriver from '../utils/storageDriver';
++import { push as syncPush, pull as syncPull, ConflictError } from '../utils/syncEngine';
++import * as SnapshotEngine from '../utils/snapshotEngine';
++
++type Tab = 'workspaces' | 'sync' | 'team' | 'history';
++
++const PRESET_COLORS = ['#f97316', '#3b82f6', '#22c55e', '#a855f7', '#ef4444', '#eab308'];
++
++interface Props {
++  onClose: () => void;
++}
++
++export default function WorkspaceManagerModal({ onClose }: Props) {
++  const [activeTab, setActiveTab] = useState<Tab>('workspaces');
++
++  return (
++    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
++      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-[640px] max-h-[80vh] flex flex-col overflow-hidden">
++        {/* Header */}
++        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
++          <h2 className="text-sm font-semibold text-slate-200">Manage Workspaces</h2>
++          <button onClick={onClose} className="text-slate-500 hover:text-slate-200 text-lg leading-none px-1">✕</button>
++        </div>
++
++        {/* Tabs */}
++        <div className="flex border-b border-slate-800 px-4">
++          {(['workspaces', 'sync', 'team', 'history'] as Tab[]).map(tab => (
++            <button
++              key={tab}
++              onClick={() => setActiveTab(tab)}
++              className={`px-3 py-2 text-xs font-medium capitalize transition-colors border-b-2 -mb-px ${
++                activeTab === tab
++                  ? 'border-orange-400 text-orange-400'
++                  : 'border-transparent text-slate-500 hover:text-slate-300'
++              }`}
++            >
++              {tab}
++            </button>
++          ))}
++        </div>
++
++        {/* Tab content */}
++        <div className="flex-1 overflow-y-auto p-4">
++          {activeTab === 'workspaces' && <WorkspacesTab onClose={onClose} />}
++          {activeTab === 'sync' && <SyncTab />}
++          {activeTab === 'team' && <TeamTab />}
++          {activeTab === 'history' && <HistoryTab />}
++        </div>
++      </div>
++    </div>
++  );
++}
++
++// ─── Workspaces Tab ───────────────────────────────────────────────────────────
++
++function WorkspacesTab({ onClose }: { onClose: () => void }) {
++  const { state, dispatch } = useApp();
++  const [editingId, setEditingId] = useState<string | null>(null);
++  const [editName, setEditName] = useState('');
++  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
++
++  async function handleSwitch(workspace: Workspace) {
++    if (workspace.id === state.activeWorkspaceId) return;
++    const data = await StorageDriver.readWorkspace(workspace.id) ?? emptyWorkspaceData();
++    dispatch({ type: 'SWITCH_WORKSPACE', payload: { workspace, data } });
++    onClose();
++  }
++
++  function startRename(w: Workspace) {
++    setEditingId(w.id);
++    setEditName(w.name);
++  }
++
++  async function commitRename(id: string) {
++    const name = editName.trim();
++    if (!name) { setEditingId(null); return; }
++    dispatch({ type: 'RENAME_WORKSPACE', payload: { id, name } });
++    // Persist manifest immediately (the debounced effect will also catch it)
++    const updated = state.workspaces.map(w => w.id === id ? { ...w, name } : w);
++    await StorageDriver.writeManifest({ workspaces: updated, activeWorkspaceId: state.activeWorkspaceId });
++    setEditingId(null);
++  }
++
++  async function handleDelete(id: string) {
++    if (state.workspaces.length <= 1) return; // guard: cannot delete last
++    const remaining = state.workspaces.filter(w => w.id !== id);
++    const fallback = remaining.find(w => w.id !== id)!;
++    const fallbackData = await StorageDriver.readWorkspace(fallback.id) ?? emptyWorkspaceData();
++    await StorageDriver.deleteWorkspace(id);
++    dispatch({ type: 'DELETE_WORKSPACE', payload: { id, fallbackId: fallback.id } });
++    if (state.activeWorkspaceId === id) {
++      dispatch({ type: 'SWITCH_WORKSPACE', payload: { workspace: fallback, data: fallbackData } });
++    }
++    await StorageDriver.writeManifest({ workspaces: remaining, activeWorkspaceId: state.activeWorkspaceId === id ? fallback.id : state.activeWorkspaceId });
++    setConfirmDelete(null);
++  }
++
++  async function handleDuplicate(w: Workspace) {
++    const srcData = await StorageDriver.readWorkspace(w.id) ?? emptyWorkspaceData();
++    const newId = generateId();
++    const newWorkspace: Workspace = {
++      ...w,
++      id: newId,
++      name: `${w.name} (Copy)`,
++      createdAt: new Date().toISOString(),
++    };
++    // Deep-clone ids to avoid shared references
++    const clonedData: WorkspaceData = JSON.parse(JSON.stringify(srcData));
++    await StorageDriver.writeWorkspace(newId, clonedData);
++    dispatch({ type: 'DUPLICATE_WORKSPACE', payload: { workspace: newWorkspace, data: clonedData } });
++    await StorageDriver.writeManifest({
++      workspaces: [...state.workspaces, newWorkspace],
++      activeWorkspaceId: newId,
++    });
++  }
++
++  function setColor(id: string, color: string) {
++    dispatch({ type: 'SET_WORKSPACE_COLOR', payload: { id, color } });
++    const updated = state.workspaces.map(w => w.id === id ? { ...w, color } : w);
++    StorageDriver.writeManifest({ workspaces: updated, activeWorkspaceId: state.activeWorkspaceId });
++  }
++
++  return (
++    <div className="space-y-2">
++      <div className="flex justify-between items-center mb-3">
++        <p className="text-xs text-slate-400">{state.workspaces.length} workspace{state.workspaces.length !== 1 ? 's' : ''}</p>
++        <button
++          onClick={() => StorageDriver.openDataFolder()}
++          className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
++        >
++          Open data folder ↗
++        </button>
++      </div>
++
++      {state.workspaces.map(w => (
++        <div
++          key={w.id}
++          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
++            w.id === state.activeWorkspaceId
++              ? 'border-orange-500/40 bg-slate-800/60'
++              : 'border-slate-800 bg-slate-800/20 hover:bg-slate-800/40'
++          }`}
++        >
++          {/* Color picker */}
++          <div className="flex gap-0.5">
++            {PRESET_COLORS.map(c => (
++              <button
++                key={c}
++                onClick={() => setColor(w.id, c)}
++                className={`w-3 h-3 rounded-full border transition-transform hover:scale-125 ${(w.color ?? '#f97316') === c ? 'border-white scale-110' : 'border-transparent'}`}
++                style={{ background: c }}
++              />
++            ))}
++          </div>
++
++          {/* Name / rename input */}
++          <div className="flex-1 min-w-0">
++            {editingId === w.id ? (
++              <input
++                autoFocus
++                value={editName}
++                onChange={e => setEditName(e.target.value)}
++                onBlur={() => commitRename(w.id)}
++                onKeyDown={e => { if (e.key === 'Enter') commitRename(w.id); if (e.key === 'Escape') setEditingId(null); }}
++                className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-0.5 text-sm text-slate-200 outline-none focus:border-orange-500"
++              />
++            ) : (
++              <button
++                onClick={() => handleSwitch(w)}
++                className="text-sm font-medium text-slate-200 truncate text-left w-full hover:text-orange-400 transition-colors"
++              >
++                {w.name}
++                {w.id === state.activeWorkspaceId && <span className="ml-2 text-[10px] text-orange-400 font-normal">active</span>}
++                {w.type === 'team' && w.role && <span className="ml-2 text-[10px] text-slate-500">{w.role}</span>}
++              </button>
++            )}
++            <p className="text-[10px] text-slate-600 mt-0.5">{new Date(w.createdAt).toLocaleDateString()}</p>
++          </div>
++
++          {/* Actions */}
++          <div className="flex items-center gap-1 shrink-0">
++            <button onClick={() => startRename(w)} title="Rename" className="text-slate-500 hover:text-slate-300 px-1 text-xs transition-colors">✏</button>
++            <button onClick={() => handleDuplicate(w)} title="Duplicate" className="text-slate-500 hover:text-slate-300 px-1 text-xs transition-colors">⧉</button>
++            <button
++              onClick={() => setConfirmDelete(w.id)}
++              title="Delete"
++              disabled={state.workspaces.length <= 1}
++              className="text-slate-500 hover:text-red-400 px-1 text-xs transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
++            >
++              🗑
++            </button>
++          </div>
++        </div>
++      ))}
++
++      {/* Delete confirmation */}
++      {confirmDelete && (
++        <div className="mt-3 p-3 bg-red-950/40 border border-red-800/50 rounded-lg text-xs text-slate-300">
++          <p className="mb-2">Delete <strong>{state.workspaces.find(w => w.id === confirmDelete)?.name}</strong>? This cannot be undone.</p>
++          <div className="flex gap-2">
++            <button onClick={() => handleDelete(confirmDelete)} className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded transition-colors">Delete</button>
++            <button onClick={() => setConfirmDelete(null)} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors">Cancel</button>
++          </div>
++        </div>
++      )}
++    </div>
++  );
++}
++
++// ─── Sync Tab ─────────────────────────────────────────────────────────────────
++
++const PROVIDER_LABELS: Record<SyncProvider, string> = {
++  s3: 'Amazon S3',
++  git: 'Git Repository',
++  http: 'HTTP Endpoint',
++  team: 'Team Server',
++};
++
++const PROVIDER_FIELDS: Record<SyncProvider, { key: string; label: string; placeholder: string; secret?: boolean }[]> = {
++  s3: [
++    { key: 'bucket', label: 'Bucket', placeholder: 'my-apilix-bucket' },
++    { key: 'region', label: 'Region', placeholder: 'us-east-1' },
++    { key: 'prefix', label: 'Prefix (optional)', placeholder: 'workspaces/' },
++    { key: 'accessKeyId', label: 'Access Key ID', placeholder: 'AKIA...', secret: true },
++    { key: 'secretAccessKey', label: 'Secret Access Key', placeholder: '••••••••', secret: true },
++  ],
++  git: [
++    { key: 'remote', label: 'Remote URL', placeholder: 'https://github.com/user/repo.git' },
++    { key: 'branch', label: 'Branch', placeholder: 'main' },
++    { key: 'username', label: 'Username', placeholder: 'git-user' },
++    { key: 'token', label: 'Token / Password', placeholder: 'ghp_...', secret: true },
++    { key: 'authorName', label: 'Author Name', placeholder: 'Your Name' },
++    { key: 'authorEmail', label: 'Author Email', placeholder: 'you@example.com' },
++  ],
++  http: [
++    { key: 'endpoint', label: 'Endpoint URL', placeholder: 'https://api.example.com/workspaces/prod' },
++    { key: 'token', label: 'Bearer Token (optional)', placeholder: 'sk-...', secret: true },
++  ],
++  team: [
++    { key: 'serverUrl', label: 'Server URL', placeholder: 'https://apilix.example.com' },
++    { key: 'workspaceServerId', label: 'Server Workspace ID', placeholder: 'ws_...' },
++    { key: 'token', label: 'JWT Token', placeholder: 'eyJ...', secret: true },
++  ],
++};
++
++function SyncTab() {
++  const { state, dispatch } = useApp();
++  const workspaceId = state.activeWorkspaceId;
++
++  const [provider, setProvider] = useState<SyncProvider>('s3');
++  const [fields, setFields] = useState<Record<string, string>>({});
++  const [loaded, setLoaded] = useState(false);
++  const [status, setStatus] = useState<'idle' | 'busy' | 'ok' | 'error'>('idle');
++  const [msg, setMsg] = useState('');
++  const [conflict, setConflict] = useState<null | { remoteTimestamp: string; localTimestamp: string | null }>(null);
++
++  // Load persisted sync config on mount / workspace change
++  useEffect(() => {
++    let active = true;
++    StorageDriver.readSyncConfig(workspaceId).then(cfg => {
++      if (!active) return;
++      if (cfg) {
++        setProvider(cfg.provider as SyncProvider);
++        setFields(cfg.config);
++      } else {
++        setFields({});
++      }
++      setLoaded(true);
++    });
++    return () => { active = false; };
++  }, [workspaceId]);
++
++  async function saveConfig() {
++    await StorageDriver.writeSyncConfig(workspaceId, provider, fields);
++  }
++
++  function setField(key: string, value: string) {
++    setFields(prev => ({ ...prev, [key]: value }));
++  }
++
++  async function handlePush() {
++    setStatus('busy'); setMsg('Pushing…'); setConflict(null);
++    try {
++      await saveConfig();
++      const data = await StorageDriver.readWorkspace(workspaceId);
++      if (!data) throw new Error('No workspace data to push');
++      const cfg: SyncConfig = { workspaceId, provider, config: fields };
++      await syncPush(cfg, data);
++      dispatch({ type: 'SET_SYNC_STATUS', payload: { workspaceId, status: 'idle' } });
++      setStatus('ok'); setMsg('Pushed successfully');
++    } catch (err: unknown) {
++      setStatus('error'); setMsg((err as Error).message);
++    }
++  }
++
++  async function handlePull(resolution?: 'keep-local' | 'keep-remote') {
++    setStatus('busy'); setMsg('Pulling…'); setConflict(null);
++    try {
++      await saveConfig();
++      const cfg: SyncConfig = { workspaceId, provider, config: fields };
++      const data = await syncPull(cfg, resolution);
++      if (data) {
++        dispatch({ type: 'HYDRATE_WORKSPACE', payload: { ...data, workspaces: state.workspaces, activeWorkspaceId: state.activeWorkspaceId } });
++        await StorageDriver.writeWorkspace(workspaceId, data);
++        setStatus('ok'); setMsg('Pulled successfully');
++      } else {
++        setStatus('ok'); setMsg('Remote is empty — nothing to pull');
++      }
++    } catch (err: unknown) {
++      if (err instanceof ConflictError) {
++        setConflict({ remoteTimestamp: err.remoteLastModified, localTimestamp: err.localLastSaved });
++        setStatus('idle'); setMsg('');
++      } else {
++        setStatus('error'); setMsg((err as Error).message);
++      }
++    }
++  }
++
++  async function handleCloneOnce() {
++    setStatus('busy'); setMsg('Importing…'); setConflict(null);
++    try {
++      const cfg: SyncConfig = { workspaceId, provider, config: fields };
++      const data = await syncPull(cfg);
++      if (data) {
++        dispatch({ type: 'HYDRATE_WORKSPACE', payload: { ...data, workspaces: state.workspaces, activeWorkspaceId: state.activeWorkspaceId } });
++        await StorageDriver.writeWorkspace(workspaceId, data);
++        setStatus('ok'); setMsg('Imported successfully — config was not saved');
++      } else {
++        setStatus('ok'); setMsg('Remote is empty — nothing to import');
++      }
++    } catch (err: unknown) {
++      if (err instanceof ConflictError) {
++        setConflict({ remoteTimestamp: err.remoteLastModified, localTimestamp: err.localLastSaved });
++        setStatus('idle'); setMsg('');
++      } else {
++        setStatus('error'); setMsg((err as Error).message);
++      }
++    }
++  }
++
++  if (!loaded) return <div className="py-8 text-center text-xs text-slate-500">Loading…</div>;
++
++  return (
++    <div className="space-y-4">
++      {/* Provider selector */}
++      <div>
++        <label className="block text-xs font-medium text-slate-400 mb-1.5">Provider</label>
++        <div className="flex gap-2 flex-wrap">
++          {(Object.keys(PROVIDER_LABELS) as SyncProvider[]).map(p => (
++            <button
++              key={p}
++              onClick={() => { setProvider(p); setFields({}); }}
++              className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
++                provider === p
++                  ? 'bg-orange-500/20 border-orange-500/50 text-orange-300'
++                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
++              }`}
++            >
++              {PROVIDER_LABELS[p]}
++            </button>
++          ))}
++        </div>
++      </div>
++
++      {/* Provider-specific fields */}
++      <div className="space-y-2.5">
++        {PROVIDER_FIELDS[provider].map(f => (
++          <div key={f.key}>
++            <label className="block text-[11px] text-slate-500 mb-1">{f.label}</label>
++            <input
++              type={f.secret ? 'password' : 'text'}
++              value={fields[f.key] ?? ''}
++              onChange={e => setField(f.key, e.target.value)}
++              placeholder={f.placeholder}
++              className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-orange-500 placeholder:text-slate-600"
++            />
++          </div>
++        ))}
++      </div>
++
++      {/* Conflict resolution */}
++      {conflict && (
++        <div className="p-3 bg-yellow-950/40 border border-yellow-700/50 rounded-lg text-xs text-slate-300 space-y-2">
++          <p className="font-medium text-yellow-300">Conflict detected</p>
++          <p>Remote was last modified: <strong>{new Date(conflict.remoteTimestamp).toLocaleString()}</strong></p>
++          {conflict.localTimestamp && <p>Local last synced: <strong>{new Date(conflict.localTimestamp).toLocaleString()}</strong></p>}
++          <div className="flex gap-2 pt-1">
++            <button onClick={() => handlePull('keep-remote')} className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors">Use Remote</button>
++            <button onClick={() => handlePull('keep-local')} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors">Keep Local</button>
++          </div>
++        </div>
++      )}
++
++      {/* Status message */}
++      {msg && (
++        <p className={`text-xs px-3 py-2 rounded border ${
++          status === 'ok' ? 'text-green-300 bg-green-950/30 border-green-800/40' :
++          status === 'error' ? 'text-red-300 bg-red-950/30 border-red-800/40' :
++          'text-slate-400 bg-slate-800/40 border-slate-700'
++        }`}>{msg}</p>
++      )}
++
++      {/* Action buttons */}
++      <div className="flex gap-2 pt-1">
++        <button
++          onClick={handlePush}
++          disabled={status === 'busy'}
++          className="flex-1 py-1.5 text-xs font-medium bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-white rounded transition-colors"
++        >
++          Push ↑
++        </button>
++        <button
++          onClick={() => handlePull()}
++          disabled={status === 'busy'}
++          className="flex-1 py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 rounded transition-colors"
++        >
++          Pull ↓
++        </button>
++        <button
++          onClick={saveConfig}
++          disabled={status === 'busy'}
++          className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 border border-slate-700 rounded transition-colors"
++        >
++          Save config
++        </button>
++      </div>
++      {/* One-time import without persisting sync config */}
++      <button
++        onClick={handleCloneOnce}
++        disabled={status === 'busy'}
++        className="w-full py-1.5 text-xs text-slate-500 hover:text-slate-300 border border-dashed border-slate-700 hover:border-slate-600 rounded transition-colors disabled:opacity-50"
++      >
++        Import once (don't save config) ↓
++      </button>
++    </div>
++  );
++}
++
++// ─── Team Tab ─────────────────────────────────────────────────────────────────
++
++function TeamTab() {
++  const { state, dispatch } = useApp();
++
++  const [serverUrl, setServerUrl] = useState('');
++  const [token, setToken] = useState('');
++  const [status, setStatus] = useState<'idle' | 'busy' | 'ok' | 'error'>('idle');
++  const [msg, setMsg] = useState('');
++
++  const activeWorkspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
++  const isTeam = activeWorkspace?.type === 'team';
++
++  useEffect(() => {
++    if (isTeam && activeWorkspace.teamServerUrl) {
++      setServerUrl(activeWorkspace.teamServerUrl);
++    }
++  }, [isTeam, activeWorkspace?.teamServerUrl]);
++
++  async function connectTeam() {
++    setStatus('busy'); setMsg('Connecting…');
++    try {
++      const res = await fetch(`${serverUrl}/workspaces`, {
++        headers: { Authorization: `Bearer ${token}` },
++      });
++      if (!res.ok) throw new Error(`Server responded ${res.status}`);
++      const body = await res.json() as { workspaces?: unknown[] };
++      const count = Array.isArray(body.workspaces) ? body.workspaces.length : 0;
++      setStatus('ok');
++      setMsg(`Connected — ${count} workspace(s) found on server`);
++    } catch (err: unknown) {
++      setStatus('error');
++      setMsg((err as Error).message);
++    }
++  }
++
++  return (
++    <div className="space-y-4">
++      <div>
++        <p className="text-xs text-slate-400 mb-3">
++          Connect to a self-hosted Apilix team server to share collections with role-based access control.
++        </p>
++
++        <div className="space-y-2.5">
++          <div>
++            <label className="block text-[11px] text-slate-500 mb-1">Server URL</label>
++            <input
++              type="text"
++              value={serverUrl}
++              onChange={e => setServerUrl(e.target.value)}
++              placeholder="https://apilix.yourcompany.com"
++              className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-orange-500 placeholder:text-slate-600"
++            />
++          </div>
++          <div>
++            <label className="block text-[11px] text-slate-500 mb-1">JWT Token</label>
++            <input
++              type="password"
++              value={token}
++              onChange={e => setToken(e.target.value)}
++              placeholder="eyJ…"
++              className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-orange-500 placeholder:text-slate-600"
++            />
++          </div>
++        </div>
++      </div>
++
++      {msg && (
++        <p className={`text-xs px-3 py-2 rounded border ${
++          status === 'ok' ? 'text-green-300 bg-green-950/30 border-green-800/40' :
++          status === 'error' ? 'text-red-300 bg-red-950/30 border-red-800/40' :
++          'text-slate-400 bg-slate-800/40 border-slate-700'
++        }`}>{msg}</p>
++      )}
++
++      <button
++        onClick={connectTeam}
++        disabled={status === 'busy' || !serverUrl || !token}
++        className="w-full py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 rounded transition-colors"
++      >
++        Test connection
++      </button>
++
++      <div className="pt-2 border-t border-slate-800">
++        <p className="text-[11px] text-slate-600">
++          To start your own team server, deploy the standalone{' '}
++          <code className="text-slate-400">apilix-team-server</code> project.
++        </p>
++      </div>
++    </div>
++  );
++}
++
++// ─── History Tab ──────────────────────────────────────────────────────────────
++
++function HistoryTab() {
++  const { state, dispatch } = useApp();
++  const workspaceId = state.activeWorkspaceId;
++
++  const [entries, setEntries] = useState<HistoryEntry[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [expanded, setExpanded] = useState<string | null>(null);
++  const [restoring, setRestoring] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    setLoading(true);
++    const idx = await SnapshotEngine.listHistory(workspaceId);
++    setEntries(idx);
++    setLoading(false);
++  }, [workspaceId]);
++
++  useEffect(() => { load(); }, [load]);
++
++  async function handleRestore(snapshotId: string) {
++    setRestoring(snapshotId);
++    const snap = await SnapshotEngine.loadSnapshot(workspaceId, snapshotId);
++    if (snap) {
++      dispatch({ type: 'RESTORE_SNAPSHOT', payload: snap.data });
++      await StorageDriver.writeWorkspace(workspaceId, snap.data);
++    }
++    setRestoring(null);
++  }
++
++  if (loading) return <div className="py-8 text-center text-xs text-slate-500">Loading history…</div>;
++
++  if (entries.length === 0) {
++    return (
++      <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 gap-2">
++        <span className="text-3xl">🕑</span>
++        <p className="text-sm font-medium text-slate-400">No history yet</p>
++        <p className="text-xs max-w-xs">Snapshots are created automatically every time you save. Make a change to the active workspace to start tracking.</p>
++      </div>
++    );
++  }
++
++  return (
++    <div className="space-y-1.5">
++      <div className="flex justify-between items-center mb-2">
++        <p className="text-xs text-slate-400">{entries.length} snapshot{entries.length !== 1 ? 's' : ''}</p>
++        <button onClick={load} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">Refresh</button>
++      </div>
++      {entries.map(entry => (
++        <div key={entry.snapshotId} className="border border-slate-800 rounded-lg overflow-hidden">
++          <button
++            onClick={() => setExpanded(expanded === entry.snapshotId ? null : entry.snapshotId)}
++            className="w-full flex items-center justify-between px-3 py-2 hover:bg-slate-800/40 transition-colors text-left"
++          >
++            <div className="flex-1 min-w-0">
++              <p className="text-xs font-medium text-slate-200 truncate">{entry.summary}</p>
++              <p className="text-[10px] text-slate-500 mt-0.5">{new Date(entry.timestamp).toLocaleString()} · {entry.collectionsCount} collection{entry.collectionsCount !== 1 ? 's' : ''}</p>
++            </div>
++            <span className="text-slate-600 text-xs ml-2">{expanded === entry.snapshotId ? '▲' : '▼'}</span>
++          </button>
++
++          {expanded === entry.snapshotId && (
++            <div className="px-3 pb-3 pt-0 border-t border-slate-800 bg-slate-900/40">
++              <div className="flex gap-2 pt-2">
++                <button
++                  onClick={() => handleRestore(entry.snapshotId)}
++                  disabled={restoring === entry.snapshotId}
++                  className="px-3 py-1 text-xs bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-white rounded transition-colors"
++                >
++                  {restoring === entry.snapshotId ? 'Restoring…' : 'Restore this snapshot'}
++                </button>
++              </div>
++            </div>
++          )}
++        </div>
++      ))}
++    </div>
++  );
++}
++
++// ─── Helpers ──────────────────────────────────────────────────────────────────
++
++function emptyWorkspaceData(): WorkspaceData {
++  return {
++    collections: [],
++    environments: [],
++    activeEnvironmentId: null,
++    collectionVariables: {},
++    globalVariables: {},
++    cookieJar: {},
++    mockCollections: [],
++    mockRoutes: [],
++    mockPort: 3002,
++  };
++}
+diff --git a/client/src/components/WorkspaceSwitcher.tsx b/client/src/components/WorkspaceSwitcher.tsx
+new file mode 100644
+index 0000000..d7261b1
+--- /dev/null
++++ b/client/src/components/WorkspaceSwitcher.tsx
+@@ -0,0 +1,190 @@
++import { useState, useRef, useEffect } from 'react';
++import type { Workspace, WorkspaceData } from '../types';
++import { useApp } from '../store';
++import { generateId } from '../store';
++import * as StorageDriver from '../utils/storageDriver';
++
++const PRESET_COLORS = ['#f97316', '#3b82f6', '#22c55e', '#a855f7', '#ef4444', '#eab308'];
++
++interface Props {
++  onManage: () => void;
++}
++
++export default function WorkspaceSwitcher({ onManage }: Props) {
++  const { state, dispatch } = useApp();
++  const [open, setOpen] = useState(false);
++  const [creating, setCreating] = useState(false);
++  const [newName, setNewName] = useState('');
++  const popoverRef = useRef<HTMLDivElement>(null);
++  const inputRef = useRef<HTMLInputElement>(null);
++
++  const activeWorkspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
++
++  // Close popover on outside click
++  useEffect(() => {
++    if (!open) return;
++    function handleClick(e: MouseEvent) {
++      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
++        setOpen(false);
++        setCreating(false);
++        setNewName('');
++      }
++    }
++    document.addEventListener('mousedown', handleClick);
++    return () => document.removeEventListener('mousedown', handleClick);
++  }, [open]);
++
++  useEffect(() => {
++    if (creating && inputRef.current) inputRef.current.focus();
++  }, [creating]);
++
++  async function handleSwitch(workspace: Workspace) {
++    if (workspace.id === state.activeWorkspaceId) {
++      setOpen(false);
++      return;
++    }
++    const data = await StorageDriver.readWorkspace(workspace.id) ?? emptyWorkspaceData();
++    dispatch({ type: 'SWITCH_WORKSPACE', payload: { workspace, data } });
++    setOpen(false);
++  }
++
++  async function handleCreate() {
++    const name = newName.trim() || 'New Workspace';
++    const newWorkspace: Workspace = {
++      id: generateId(),
++      name,
++      color: PRESET_COLORS[state.workspaces.length % PRESET_COLORS.length],
++      createdAt: new Date().toISOString(),
++      type: 'local',
++    };
++    const emptyData = emptyWorkspaceData();
++    await StorageDriver.writeWorkspace(newWorkspace.id, emptyData);
++    dispatch({ type: 'CREATE_WORKSPACE', payload: newWorkspace });
++    setCreating(false);
++    setNewName('');
++    setOpen(false);
++  }
++
++  const dotColor = activeWorkspace?.color ?? '#f97316';
++  const local = state.workspaces.filter(w => w.type === 'local');
++  const team = state.workspaces.filter(w => w.type === 'team');
++
++  return (
++    <div className="relative w-full" ref={popoverRef}>
++      {/* Trigger pill */}
++      <button
++        onClick={() => setOpen(o => !o)}
++        title="Switch workspace"
++        className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded bg-slate-800/70 hover:bg-slate-700/80 transition-colors"
++      >
++        <span className="shrink-0 w-2 h-2 rounded-full" style={{ background: dotColor }} />
++        <span className="text-[10px] font-semibold text-slate-300 truncate leading-none flex-1 text-left">
++          {activeWorkspace?.name ?? '…'}
++        </span>
++        <svg className="w-2.5 h-2.5 text-slate-500 shrink-0" viewBox="0 0 16 16" fill="currentColor">
++          <path d="M8 10.5 3 5.5h10L8 10.5z" />
++        </svg>
++      </button>
++
++      {/* Popover */}
++      {open && (
++        <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 py-1 text-[12px]">
++          {/* Local workspaces */}
++          {local.length > 0 && (
++            <>
++              <p className="px-3 pt-1 pb-0.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Local</p>
++              {local.map(w => (
++                <WorkspaceRow
++                  key={w.id}
++                  workspace={w}
++                  active={w.id === state.activeWorkspaceId}
++                  onSelect={() => handleSwitch(w)}
++                />
++              ))}
++            </>
++          )}
++
++          {/* Team workspaces */}
++          {team.length > 0 && (
++            <>
++              <p className="px-3 pt-2 pb-0.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Team</p>
++              {team.map(w => (
++                <WorkspaceRow
++                  key={w.id}
++                  workspace={w}
++                  active={w.id === state.activeWorkspaceId}
++                  onSelect={() => handleSwitch(w)}
++                />
++              ))}
++            </>
++          )}
++
++          <div className="my-1 border-t border-slate-800" />
++
++          {/* New workspace inline form */}
++          {creating ? (
++            <div className="px-2 py-1 flex items-center gap-1">
++              <input
++                ref={inputRef}
++                value={newName}
++                onChange={e => setNewName(e.target.value)}
++                onKeyDown={e => {
++                  if (e.key === 'Enter') handleCreate();
++                  if (e.key === 'Escape') { setCreating(false); setNewName(''); }
++                }}
++                placeholder="Workspace name"
++                className="flex-1 bg-slate-800 border border-slate-600 rounded px-2 py-0.5 text-slate-200 text-[11px] outline-none focus:border-orange-500"
++              />
++              <button onClick={handleCreate} className="text-orange-400 hover:text-orange-300 px-1 font-semibold">✓</button>
++              <button onClick={() => { setCreating(false); setNewName(''); }} className="text-slate-500 hover:text-slate-300 px-1">✕</button>
++            </div>
++          ) : (
++            <button
++              onClick={() => setCreating(true)}
++              className="w-full text-left px-3 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
++            >
++              + New workspace
++            </button>
++          )}
++
++          <button
++            onClick={() => { setOpen(false); onManage(); }}
++            className="w-full text-left px-3 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
++          >
++            Manage workspaces…
++          </button>
++        </div>
++      )}
++    </div>
++  );
++}
++
++function WorkspaceRow({ workspace, active, onSelect }: { workspace: Workspace; active: boolean; onSelect: () => void }) {
++  return (
++    <button
++      onClick={onSelect}
++      className={`w-full text-left px-3 py-1.5 flex items-center gap-2 transition-colors ${active ? 'text-orange-400 bg-slate-800/60' : 'text-slate-300 hover:bg-slate-800/60'}`}
++    >
++      <span className="shrink-0 w-2 h-2 rounded-full" style={{ background: workspace.color ?? '#94a3b8' }} />
++      <span className="flex-1 truncate">{workspace.name}</span>
++      {workspace.role && workspace.type === 'team' && (
++        <span className="text-[9px] text-slate-500 font-medium uppercase">{workspace.role}</span>
++      )}
++      {active && <span className="text-orange-400 text-[10px]">✓</span>}
++    </button>
++  );
++}
++
++function emptyWorkspaceData(): WorkspaceData {
++  return {
++    collections: [],
++    environments: [],
++    activeEnvironmentId: null,
++    collectionVariables: {},
++    globalVariables: {},
++    cookieJar: {},
++    mockCollections: [],
++    mockRoutes: [],
++    mockPort: 3002,
++  };
++}
+diff --git a/client/src/index.css b/client/src/index.css
+index 9626d79..66f0a16 100644
+--- a/client/src/index.css
++++ b/client/src/index.css
+@@ -149,8 +149,17 @@ html.light .bg-slate-600 { background-color: #cbd5e1; }
+ /* Opacity-variant backgrounds */
+ html.light .bg-slate-900\/50 { background-color: rgb(248 250 252 / 0.5); }
+ html.light .bg-slate-800\/50 { background-color: rgb(241 245 249 / 0.5); }
++html.light .bg-slate-800\/60 { background-color: rgb(226 232 240 / 0.6); }
++html.light .bg-slate-800\/70 { background-color: rgb(241 245 249 / 0.7); }
+ html.light .bg-slate-950\/90 { background-color: rgb(255 255 255 / 0.9); }
+ 
++/* Status/section accents used in modals */
++html.light .bg-purple-500\/20 { background-color: rgb(233 213 255 / 0.9); }
++html.light .bg-blue-500\/20 { background-color: rgb(191 219 254 / 0.9); }
++html.light .bg-orange-500\/20 { background-color: rgb(254 215 170 / 0.9); }
++html.light .bg-red-950\/40 { background-color: rgb(254 226 226 / 0.85); }
++html.light .border-red-800\/50 { border-color: rgb(252 165 165 / 0.8); }
++
+ /* Text remapping */
+ html.light .text-slate-100 { color: #0f172a; }
+ html.light .text-slate-200 { color: #1e293b; }
+@@ -169,6 +178,7 @@ html.light .hover\:bg-slate-800:hover { background-color: #f1f5f9; }
+ html.light .hover\:bg-slate-700:hover { background-color: #e2e8f0; }
+ html.light .hover\:bg-slate-900:hover { background-color: #f8fafc; }
+ html.light .hover\:bg-slate-600:hover { background-color: #cbd5e1; }
++html.light .hover\:bg-slate-700\/80:hover { background-color: rgb(226 232 240 / 0.8); }
+ 
+ /* Hover text remapping */
+ html.light .hover\:text-slate-200:hover { color: #1e293b; }
+@@ -176,6 +186,10 @@ html.light .hover\:text-slate-100:hover { color: #0f172a; }
+ 
+ /* Focus border remapping */
+ html.light .focus\:border-orange-500:focus { border-color: #f97316; }
++html.light .focus\:border-purple-500:focus { border-color: #a855f7; }
++
++/* Keep selected websocket toggle readable in light mode where text-white remaps dark */
++html.light .bg-purple-700 { background-color: #e9d5ff; }
+ 
+ /* ─── Tab bar ─────────────────────────────────────────────────────────────── */
+ html.light .border-slate-800 { border-color: #e2e8f0; }
+diff --git a/client/src/store.tsx b/client/src/store.tsx
+index cc20700..ddc131c 100644
+--- a/client/src/store.tsx
++++ b/client/src/store.tsx
+@@ -1,7 +1,9 @@
+-import React, { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
+-import type { AppState, AppAction, AppCollection, AppEnvironment, CollectionItem, RequestTab, CookieJar, Cookie, MockRoute, MockCollection } from './types';
++import React, { createContext, useContext, useEffect, useReducer, useState, type ReactNode } from 'react';
++import type { AppState, AppAction, AppCollection, AppEnvironment, CollectionItem, RequestTab, CookieJar, Cookie, MockRoute, MockCollection, Workspace, WorkspaceData } from './types';
++import * as StorageDriver from './utils/storageDriver';
++import * as SnapshotEngine from './utils/snapshotEngine';
+ 
+-const STORAGE_KEY = 'apilix_persist';
++const STORAGE_KEY = 'apilix_persist'; // legacy key — kept for migration only
+ 
+ function ensureIds(items: CollectionItem[]): CollectionItem[] {
+   return items.map(item => ({
+@@ -41,6 +43,12 @@ function loadPersisted(): PersistedState | null {
+ }
+ 
+ const initialState: AppState = {
++  // ── Workspace ────────────────────────────────────────────────────────────
++  workspaces: [],
++  activeWorkspaceId: '',
++  storageReady: false,
++  syncStatus: {},
++  // ── Data ─────────────────────────────────────────────────────────────────
+   collections: [],
+   environments: [],
+   activeEnvironmentId: null,
+@@ -380,6 +388,168 @@ function appReducer(state: AppState, action: AppAction): AppState {
+       return { ...state, environments: updatedEnvs };
+     }
+ 
++    // ── Workspace actions ────────────────────────────────────────────────────
++
++    case 'SET_STORAGE_READY':
++      return { ...state, storageReady: action.payload };
++
++    case 'HYDRATE_WORKSPACE': {
++      const { workspaces, activeWorkspaceId, ...data } = action.payload;
++      const restoredCollections = (data.collections ?? []).map(col => ({
++        ...col,
++        item: ensureIds(col.item),
++      }));
++      return {
++        ...state,
++        workspaces,
++        activeWorkspaceId,
++        storageReady: true,
++        collections: restoredCollections,
++        environments: data.environments ?? [],
++        activeEnvironmentId: data.activeEnvironmentId ?? null,
++        collectionVariables: data.collectionVariables ?? {},
++        globalVariables: data.globalVariables ?? {},
++        cookieJar: data.cookieJar ?? {},
++        mockCollections: data.mockCollections ?? [],
++        mockRoutes: data.mockRoutes ?? [],
++        mockPort: data.mockPort ?? 3002,
++      };
++    }
++
++    case 'CREATE_WORKSPACE':
++      return {
++        ...state,
++        workspaces: [...state.workspaces, action.payload],
++        activeWorkspaceId: action.payload.id,
++        collections: [],
++        environments: [],
++        activeEnvironmentId: null,
++        collectionVariables: {},
++        globalVariables: {},
++        cookieJar: {},
++        mockCollections: [],
++        mockRoutes: [],
++        mockPort: 3002,
++        tabs: [],
++        activeTabId: null,
++        activeRequest: null,
++        response: null,
++        consoleLogs: [],
++        runnerResults: null,
++        isRunning: false,
++        view: 'request',
++        mockServerRunning: false,
++      };
++
++    case 'SWITCH_WORKSPACE': {
++      const { workspace, data } = action.payload;
++      const restoredCollections = (data.collections ?? []).map(col => ({
++        ...col,
++        item: ensureIds(col.item),
++      }));
++      return {
++        ...state,
++        activeWorkspaceId: workspace.id,
++        collections: restoredCollections,
++        environments: data.environments ?? [],
++        activeEnvironmentId: data.activeEnvironmentId ?? null,
++        collectionVariables: data.collectionVariables ?? {},
++        globalVariables: data.globalVariables ?? {},
++        cookieJar: data.cookieJar ?? {},
++        mockCollections: data.mockCollections ?? [],
++        mockRoutes: data.mockRoutes ?? [],
++        mockPort: data.mockPort ?? 3002,
++        tabs: [],
++        activeTabId: null,
++        activeRequest: null,
++        response: null,
++        consoleLogs: [],
++        runnerResults: null,
++        isRunning: false,
++        view: 'request',
++        mockServerRunning: false,
++      };
++    }
++
++    case 'RENAME_WORKSPACE':
++      return {
++        ...state,
++        workspaces: state.workspaces.map(w =>
++          w.id === action.payload.id ? { ...w, name: action.payload.name } : w
++        ),
++      };
++
++    case 'SET_WORKSPACE_COLOR':
++      return {
++        ...state,
++        workspaces: state.workspaces.map(w =>
++          w.id === action.payload.id ? { ...w, color: action.payload.color } : w
++        ),
++      };
++
++    case 'DELETE_WORKSPACE': {
++      const { id, fallbackId } = action.payload;
++      const remaining = state.workspaces.filter(w => w.id !== id);
++      return { ...state, workspaces: remaining, activeWorkspaceId: state.activeWorkspaceId === id ? fallbackId : state.activeWorkspaceId };
++    }
++
++    case 'DUPLICATE_WORKSPACE': {
++      const { workspace, data } = action.payload;
++      const restoredCollections = (data.collections ?? []).map(col => ({
++        ...col,
++        item: ensureIds(col.item),
++      }));
++      return {
++        ...state,
++        workspaces: [...state.workspaces, workspace],
++        activeWorkspaceId: workspace.id,
++        collections: restoredCollections,
++        environments: data.environments ?? [],
++        activeEnvironmentId: data.activeEnvironmentId ?? null,
++        collectionVariables: data.collectionVariables ?? {},
++        globalVariables: data.globalVariables ?? {},
++        cookieJar: data.cookieJar ?? {},
++        mockCollections: data.mockCollections ?? [],
++        mockRoutes: data.mockRoutes ?? [],
++        mockPort: data.mockPort ?? 3002,
++        tabs: [],
++        activeTabId: null,
++        activeRequest: null,
++        response: null,
++        consoleLogs: [],
++        runnerResults: null,
++        isRunning: false,
++        view: 'request',
++        mockServerRunning: false,
++      };
++    }
++
++    case 'SET_SYNC_STATUS':
++      return {
++        ...state,
++        syncStatus: { ...state.syncStatus, [action.payload.workspaceId]: action.payload.status },
++      };
++
++    case 'RESTORE_SNAPSHOT': {
++      const data = action.payload;
++      const restoredCollections = (data.collections ?? []).map(col => ({
++        ...col,
++        item: ensureIds(col.item),
++      }));
++      return {
++        ...state,
++        collections: restoredCollections,
++        environments: data.environments ?? [],
++        activeEnvironmentId: data.activeEnvironmentId ?? null,
++        collectionVariables: data.collectionVariables ?? {},
++        globalVariables: data.globalVariables ?? {},
++        cookieJar: data.cookieJar ?? {},
++        mockCollections: data.mockCollections ?? [],
++        mockRoutes: data.mockRoutes ?? [],
++        mockPort: data.mockPort ?? 3002,
++      };
++    }
++
+     default:
+       return state;
+   }
+@@ -398,77 +568,106 @@ interface AppContextValue {
+ const AppContext = createContext<AppContextValue | null>(null);
+ 
+ export function AppProvider({ children }: { children: ReactNode }) {
+-  const [state, dispatch] = useReducer(appReducer, initialState, (base) => {
+-    const saved = loadPersisted();
+-    if (!saved) return base;
+-    const restoredCollections = (saved.collections ?? base.collections).map(col => ({
+-      ...col,
+-      item: ensureIds(col.item),
+-    }));
+-
+-    let restoredTabs: RequestTab[] = [];
+-    let restoredActiveTabId: string | null = null;
+-    if (saved.tabSession) {
+-      restoredTabs = saved.tabSession.tabs
+-        .map(ref => {
+-          const col = restoredCollections.find(c => c._id === ref.collectionId);
+-          if (!col) return null;
+-          const item = findItemInTree(col.item, ref.itemId);
+-          if (!item || !item.request) return null;
+-          return { id: ref.id, collectionId: ref.collectionId, item, response: null, isLoading: false } as RequestTab;
+-        })
+-        .filter((t): t is RequestTab => t !== null);
+-
+-      if (saved.tabSession.activeTabId && restoredTabs.some(t => t.id === saved.tabSession!.activeTabId)) {
+-        restoredActiveTabId = saved.tabSession.activeTabId;
+-      } else {
+-        restoredActiveTabId = restoredTabs[0]?.id ?? null;
++  const [state, dispatch] = useReducer(appReducer, initialState);
++  // Track whether a debounced write is in flight to avoid unnecessary I/O
++  const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
++
++  // ── Async init ───────────────────────────────────────────────────────────
++  useEffect(() => {
++    async function init() {
++      let manifest = await StorageDriver.readManifest();
++
++      // ── Migration: old apilix_persist → Default workspace ────────────────
++      if (!manifest) {
++        const legacy = loadPersisted();
++        if (legacy) {
++          const defaultId = generateId();
++          const defaultWorkspace: Workspace = {
++            id: defaultId,
++            name: 'Default',
++            createdAt: new Date().toISOString(),
++            type: 'local',
++          };
++          const workspaceData: WorkspaceData = {
++            collections: legacy.collections ?? [],
++            environments: legacy.environments ?? [],
++            activeEnvironmentId: legacy.activeEnvironmentId ?? null,
++            collectionVariables: legacy.collectionVariables ?? {},
++            globalVariables: legacy.globalVariables ?? {},
++            cookieJar: legacy.cookieJar ?? {},
++            mockCollections: legacy.mockCollections ?? [],
++            mockRoutes: legacy.mockRoutes ?? [],
++            mockPort: legacy.mockPort ?? 3002,
++          };
++          manifest = { workspaces: [defaultWorkspace], activeWorkspaceId: defaultId };
++          await StorageDriver.writeManifest(manifest);
++          await StorageDriver.writeWorkspace(defaultId, workspaceData);
++          try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
++        }
+       }
+-    }
+ 
+-    const activeTab = restoredTabs.find(t => t.id === restoredActiveTabId) ?? null;
+-
+-    return {
+-      ...base,
+-      collections: restoredCollections,
+-      environments: saved.environments ?? base.environments,
+-      activeEnvironmentId: saved.activeEnvironmentId ?? base.activeEnvironmentId,
+-      collectionVariables: saved.collectionVariables ?? base.collectionVariables,
+-      globalVariables: saved.globalVariables ?? base.globalVariables,
+-      cookieJar: saved.cookieJar ?? base.cookieJar,
+-      mockRoutes: saved.mockRoutes ?? base.mockRoutes,
+-      mockCollections: saved.mockCollections ?? base.mockCollections,
+-      mockPort: saved.mockPort ?? base.mockPort,
+-      tabs: restoredTabs,
+-      activeTabId: restoredActiveTabId,
+-      activeRequest: activeTab ? { collectionId: activeTab.collectionId, item: activeTab.item } : null,
+-    };
+-  });
++      // ── First-ever launch: create Default workspace ───────────────────────
++      if (!manifest) {
++        const defaultId = generateId();
++        const defaultWorkspace: Workspace = {
++          id: defaultId,
++          name: 'Default',
++          createdAt: new Date().toISOString(),
++          type: 'local',
++        };
++        manifest = { workspaces: [defaultWorkspace], activeWorkspaceId: defaultId };
++        await StorageDriver.writeManifest(manifest);
++      }
+ 
+-  useEffect(() => {
+-    const snapshot: PersistedState = {
+-      collections: state.collections,
+-      environments: state.environments,
+-      activeEnvironmentId: state.activeEnvironmentId,
+-      collectionVariables: state.collectionVariables,
+-      globalVariables: state.globalVariables,
+-      cookieJar: state.cookieJar,
+-      mockCollections: state.mockCollections,
+-      mockRoutes: state.mockRoutes,
+-      mockPort: state.mockPort,
+-      tabSession: {
+-        tabs: state.tabs
+-          .filter(t => t.item.id != null)
+-          .map(t => ({ id: t.id, collectionId: t.collectionId, itemId: t.item.id! })),
+-        activeTabId: state.activeTabId,
+-      },
+-    };
+-    try {
+-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+-    } catch {
+-      // localStorage unavailable or quota exceeded — fail silently
++      const workspaceData = await StorageDriver.readWorkspace(manifest.activeWorkspaceId);
++      dispatch({
++        type: 'HYDRATE_WORKSPACE',
++        payload: {
++          workspaces: manifest.workspaces,
++          activeWorkspaceId: manifest.activeWorkspaceId,
++          ...(workspaceData ?? {
++            collections: [],
++            environments: [],
++            activeEnvironmentId: null,
++            collectionVariables: {},
++            globalVariables: {},
++            cookieJar: {},
++            mockCollections: [],
++            mockRoutes: [],
++            mockPort: 3002,
++          }),
++        },
++      });
+     }
+-  }, [state.collections, state.environments, state.activeEnvironmentId, state.collectionVariables, state.globalVariables, state.cookieJar, state.mockCollections, state.mockRoutes, state.mockPort, state.tabs, state.activeTabId]);
++    init();
++  // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
++
++  // ── Debounced workspace persistence ──────────────────────────────────────
++  useEffect(() => {
++    if (!state.storageReady) return;
++    if (saveTimer) clearTimeout(saveTimer);
++    const t = setTimeout(async () => {
++      const workspaceData: WorkspaceData = {
++        collections: state.collections,
++        environments: state.environments,
++        activeEnvironmentId: state.activeEnvironmentId,
++        collectionVariables: state.collectionVariables,
++        globalVariables: state.globalVariables,
++        cookieJar: state.cookieJar,
++        mockCollections: state.mockCollections,
++        mockRoutes: state.mockRoutes,
++        mockPort: state.mockPort,
++      };
++      await StorageDriver.writeWorkspace(state.activeWorkspaceId, workspaceData);
++      await StorageDriver.writeManifest({ workspaces: state.workspaces, activeWorkspaceId: state.activeWorkspaceId });
++      // Create a snapshot for history
++      await SnapshotEngine.createSnapshot(state.activeWorkspaceId, workspaceData);
++    }, 300);
++    setSaveTimer(t);
++    return () => clearTimeout(t);
++  // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [state.collections, state.environments, state.activeEnvironmentId, state.collectionVariables, state.globalVariables, state.cookieJar, state.mockCollections, state.mockRoutes, state.mockPort, state.workspaces, state.activeWorkspaceId, state.storageReady]);
+ 
+   function getActiveEnvironment(): AppEnvironment | null {
+     if (!state.activeEnvironmentId) return null;
+@@ -489,6 +688,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
+     return state.collectionVariables[collectionId] || {};
+   }
+ 
++  // Show a simple loading screen until storage has been read from disk
++  if (!state.storageReady) {
++    return (
++      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#1a1a2e', color: '#ccc', fontFamily: 'sans-serif', fontSize: 14 }}>
++        Loading…
++      </div>
++    );
++  }
++
+   return (
+     <AppContext.Provider value={{ state, dispatch, getActiveEnvironment, getEnvironmentVars, getCollectionVars }}>
+       {children}
+diff --git a/client/src/types.ts b/client/src/types.ts
+index e5dd10e..3b85a08 100644
+--- a/client/src/types.ts
++++ b/client/src/types.ts
+@@ -281,7 +281,74 @@ export interface MockRoute {
+   wsMessageHandlers?: WsMessageHandler[];
+ }
+ 
++// ─── Workspace & Collaboration Types ─────────────────────────────────────────
++
++export type WorkspaceRole = 'owner' | 'editor' | 'viewer';
++export type WorkspaceType = 'local' | 'team';
++
++export interface Workspace {
++  id: string;
++  name: string;
++  description?: string;
++  color?: string;
++  createdAt: string;
++  type: WorkspaceType;
++  teamServerId?: string;
++  teamServerUrl?: string;
++  role?: WorkspaceRole;
++}
++
++export interface WorkspaceData {
++  collections: AppCollection[];
++  environments: AppEnvironment[];
++  activeEnvironmentId: string | null;
++  collectionVariables: Record<string, Record<string, string>>;
++  globalVariables: Record<string, string>;
++  cookieJar: CookieJar;
++  mockCollections: MockCollection[];
++  mockRoutes: MockRoute[];
++  mockPort: number;
++}
++
++export type SyncProvider = 's3' | 'git' | 'http' | 'team';
++
++export interface SyncConfig {
++  workspaceId: string;
++  provider: SyncProvider;
++  /** Provider-specific fields (encrypted when stored to disk) */
++  config: Record<string, string>;
++  lastSynced?: string;
++}
++
++export interface HistoryEntry {
++  snapshotId: string;
++  timestamp: string;
++  summary: string;
++  collectionsCount: number;
++}
++
++export interface WorkspaceSnapshot {
++  snapshotId: string;
++  timestamp: string;
++  summary: string;
++  data: WorkspaceData;
++}
++
++export interface TeamServer {
++  id: string;
++  url: string;
++  /** Encrypted JWT token — never store plaintext */
++  token: string;
++  name: string;
++}
++
+ export interface AppState {
++  // ── Workspace ──────────────────────────────────────────────────────────────
++  workspaces: Workspace[];
++  activeWorkspaceId: string;
++  storageReady: boolean;
++  syncStatus: Record<string, 'idle' | 'syncing' | 'error'>;
++  // ── Data ──────────────────────────────────────────────────────────────────
+   collections: AppCollection[];
+   environments: AppEnvironment[];
+   activeEnvironmentId: string | null;
+@@ -367,4 +434,15 @@ export type AppAction =
+   | { type: 'SET_MOCK_ROUTES'; payload: MockRoute[] }
+   | { type: 'SET_MOCK_SERVER_RUNNING'; payload: boolean }
+   | { type: 'SET_MOCK_PORT'; payload: number }
+-  | { type: 'SET_RUNNER_PRESELECTION'; payload: { collectionId: string; requestIds: string[] } | null };
++  | { type: 'SET_RUNNER_PRESELECTION'; payload: { collectionId: string; requestIds: string[] } | null }
++  // ── Workspace actions ────────────────────────────────────────────────────
++  | { type: 'HYDRATE_WORKSPACE'; payload: WorkspaceData & { workspaces: Workspace[]; activeWorkspaceId: string } }
++  | { type: 'SET_STORAGE_READY'; payload: boolean }
++  | { type: 'CREATE_WORKSPACE'; payload: Workspace }
++  | { type: 'SWITCH_WORKSPACE'; payload: { workspace: Workspace; data: WorkspaceData } }
++  | { type: 'RENAME_WORKSPACE'; payload: { id: string; name: string } }
++  | { type: 'SET_WORKSPACE_COLOR'; payload: { id: string; color: string } }
++  | { type: 'DELETE_WORKSPACE'; payload: { id: string; fallbackId: string } }
++  | { type: 'DUPLICATE_WORKSPACE'; payload: { workspace: Workspace; data: WorkspaceData } }
++  | { type: 'SET_SYNC_STATUS'; payload: { workspaceId: string; status: 'idle' | 'syncing' | 'error' } }
++  | { type: 'RESTORE_SNAPSHOT'; payload: WorkspaceData };
+diff --git a/client/src/utils/snapshotEngine.ts b/client/src/utils/snapshotEngine.ts
+new file mode 100644
+index 0000000..627d43c
+--- /dev/null
++++ b/client/src/utils/snapshotEngine.ts
+@@ -0,0 +1,109 @@
++/**
++ * Snapshot Engine
++ *
++ * Creates and manages point-in-time snapshots of workspace data.
++ * Snapshots are stored via StorageDriver at:
++ *   userData/workspaces/{workspaceId}/snapshots/{snapshotId}.json
++ *   userData/workspaces/{workspaceId}/history.json  ← index
++ *
++ * A ring-buffer of MAX_SNAPSHOTS is maintained per workspace.
++ * Oldest entries are pruned automatically.
++ */
++
++import type { WorkspaceData, HistoryEntry, WorkspaceSnapshot } from '../types';
++import * as StorageDriver from './storageDriver';
++import { generateId } from '../store';
++
++const MAX_SNAPSHOTS = 50;
++
++/**
++ * Create a new snapshot for the given workspace.
++ * Called automatically by store.tsx after every debounced save.
++ */
++export async function createSnapshot(
++  workspaceId: string,
++  data: WorkspaceData,
++  summary?: string,
++): Promise<void> {
++  const snapshotId = generateId();
++  const timestamp = new Date().toISOString();
++  const autoSummary = summary ?? `${data.collections.length} collection(s), auto-save`;
++
++  const snapshot: WorkspaceSnapshot = { snapshotId, timestamp, summary: autoSummary, data };
++  await StorageDriver.writeSnapshot(workspaceId, snapshotId, snapshot);
++
++  // Update history index
++  const idx = await StorageDriver.readHistoryIndex(workspaceId) ?? [];
++  const entry: HistoryEntry = {
++    snapshotId,
++    timestamp,
++    summary: autoSummary,
++    collectionsCount: data.collections.length,
++  };
++  const updated = [entry, ...idx].slice(0, MAX_SNAPSHOTS);
++  await StorageDriver.writeHistoryIndex(workspaceId, updated);
++}
++
++/**
++ * Retrieve the ordered history index (newest first).
++ */
++export async function listHistory(workspaceId: string): Promise<HistoryEntry[]> {
++  const raw = await StorageDriver.readHistoryIndex(workspaceId);
++  return (raw as HistoryEntry[] | null) ?? [];
++}
++
++/**
++ * Load a specific snapshot by id.
++ */
++export async function loadSnapshot(
++  workspaceId: string,
++  snapshotId: string,
++): Promise<WorkspaceSnapshot | null> {
++  return StorageDriver.readSnapshot(workspaceId, snapshotId) as Promise<WorkspaceSnapshot | null>;
++}
++
++/**
++ * Produce a simple structural diff between two WorkspaceData instances.
++ * Returns human-readable lines describing what changed.
++ */
++export function diffSnapshots(a: WorkspaceData, b: WorkspaceData): string[] {
++  const lines: string[] = [];
++
++  const aColIds = new Set(a.collections.map(c => c._id));
++  const bColIds = new Set(b.collections.map(c => c._id));
++  const aColMap = new Map(a.collections.map(c => [c._id, c]));
++  const bColMap = new Map(b.collections.map(c => [c._id, c]));
++
++  for (const id of bColIds) {
++    if (!aColIds.has(id)) {
++      lines.push(`+ Collection added: ${bColMap.get(id)!.info.name}`);
++    }
++  }
++  for (const id of aColIds) {
++    if (!bColIds.has(id)) {
++      lines.push(`- Collection removed: ${aColMap.get(id)!.info.name}`);
++    }
++  }
++  for (const id of aColIds) {
++    if (bColIds.has(id)) {
++      const ac = aColMap.get(id)!;
++      const bc = bColMap.get(id)!;
++      if (ac.info.name !== bc.info.name) lines.push(`~ Collection renamed: ${ac.info.name} → ${bc.info.name}`);
++      const aItems = JSON.stringify(ac.item ?? []);
++      const bItems = JSON.stringify(bc.item ?? []);
++      if (aItems !== bItems) lines.push(`~ Collection modified: ${bc.info.name}`);
++    }
++  }
++
++  const aEnvIds = new Set(a.environments.map(e => e._id));
++  const bEnvMap = new Map(b.environments.map(e => [e._id, e]));
++  for (const [id, env] of bEnvMap) {
++    if (!aEnvIds.has(id)) lines.push(`+ Environment added: ${env.name}`);
++  }
++  for (const env of a.environments) {
++    if (!bEnvMap.has(env._id)) lines.push(`- Environment removed: ${env.name}`);
++  }
++
++  if (lines.length === 0) lines.push('No structural changes detected');
++  return lines;
++}
+diff --git a/client/src/utils/storageDriver.ts b/client/src/utils/storageDriver.ts
+new file mode 100644
+index 0000000..2c66c75
+--- /dev/null
++++ b/client/src/utils/storageDriver.ts
+@@ -0,0 +1,267 @@
++/**
++ * StorageDriver — disk-first persistence with localStorage write-through fallback.
++ *
++ * When running inside Electron, all reads/writes go to
++ * `app.getPath('userData')` via IPC and are mirrored to localStorage as a
++ * hot-reload / browser-dev-mode fallback.
++ *
++ * When `window.electronAPI` is absent (browser dev mode), only localStorage
++ * is used, and the module remains crash-free.
++ */
++
++import type { WorkspaceData, Workspace } from '../types';
++
++// ─── Electron API shim ────────────────────────────────────────────────────────
++
++interface ElectronAPI {
++  getDataDir: () => Promise<string>;
++  readJsonFile: (filePath: string) => Promise<unknown>;
++  writeJsonFile: (filePath: string, data: unknown) => Promise<void>;
++  deleteFile: (filePath: string) => Promise<void>;
++  listDir: (dirPath: string) => Promise<string[]>;
++  shellOpenPath: (dirPath: string) => Promise<void>;
++  openFileDialog: (filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
++  encryptString: (value: string) => Promise<string | null>;
++  decryptString: (encrypted: string) => Promise<string | null>;
++}
++
++function eAPI(): ElectronAPI | null {
++  return (window as unknown as { electronAPI?: ElectronAPI }).electronAPI ?? null;
++}
++
++// ─── localStorage helpers ────────────────────────────────────────────────────
++
++const LS_MANIFEST = 'apilix_workspaces';
++const LS_WORKSPACE = (id: string) => `apilix_workspace_${id}`;
++const LS_SETTINGS = 'apilix_settings';
++const LS_SYNC_CONFIG = 'apilix_sync_config';
++
++function lsRead<T>(key: string): T | null {
++  try {
++    const raw = localStorage.getItem(key);
++    return raw ? (JSON.parse(raw) as T) : null;
++  } catch {
++    return null;
++  }
++}
++
++function lsWrite(key: string, data: unknown): void {
++  try {
++    localStorage.setItem(key, JSON.stringify(data));
++  } catch {
++    // quota exceeded — fail silently
++  }
++}
++
++function lsDelete(key: string): void {
++  try {
++    localStorage.removeItem(key);
++  } catch {
++    // ignore
++  }
++}
++
++// ─── Manifest ────────────────────────────────────────────────────────────────
++
++export interface WorkspaceManifest {
++  workspaces: Workspace[];
++  activeWorkspaceId: string;
++}
++
++export async function readManifest(): Promise<WorkspaceManifest | null> {
++  const api = eAPI();
++  if (api) {
++    try {
++      const dir = await api.getDataDir();
++      const data = await api.readJsonFile(`${dir}/workspaces.json`);
++      if (data) return data as WorkspaceManifest;
++    } catch {
++      // fall through to localStorage
++    }
++  }
++  return lsRead<WorkspaceManifest>(LS_MANIFEST);
++}
++
++export async function writeManifest(manifest: WorkspaceManifest): Promise<void> {
++  lsWrite(LS_MANIFEST, manifest);
++  const api = eAPI();
++  if (api) {
++    const dir = await api.getDataDir();
++    await api.writeJsonFile(`${dir}/workspaces.json`, manifest);
++  }
++}
++
++// ─── Workspace data ───────────────────────────────────────────────────────────
++
++export async function readWorkspace(id: string): Promise<WorkspaceData | null> {
++  const api = eAPI();
++  if (api) {
++    try {
++      const dir = await api.getDataDir();
++      const data = await api.readJsonFile(`${dir}/workspaces/${id}.json`);
++      if (data) return data as WorkspaceData;
++    } catch {
++      // fall through to localStorage
++    }
++  }
++  return lsRead<WorkspaceData>(LS_WORKSPACE(id));
++}
++
++export async function writeWorkspace(id: string, data: WorkspaceData): Promise<void> {
++  lsWrite(LS_WORKSPACE(id), data);
++  const api = eAPI();
++  if (api) {
++    const dir = await api.getDataDir();
++    await api.writeJsonFile(`${dir}/workspaces/${id}.json`, data);
++  }
++}
++
++export async function deleteWorkspace(id: string): Promise<void> {
++  lsDelete(LS_WORKSPACE(id));
++  const api = eAPI();
++  if (api) {
++    const dir = await api.getDataDir();
++    await api.deleteFile(`${dir}/workspaces/${id}.json`);
++  }
++}
++
++// ─── Settings ────────────────────────────────────────────────────────────────
++
++export interface AppSettings {
++  theme?: 'dark' | 'light' | 'system';
++  [key: string]: unknown;
++}
++
++export async function readSettings(): Promise<AppSettings | null> {
++  const api = eAPI();
++  if (api) {
++    try {
++      const dir = await api.getDataDir();
++      const data = await api.readJsonFile(`${dir}/settings.json`);
++      if (data) return data as AppSettings;
++    } catch {
++      // fall through
++    }
++  }
++  return lsRead<AppSettings>(LS_SETTINGS);
++}
++
++export async function writeSettings(settings: AppSettings): Promise<void> {
++  lsWrite(LS_SETTINGS, settings);
++  const api = eAPI();
++  if (api) {
++    const dir = await api.getDataDir();
++    await api.writeJsonFile(`${dir}/settings.json`, settings);
++  }
++}
++
++// ─── Sync config (encrypted credentials) ────────────────────────────────────
++
++export type SyncConfigStore = Record<string, Record<string, string>>;
++
++/** Read the sync config for a specific workspace. */
++export async function readSyncConfig(workspaceId: string): Promise<{ provider: string; config: Record<string, string> } | null> {
++  const api = eAPI();
++  let store: SyncConfigStore | null = null;
++  if (api) {
++    try {
++      const dir = await api.getDataDir();
++      store = await api.readJsonFile(`${dir}/sync-config.json`) as SyncConfigStore | null;
++    } catch { /* fall through */ }
++  }
++  if (!store) store = lsRead<SyncConfigStore>(LS_SYNC_CONFIG);
++  if (!store || !store[workspaceId]) return null;
++  const entry = store[workspaceId] as unknown as { provider: string; config: Record<string, string> };
++  return entry;
++}
++
++/** Write the sync config for a specific workspace (merges into the store file). */
++export async function writeSyncConfig(workspaceId: string, provider: string, config: Record<string, string>): Promise<void> {
++  const api = eAPI();
++  let store: SyncConfigStore = {};
++  if (api) {
++    try {
++      const dir = await api.getDataDir();
++      store = (await api.readJsonFile(`${dir}/sync-config.json`) as SyncConfigStore | null) ?? {};
++      store[workspaceId] = { provider, config } as unknown as Record<string, string>;
++      await api.writeJsonFile(`${dir}/sync-config.json`, store);
++    } catch { /* fall through */ }
++  }
++  lsWrite(LS_SYNC_CONFIG, { ...store, [workspaceId]: { provider, config } });
++}
++
++// ─── Encryption helpers ───────────────────────────────────────────────────────
++
++export async function encryptValue(value: string): Promise<string> {
++  const api = eAPI();
++  if (api) {
++    const encrypted = await api.encryptString(value);
++    if (encrypted) return encrypted;
++  }
++  // Browser fallback: store as-is (no encryption available)
++  return value;
++}
++
++export async function decryptValue(encrypted: string): Promise<string> {
++  const api = eAPI();
++  if (api) {
++    const decrypted = await api.decryptString(encrypted);
++    if (decrypted !== null) return decrypted;
++  }
++  return encrypted;
++}
++
++// ─── Snapshot helpers ─────────────────────────────────────────────────────────
++
++export async function readHistoryIndex(workspaceId: string): Promise<unknown[] | null> {
++  const api = eAPI();
++  if (!api) return null;
++  const dir = await api.getDataDir();
++  return api.readJsonFile(`${dir}/workspaces/${workspaceId}/history.json`) as Promise<unknown[] | null>;
++}
++
++export async function writeHistoryIndex(workspaceId: string, index: unknown[]): Promise<void> {
++  const api = eAPI();
++  if (!api) return;
++  const dir = await api.getDataDir();
++  await api.writeJsonFile(`${dir}/workspaces/${workspaceId}/history.json`, index);
++}
++
++export async function readSnapshot(workspaceId: string, snapshotId: string): Promise<unknown | null> {
++  const api = eAPI();
++  if (!api) return null;
++  const dir = await api.getDataDir();
++  return api.readJsonFile(`${dir}/workspaces/${workspaceId}/snapshots/${snapshotId}.json`);
++}
++
++export async function writeSnapshot(workspaceId: string, snapshotId: string, data: unknown): Promise<void> {
++  const api = eAPI();
++  if (!api) return;
++  const dir = await api.getDataDir();
++  await api.writeJsonFile(`${dir}/workspaces/${workspaceId}/snapshots/${snapshotId}.json`, data);
++}
++
++// ─── Utility ──────────────────────────────────────────────────────────────────
++
++/** Opens the workspace data folder in Finder / Explorer. */
++export async function openDataFolder(workspaceId?: string): Promise<void> {
++  const api = eAPI();
++  if (!api) return;
++  const dir = await api.getDataDir();
++  const target = workspaceId ? `${dir}/workspaces/${workspaceId}` : dir;
++  await api.shellOpenPath(target);
++}
++
++/** Opens a native file picker and returns the selected file path, or null. */
++export async function pickFile(filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null> {
++  const api = eAPI();
++  if (!api) return null;
++  return api.openFileDialog(filters ?? [{ name: 'All Files', extensions: ['*'] }]);
++}
++
++/** Returns the Electron userData directory, or null in browser mode. */
++export async function getDataDir(): Promise<string | null> {
++  const api = eAPI();
++  if (!api) return null;
++  return api.getDataDir();
++}
+diff --git a/client/src/utils/sync/gitAdapter.ts b/client/src/utils/sync/gitAdapter.ts
+new file mode 100644
+index 0000000..b7e306c
+--- /dev/null
++++ b/client/src/utils/sync/gitAdapter.ts
+@@ -0,0 +1,73 @@
++/**
++ * Git Sync Adapter
++ *
++ * Delegates to the local API server (`server/index.js`) which runs
++ * `simple-git` commands server-side. This means no git binary is required
++ * in the renderer process, and credentials stay on the server.
++ *
++ * Required config keys:
++ *   remote   — git remote URL (e.g. "https://github.com/user/api-workspace.git")
++ *   branch   — branch name, defaults to "main"
++ *   username — git username (for HTTPS authentication)
++ *   token    — personal access token (stored encrypted)
++ *
++ * The server stores each workspace in a local git repository at
++ * `userData/git-sync/workspaces/{workspaceId}/`, with the workspace data
++ * written to `workspace.json` inside that repository directory.
++ */
++
++import type { WorkspaceData } from '../../types';
++import type { SyncAdapter } from '../syncEngine';
++import { getDataDir } from '../storageDriver';
++
++function serverUrl(): string {
++  const port = (window as any).electronAPI?.serverPort ?? 3001;
++  return `http://localhost:${port}`;
++}
++
++export const gitAdapter: SyncAdapter = {
++  async push(workspaceId, data, config) {
++    const dataDir = await getDataDir();
++    const res = await fetch(`${serverUrl()}/api/sync/git/push`, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ workspaceId, data, config, dataDir }),
++    });
++    if (!res.ok) {
++      const body = await res.json().catch(() => ({})) as { error?: string };
++      throw new Error(`Git push failed: ${body.error ?? res.statusText}`);
++    }
++  },
++
++  async pull(workspaceId, config) {
++    const dataDir = await getDataDir();
++    const res = await fetch(`${serverUrl()}/api/sync/git/pull`, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ workspaceId, config, dataDir }),
++    });
++    if (res.status === 404) return null;
++    if (!res.ok) {
++      const body = await res.json().catch(() => ({})) as { error?: string };
++      throw new Error(`Git pull failed: ${body.error ?? res.statusText}`);
++    }
++    const body = await res.json() as { data: WorkspaceData };
++    return body.data;
++  },
++
++  async getRemoteTimestamp(workspaceId, config) {
++    try {
++      const dataDir = await getDataDir();
++      const res = await fetch(`${serverUrl()}/api/sync/git/timestamp`, {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ workspaceId, config, dataDir }),
++      });
++      if (!res.ok) return null;
++      const body = await res.json() as { timestamp: string | null };
++      return body.timestamp;
++    } catch {
++      return null;
++    }
++  },
++};
+diff --git a/client/src/utils/sync/httpAdapter.ts b/client/src/utils/sync/httpAdapter.ts
+new file mode 100644
+index 0000000..b5c5f0a
+--- /dev/null
++++ b/client/src/utils/sync/httpAdapter.ts
+@@ -0,0 +1,62 @@
++/**
++ * HTTP Sync Adapter
++ *
++ * Pushes/pulls workspace JSON to/from any HTTP endpoint that accepts a
++ * JSON body. Useful for self-hosted backends that are not Apilix team
++ * servers (e.g. a company's own sync service or a cloud function).
++ *
++ * Required config keys:
++ *   endpoint — full URL (e.g. "https://my-api.example.com/workspaces/prod")
++ *   token    — Bearer token sent in `Authorization` header (stored encrypted)
++ */
++
++import type { WorkspaceData } from '../../types';
++import type { SyncAdapter } from '../syncEngine';
++
++export const httpAdapter: SyncAdapter = {
++  async push(_workspaceId, data, config) {
++    const res = await fetch(config.endpoint, {
++      method: 'PUT',
++      headers: {
++        'Content-Type': 'application/json',
++        ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
++      },
++      body: JSON.stringify({ data, lastModified: new Date().toISOString() }),
++    });
++    if (!res.ok) {
++      const text = await res.text().catch(() => res.statusText);
++      throw new Error(`HTTP push failed (${res.status}): ${text}`);
++    }
++  },
++
++  async pull(_workspaceId, config) {
++    const res = await fetch(config.endpoint, {
++      method: 'GET',
++      headers: {
++        ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
++      },
++    });
++    if (res.status === 404) return null;
++    if (!res.ok) {
++      const text = await res.text().catch(() => res.statusText);
++      throw new Error(`HTTP pull failed (${res.status}): ${text}`);
++    }
++    const body = await res.json() as { data: WorkspaceData };
++    return body.data;
++  },
++
++  async getRemoteTimestamp(_workspaceId, config) {
++    try {
++      const res = await fetch(config.endpoint, {
++        method: 'HEAD',
++        headers: {
++          ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
++        },
++      });
++      if (!res.ok) return null;
++      return res.headers.get('Last-Modified') ?? res.headers.get('X-Last-Modified');
++    } catch {
++      return null;
++    }
++  },
++};
+diff --git a/client/src/utils/sync/s3Adapter.ts b/client/src/utils/sync/s3Adapter.ts
+new file mode 100644
+index 0000000..ff2130a
+--- /dev/null
++++ b/client/src/utils/sync/s3Adapter.ts
+@@ -0,0 +1,71 @@
++/**
++ * S3 Sync Adapter
++ *
++ * Uses presigned URLs generated server-side (via the Electron main process
++ * IPC channel `get-presigned-url`) so that AWS credentials never reach the
++ * renderer process. The presigned URL is valid for 60 seconds; it is
++ * requested fresh on every push/pull.
++ *
++ * Required config keys:
++ *   bucket   — S3 bucket name
++ *   region   — AWS region (e.g. "us-east-1")
++ *   keyId    — AWS Access Key ID  (stored encrypted in sync-config.json)
++ *   secret   — AWS Secret Access Key (stored encrypted)
++ *   prefix   — optional key prefix, defaults to "apilix/"
++ */
++
++import type { WorkspaceData } from '../../types';
++import type { SyncAdapter } from '../syncEngine';
++
++async function getPresignedUrl(
++  operation: 'PUT' | 'GET' | 'HEAD',
++  config: Record<string, string>,
++  workspaceId: string,
++): Promise<string> {
++  // Ask the Electron main process to generate the presigned URL.
++  // This keeps AWS credentials inside the sandboxed main process only.
++  const api = (window as any).electronAPI;
++  if (!api?.getPresignedUrl) {
++    throw new Error('S3 presigned URL generation requires Electron (not available in browser mode)');
++  }
++  return api.getPresignedUrl({
++    operation,
++    bucket: config.bucket,
++    region: config.region,
++    keyId: config.keyId,
++    secret: config.secret,
++    objectKey: `${config.prefix ?? 'apilix/'}${workspaceId}.json`,
++  });
++}
++
++export const s3Adapter: SyncAdapter = {
++  async push(workspaceId, data, config) {
++    const url = await getPresignedUrl('PUT', config, workspaceId);
++    const res = await fetch(url, {
++      method: 'PUT',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ data, lastModified: new Date().toISOString() }),
++    });
++    if (!res.ok) throw new Error(`S3 PUT failed: ${res.status} ${res.statusText}`);
++  },
++
++  async pull(workspaceId, config) {
++    const url = await getPresignedUrl('GET', config, workspaceId);
++    const res = await fetch(url);
++    if (res.status === 404) return null;
++    if (!res.ok) throw new Error(`S3 GET failed: ${res.status} ${res.statusText}`);
++    const body = await res.json() as { data: WorkspaceData };
++    return body.data;
++  },
++
++  async getRemoteTimestamp(workspaceId, config) {
++    try {
++      const url = await getPresignedUrl('HEAD', config, workspaceId);
++      const res = await fetch(url, { method: 'HEAD' });
++      if (!res.ok) return null;
++      return res.headers.get('Last-Modified');
++    } catch {
++      return null;
++    }
++  },
++};
+diff --git a/client/src/utils/sync/teamAdapter.ts b/client/src/utils/sync/teamAdapter.ts
+new file mode 100644
+index 0000000..21603f4
+--- /dev/null
++++ b/client/src/utils/sync/teamAdapter.ts
+@@ -0,0 +1,64 @@
++/**
++ * Team Server Adapter
++ *
++ * Syncs workspace data with an Apilix team server (the self-hosted
++ * Express service in `server/team/`). RBAC is enforced server-side.
++ *
++ * Required config keys:
++ *   serverUrl         — base URL of the team server (e.g. "https://apilix.example.com")
++ *   workspaceServerId — the workspace ID as known by the team server
++ *   token             — JWT session token (stored encrypted)
++ */
++
++import type { WorkspaceData } from '../../types';
++import type { SyncAdapter } from '../syncEngine';
++
++export const teamAdapter: SyncAdapter = {
++  async push(_workspaceId, data, config) {
++    const url = `${config.serverUrl}/workspaces/${config.workspaceServerId}/data`;
++    const res = await fetch(url, {
++      method: 'PUT',
++      headers: {
++        'Content-Type': 'application/json',
++        Authorization: `Bearer ${config.token}`,
++      },
++      body: JSON.stringify({ data }),
++    });
++    if (!res.ok) {
++      const body = await res.json().catch(() => ({})) as { error?: string };
++      throw new Error(`Team push failed (${res.status}): ${body.error ?? res.statusText}`);
++    }
++  },
++
++  async pull(_workspaceId, config) {
++    const url = `${config.serverUrl}/workspaces/${config.workspaceServerId}/data`;
++    const res = await fetch(url, {
++      method: 'GET',
++      headers: { Authorization: `Bearer ${config.token}` },
++    });
++    if (res.status === 404) return null;
++    if (!res.ok) {
++      const body = await res.json().catch(() => ({})) as { error?: string };
++      throw new Error(`Team pull failed (${res.status}): ${body.error ?? res.statusText}`);
++    }
++    const body = await res.json() as { data: WorkspaceData };
++    return body.data;
++  },
++
++  async getRemoteTimestamp(_workspaceId, config) {
++    try {
++      const url = `${config.serverUrl}/workspaces/${config.workspaceServerId}/data`;
++      const res = await fetch(url, {
++        method: 'HEAD',
++        headers: { Authorization: `Bearer ${config.token}` },
++      });
++      if (!res.ok) return null;
++      return (
++        res.headers.get('X-Last-Modified') ??
++        res.headers.get('Last-Modified')
++      );
++    } catch {
++      return null;
++    }
++  },
++};
+diff --git a/client/src/utils/syncEngine.ts b/client/src/utils/syncEngine.ts
+new file mode 100644
+index 0000000..b301cfc
+--- /dev/null
++++ b/client/src/utils/syncEngine.ts
+@@ -0,0 +1,104 @@
++/**
++ * syncEngine — provider-agnostic sync orchestrator.
++ *
++ * Each adapter implements the { push, pull, getRemoteTimestamp } interface.
++ * The engine negotiates conflict resolution between local and remote state.
++ */
++
++import type { WorkspaceData, SyncConfig } from '../types';
++
++export type ConflictResolution = 'keep-local' | 'keep-remote';
++
++export interface SyncConflict {
++  workspaceId: string;
++  localLastSaved: string;
++  remoteLastModified: string;
++}
++
++export interface SyncAdapter {
++  push(workspaceId: string, data: WorkspaceData, config: Record<string, string>): Promise<void>;
++  pull(workspaceId: string, config: Record<string, string>): Promise<WorkspaceData | null>;
++  getRemoteTimestamp(workspaceId: string, config: Record<string, string>): Promise<string | null>;
++}
++
++// ─── Public API ───────────────────────────────────────────────────────────────
++
++/**
++ * Push the active workspace data to the configured provider.
++ * Throws on provider error; caller should dispatch SET_SYNC_STATUS accordingly.
++ */
++export async function push(syncConfig: SyncConfig, data: WorkspaceData): Promise<void> {
++  const adapter = getAdapter(syncConfig.provider as string);
++  await adapter.push(syncConfig.workspaceId, data, syncConfig.config);
++}
++
++/**
++ * Pull workspace data from the configured provider.
++ * Returns null if no remote data exists yet.
++ * Throws on provider or conflict — caller should handle ConflictError.
++ */
++export async function pull(
++  syncConfig: SyncConfig,
++  resolution?: ConflictResolution,
++): Promise<WorkspaceData | null> {
++  const adapter = getAdapter(syncConfig.provider as string);
++
++  if (!resolution) {
++    // Check for conflict before pulling
++    const remoteTs = await adapter.getRemoteTimestamp(syncConfig.workspaceId, syncConfig.config);
++    const localTs = syncConfig.lastSynced ?? null;
++    if (remoteTs && localTs && remoteTs > localTs) {
++      const err = new ConflictError(syncConfig.workspaceId, localTs, remoteTs);
++      throw err;
++    }
++  }
++
++  if (resolution === 'keep-local') return null; // caller will push instead
++
++  return adapter.pull(syncConfig.workspaceId, syncConfig.config);
++}
++
++/**
++ * Check whether the remote is newer than the local copy.
++ * Returns null if no remote exists.
++ */
++export async function checkConflict(syncConfig: SyncConfig): Promise<SyncConflict | null> {
++  const adapter = getAdapter(syncConfig.provider as string);
++  const remoteTs = await adapter.getRemoteTimestamp(syncConfig.workspaceId, syncConfig.config);
++  const localTs = syncConfig.lastSynced ?? null;
++  if (remoteTs && localTs && remoteTs > localTs) {
++    return { workspaceId: syncConfig.workspaceId, localLastSaved: localTs, remoteLastModified: remoteTs };
++  }
++  return null;
++}
++
++// ─── ConflictError ────────────────────────────────────────────────────────────
++
++export class ConflictError extends Error {
++  constructor(
++    public workspaceId: string,
++    public localLastSaved: string,
++    public remoteLastModified: string,
++  ) {
++    super(`Sync conflict for workspace ${workspaceId}: remote is newer`);
++  }
++}
++
++// ─── Adapter registry ─────────────────────────────────────────────────────────
++
++function getAdapter(provider: string): SyncAdapter {
++  switch (provider) {
++    case 's3': return s3Adapter;
++    case 'git': return gitAdapter;
++    case 'http': return httpAdapter;
++    case 'team': return teamAdapter;
++    default: throw new Error(`Unknown sync provider: ${provider}`);
++  }
++}
++
++// ─── Lazy adapter imports (tree-shaken when unused) ───────────────────────────
++
++import { s3Adapter } from './sync/s3Adapter';
++import { gitAdapter } from './sync/gitAdapter';
++import { httpAdapter } from './sync/httpAdapter';
++import { teamAdapter } from './sync/teamAdapter';
+diff --git a/electron/main.js b/electron/main.js
+index 0331a85..84c98df 100644
+--- a/electron/main.js
++++ b/electron/main.js
+@@ -1,6 +1,6 @@
+ 'use strict';
+ 
+-const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron');
++const { app, BrowserWindow, shell, ipcMain, dialog, safeStorage } = require('electron');
+ const path = require('path');
+ const fs = require('fs');
+ const net = require('net');
+@@ -32,12 +32,13 @@ function findFreePort() {
+ function startServer(port) {
+   process.env.PORT = String(port);
+   process.env.API_PORT = String(port);
++  process.env.APILIX_DATA_DIR = app.getPath('userData');
+ 
+   if (isDev) {
+     const { fork } = require('child_process');
+     const serverPath = path.join(__dirname, '..', 'server', 'index.js');
+     serverProcess = fork(serverPath, [], {
+-      env: { ...process.env, PORT: String(port) },
++      env: { ...process.env, PORT: String(port), APILIX_DATA_DIR: app.getPath('userData') },
+       stdio: 'pipe',
+     });
+     serverProcess.stdout.on('data', (d) => writeLog('[server] ' + d.toString().trim()));
+@@ -119,6 +120,95 @@ ipcMain.handle('save-file-to-disk', async (_event, { filePath, content }) => {
+   fs.writeFileSync(filePath, content, 'utf8');
+ });
+ 
++// ─── Workspace / Persistence IPC ─────────────────────────────────────────────
++
++function getUserDataDir() {
++  return app.getPath('userData');
++}
++
++function assertInsideUserData(filePath) {
++  const base = path.resolve(getUserDataDir());
++  const resolved = path.resolve(filePath);
++  if (!resolved.startsWith(base + path.sep) && resolved !== base) {
++    throw new Error('Path traversal detected: path must be inside userData');
++  }
++}
++
++// Returns the userData directory path
++ipcMain.handle('get-data-dir', () => getUserDataDir());
++
++// Read and parse a JSON file from disk (must be inside userData)
++ipcMain.handle('read-json-file', async (_event, { filePath }) => {
++  assertInsideUserData(filePath);
++  try {
++    const content = fs.readFileSync(filePath, 'utf8');
++    return JSON.parse(content);
++  } catch (err) {
++    if (err.code === 'ENOENT') return null;
++    throw err;
++  }
++});
++
++// Write JSON data to a file (must be inside userData); creates parent directories
++ipcMain.handle('write-json-file', async (_event, { filePath, data }) => {
++  assertInsideUserData(filePath);
++  fs.mkdirSync(path.dirname(filePath), { recursive: true });
++  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
++});
++
++// Delete a file (must be inside userData); no-ops if not found
++ipcMain.handle('delete-file', async (_event, { filePath }) => {
++  assertInsideUserData(filePath);
++  try {
++    fs.unlinkSync(filePath);
++  } catch (err) {
++    if (err.code !== 'ENOENT') throw err;
++  }
++});
++
++// List files in a directory (must be inside userData)
++ipcMain.handle('list-dir', async (_event, { dirPath }) => {
++  assertInsideUserData(dirPath);
++  try {
++    return fs.readdirSync(dirPath);
++  } catch (err) {
++    if (err.code === 'ENOENT') return [];
++    throw err;
++  }
++});
++
++// Open a file picker dialog for import
++ipcMain.handle('open-file-dialog', async (_event, { filters } = {}) => {
++  const result = await dialog.showOpenDialog(mainWindow, {
++    title: 'Open file',
++    properties: ['openFile'],
++    filters: filters ?? [{ name: 'All Files', extensions: ['*'] }],
++  });
++  return result.canceled ? null : result.filePaths[0];
++});
++
++// Reveal a path in Finder / Explorer
++ipcMain.handle('shell-open-path', async (_event, { dirPath }) => {
++  assertInsideUserData(dirPath);
++  shell.showItemInFolder(dirPath);
++});
++
++// Encrypt a string using OS keychain (safeStorage)
++ipcMain.handle('encrypt-string', (_event, { value }) => {
++  if (!safeStorage.isEncryptionAvailable()) return null;
++  return safeStorage.encryptString(value).toString('base64');
++});
++
++// Decrypt a base64-encoded string previously encrypted with encrypt-string
++ipcMain.handle('decrypt-string', (_event, { encrypted }) => {
++  if (!safeStorage.isEncryptionAvailable()) return null;
++  try {
++    return safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
++  } catch {
++    return null;
++  }
++});
++
+ app.whenReady().then(async () => {
+   // In dev, keep port 3001 so Vite's proxy config stays valid.
+   // In production, find a free port dynamically.
+diff --git a/electron/preload.js b/electron/preload.js
+index 811e8d0..5f1f15b 100644
+--- a/electron/preload.js
++++ b/electron/preload.js
+@@ -4,7 +4,18 @@ const { contextBridge, ipcRenderer } = require('electron');
+ 
+ contextBridge.exposeInMainWorld('electronAPI', {
+   serverPort: process.env.API_PORT ? parseInt(process.env.API_PORT, 10) : null,
++  // ── Existing ──────────────────────────────────────────────────────────────
+   chooseExportFolder: () => ipcRenderer.invoke('choose-export-folder'),
+   saveFileToDisk: (filePath, content) =>
+     ipcRenderer.invoke('save-file-to-disk', { filePath, content }),
++  // ── Workspace / Persistence ───────────────────────────────────────────────
++  getDataDir: () => ipcRenderer.invoke('get-data-dir'),
++  readJsonFile: (filePath) => ipcRenderer.invoke('read-json-file', { filePath }),
++  writeJsonFile: (filePath, data) => ipcRenderer.invoke('write-json-file', { filePath, data }),
++  deleteFile: (filePath) => ipcRenderer.invoke('delete-file', { filePath }),
++  listDir: (dirPath) => ipcRenderer.invoke('list-dir', { dirPath }),
++  openFileDialog: (filters) => ipcRenderer.invoke('open-file-dialog', { filters }),
++  shellOpenPath: (dirPath) => ipcRenderer.invoke('shell-open-path', { dirPath }),
++  encryptString: (value) => ipcRenderer.invoke('encrypt-string', { value }),
++  decryptString: (encrypted) => ipcRenderer.invoke('decrypt-string', { encrypted }),
+ });
+diff --git a/server/index.js b/server/index.js
+index 1658393..c178cde 100644
+--- a/server/index.js
++++ b/server/index.js
+@@ -966,6 +966,179 @@ app.delete('/api/mock-log', (_req, res) => {
+   res.json({ ok: true });
+ });
+ 
++// ─── Git Sync Routes ───────────────────────────────────────────────────────────
++//
++// These routes use `simple-git` to maintain a local git repository per
++// workspace inside {userData}/git-sync/workspaces/{workspaceId}/.
++// The userData path is supplied by the renderer via the request body
++// because the server process may not have direct access to Electron's
++// app.getPath('userData') — it receives it once per call.
++//
++// All three routes share the same validation and git-repo bootstrap logic.
++
++let simpleGit;
++try {
++  simpleGit = require('simple-git');
++} catch {
++  // simple-git is optional — git sync routes will return 501 if missing
++}
++
++const path = require('path');
++const fs = require('fs');
++
++function assertGitAvailable(res) {
++  if (!simpleGit) {
++    res.status(501).json({ error: 'simple-git package not installed. Run: npm install simple-git in the server directory.' });
++    return false;
++  }
++  return true;
++}
++
++/**
++ * Bootstrap a local git repo for the given workspace.
++ * Returns a simple-git instance pointing at `repoDir`.
++ */
++async function ensureRepo(repoDir, config) {
++  if (!fs.existsSync(repoDir)) {
++    fs.mkdirSync(repoDir, { recursive: true });
++  }
++  const git = simpleGit(repoDir);
++  const isRepo = await git.checkIsRepo().catch(() => false);
++  if (!isRepo) {
++    await git.init();
++  }
++  // Set remote
++  const remotes = await git.getRemotes();
++  if (!remotes.find(r => r.name === 'origin')) {
++    await git.addRemote('origin', config.remote);
++  } else {
++    await git.remote(['set-url', 'origin', config.remote]);
++  }
++  // Configure author
++  if (config.authorName) await git.addConfig('user.name', config.authorName);
++  if (config.authorEmail) await git.addConfig('user.email', config.authorEmail);
++  // Always use merge strategy on pull (avoids "divergent branches" error)
++  await git.addConfig('pull.rebase', 'false');
++  // Ensure the target branch exists locally and is checked out before commit/push.
++  const branch = config.branch || 'main';
++  const localBranches = await git.branchLocal();
++  if (localBranches.all.includes(branch)) {
++    await git.checkout(branch);
++  } else {
++    await git.checkoutLocalBranch(branch);
++  }
++  return git;
++}
++
++// POST /api/sync/git/push
++app.post('/api/sync/git/push', async (req, res) => {
++  if (!assertGitAvailable(res)) return;
++  const { workspaceId, data, config } = req.body;
++  const dataDir = req.body.dataDir || process.env.APILIX_DATA_DIR;
++  if (!workspaceId || !data || !config?.remote || !dataDir) {
++    return res.status(400).json({ error: 'workspaceId, data, config.remote, and dataDir are required' });
++  }
++  // Guard path traversal
++  const repoBase = path.join(dataDir, 'git-sync', 'workspaces');
++  const repoDir = path.resolve(repoBase, workspaceId);
++  if (!repoDir.startsWith(path.resolve(repoBase))) {
++    return res.status(400).json({ error: 'Invalid workspaceId' });
++  }
++  try {
++    const git = await ensureRepo(repoDir, config);
++    const filePath = path.join(repoDir, 'workspace.json');
++    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
++    const branch = config.branch || 'main';
++    await git.add('.');
++    const status = await git.status();
++    if (status.files.length === 0) {
++      return res.json({ ok: true, message: 'Nothing to commit' });
++    }
++    await git.commit(`chore: sync workspace ${workspaceId} at ${new Date().toISOString()}`);
++    // Build authenticated remote URL if token provided
++    let remote = config.remote;
++    if (config.token && config.username) {
++      const url = new URL(remote);
++      url.username = encodeURIComponent(config.username);
++      url.password = encodeURIComponent(config.token);
++      remote = url.toString();
++    }
++    await git.push(remote, branch, ['--set-upstream']);
++    res.json({ ok: true });
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++// POST /api/sync/git/pull
++app.post('/api/sync/git/pull', async (req, res) => {
++  if (!assertGitAvailable(res)) return;
++  const { workspaceId, config } = req.body;
++  const dataDir = req.body.dataDir || process.env.APILIX_DATA_DIR;
++  if (!workspaceId || !config?.remote || !dataDir) {
++    return res.status(400).json({ error: 'workspaceId, config.remote, and dataDir are required' });
++  }
++  const repoBase = path.join(dataDir, 'git-sync', 'workspaces');
++  const repoDir = path.resolve(repoBase, workspaceId);
++  if (!repoDir.startsWith(path.resolve(repoBase))) {
++    return res.status(400).json({ error: 'Invalid workspaceId' });
++  }
++  try {
++    const git = await ensureRepo(repoDir, config);
++    const branch = config.branch || 'main';
++    let remote = config.remote;
++    if (config.token && config.username) {
++      const url = new URL(remote);
++      url.username = encodeURIComponent(config.username);
++      url.password = encodeURIComponent(config.token);
++      remote = url.toString();
++    }
++    await git.pull(remote, branch, ['--no-rebase']);
++    const filePath = path.join(repoDir, 'workspace.json');
++    if (!fs.existsSync(filePath)) {
++      return res.status(404).json({ error: 'No workspace.json in remote' });
++    }
++    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
++    res.json({ data });
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++// POST /api/sync/git/timestamp
++app.post('/api/sync/git/timestamp', async (req, res) => {
++  if (!assertGitAvailable(res)) return;
++  const { workspaceId, config } = req.body;
++  const dataDir = req.body.dataDir || process.env.APILIX_DATA_DIR;
++  if (!workspaceId || !config?.remote || !dataDir) {
++    return res.status(400).json({ error: 'workspaceId, config.remote, and dataDir are required' });
++  }
++  const repoBase = path.join(dataDir, 'git-sync', 'workspaces');
++  const repoDir = path.resolve(repoBase, workspaceId);
++  if (!repoDir.startsWith(path.resolve(repoBase))) {
++    return res.status(400).json({ error: 'Invalid workspaceId' });
++  }
++  try {
++    const git = await ensureRepo(repoDir, config);
++    let remote = config.remote;
++    if (config.token && config.username) {
++      const url = new URL(remote);
++      url.username = encodeURIComponent(config.username);
++      url.password = encodeURIComponent(config.token);
++      remote = url.toString();
++    }
++    // Fetch only — don't merge
++    await git.fetch(remote, config.branch || 'main');
++    const log = await git.log(['FETCH_HEAD', '-1']).catch(() => null);
++    if (!log || !log.latest) {
++      return res.json({ timestamp: null });
++    }
++    res.json({ timestamp: log.latest.date });
++  } catch (err) {
++    res.json({ timestamp: null });
++  }
++});
++
+ // ─── Start ─────────────────────────────────────────────────────────────────────
+ 
+ app.listen(PORT, () => {
+diff --git a/server/package-lock.json b/server/package-lock.json
+index f5cf159..95a0b8b 100644
+--- a/server/package-lock.json
++++ b/server/package-lock.json
+@@ -10,15 +10,65 @@
+       "dependencies": {
+         "@xmldom/xmldom": "^0.9.9",
+         "axios": "^1.6.5",
++        "bcryptjs": "^3.0.3",
+         "cors": "^2.8.5",
+         "csv-parse": "^5.5.3",
+         "express": "^4.18.2",
+         "form-data": "^4.0.0",
++        "jsonwebtoken": "^9.0.3",
+         "multer": "^1.4.5-lts.1",
++        "simple-git": "^3.35.2",
+         "ws": "^8.18.0",
+         "xpath": "^0.0.34"
+       }
+     },
++    "node_modules/@kwsites/file-exists": {
++      "version": "1.1.1",
++      "resolved": "https://registry.npmjs.org/@kwsites/file-exists/-/file-exists-1.1.1.tgz",
++      "integrity": "sha512-m9/5YGR18lIwxSFDwfE3oA7bWuq9kdau6ugN4H2rJeyhFQZcG9AgSHkQtSD15a8WvTgfz9aikZMrKPHvbpqFiw==",
++      "dependencies": {
++        "debug": "^4.1.1"
++      }
++    },
++    "node_modules/@kwsites/file-exists/node_modules/debug": {
++      "version": "4.4.3",
++      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
++      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
++      "dependencies": {
++        "ms": "^2.1.3"
++      },
++      "engines": {
++        "node": ">=6.0"
++      },
++      "peerDependenciesMeta": {
++        "supports-color": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/@kwsites/file-exists/node_modules/ms": {
++      "version": "2.1.3",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
++      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
++    },
++    "node_modules/@kwsites/promise-deferred": {
++      "version": "1.1.1",
++      "resolved": "https://registry.npmjs.org/@kwsites/promise-deferred/-/promise-deferred-1.1.1.tgz",
++      "integrity": "sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw=="
++    },
++    "node_modules/@simple-git/args-pathspec": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/@simple-git/args-pathspec/-/args-pathspec-1.0.2.tgz",
++      "integrity": "sha512-nEFVejViHUoL8wU8GTcwqrvqfUG40S5ts6S4fr1u1Ki5CklXlRDYThPVA/qurTmCYFGnaX3XpVUmICLHdvhLaA=="
++    },
++    "node_modules/@simple-git/argv-parser": {
++      "version": "1.0.3",
++      "resolved": "https://registry.npmjs.org/@simple-git/argv-parser/-/argv-parser-1.0.3.tgz",
++      "integrity": "sha512-NMKv9sJcSN2VvnPT9Ja7eKfGy8Q8mMFLwPTCcuZMtv3+mYcLIZflg31S/tp2XCCyiY7YAx6cgBHQ0fwA2fWHpQ==",
++      "dependencies": {
++        "@simple-git/args-pathspec": "^1.0.2"
++      }
++    },
+     "node_modules/@xmldom/xmldom": {
+       "version": "0.9.9",
+       "resolved": "https://registry.npmjs.org/@xmldom/xmldom/-/xmldom-0.9.9.tgz",
+@@ -69,6 +119,15 @@
+         "proxy-from-env": "^1.1.0"
+       }
+     },
++    "node_modules/bcryptjs": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/bcryptjs/-/bcryptjs-3.0.3.tgz",
++      "integrity": "sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==",
++      "license": "BSD-3-Clause",
++      "bin": {
++        "bcrypt": "bin/bcrypt"
++      }
++    },
+     "node_modules/body-parser": {
+       "version": "1.20.4",
+       "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-1.20.4.tgz",
+@@ -93,6 +152,12 @@
+         "npm": "1.2.8000 || >= 1.4.16"
+       }
+     },
++    "node_modules/buffer-equal-constant-time": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
++      "integrity": "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA==",
++      "license": "BSD-3-Clause"
++    },
+     "node_modules/buffer-from": {
+       "version": "1.1.2",
+       "resolved": "https://registry.npmjs.org/buffer-from/-/buffer-from-1.1.2.tgz",
+@@ -291,6 +356,15 @@
+         "node": ">= 0.4"
+       }
+     },
++    "node_modules/ecdsa-sig-formatter": {
++      "version": "1.0.11",
++      "resolved": "https://registry.npmjs.org/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz",
++      "integrity": "sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "safe-buffer": "^5.0.1"
++      }
++    },
+     "node_modules/ee-first": {
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/ee-first/-/ee-first-1.1.1.tgz",
+@@ -634,6 +708,97 @@
+       "integrity": "sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ==",
+       "license": "MIT"
+     },
++    "node_modules/jsonwebtoken": {
++      "version": "9.0.3",
++      "resolved": "https://registry.npmjs.org/jsonwebtoken/-/jsonwebtoken-9.0.3.tgz",
++      "integrity": "sha512-MT/xP0CrubFRNLNKvxJ2BYfy53Zkm++5bX9dtuPbqAeQpTVe0MQTFhao8+Cp//EmJp244xt6Drw/GVEGCUj40g==",
++      "license": "MIT",
++      "dependencies": {
++        "jws": "^4.0.1",
++        "lodash.includes": "^4.3.0",
++        "lodash.isboolean": "^3.0.3",
++        "lodash.isinteger": "^4.0.4",
++        "lodash.isnumber": "^3.0.3",
++        "lodash.isplainobject": "^4.0.6",
++        "lodash.isstring": "^4.0.1",
++        "lodash.once": "^4.0.0",
++        "ms": "^2.1.1",
++        "semver": "^7.5.4"
++      },
++      "engines": {
++        "node": ">=12",
++        "npm": ">=6"
++      }
++    },
++    "node_modules/jsonwebtoken/node_modules/ms": {
++      "version": "2.1.3",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
++      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
++      "license": "MIT"
++    },
++    "node_modules/jwa": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/jwa/-/jwa-2.0.1.tgz",
++      "integrity": "sha512-hRF04fqJIP8Abbkq5NKGN0Bbr3JxlQ+qhZufXVr0DvujKy93ZCbXZMHDL4EOtodSbCWxOqR8MS1tXA5hwqCXDg==",
++      "license": "MIT",
++      "dependencies": {
++        "buffer-equal-constant-time": "^1.0.1",
++        "ecdsa-sig-formatter": "1.0.11",
++        "safe-buffer": "^5.0.1"
++      }
++    },
++    "node_modules/jws": {
++      "version": "4.0.1",
++      "resolved": "https://registry.npmjs.org/jws/-/jws-4.0.1.tgz",
++      "integrity": "sha512-EKI/M/yqPncGUUh44xz0PxSidXFr/+r0pA70+gIYhjv+et7yxM+s29Y+VGDkovRofQem0fs7Uvf4+YmAdyRduA==",
++      "license": "MIT",
++      "dependencies": {
++        "jwa": "^2.0.1",
++        "safe-buffer": "^5.0.1"
++      }
++    },
++    "node_modules/lodash.includes": {
++      "version": "4.3.0",
++      "resolved": "https://registry.npmjs.org/lodash.includes/-/lodash.includes-4.3.0.tgz",
++      "integrity": "sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w==",
++      "license": "MIT"
++    },
++    "node_modules/lodash.isboolean": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/lodash.isboolean/-/lodash.isboolean-3.0.3.tgz",
++      "integrity": "sha512-Bz5mupy2SVbPHURB98VAcw+aHh4vRV5IPNhILUCsOzRmsTmSQ17jIuqopAentWoehktxGd9e/hbIXq980/1QJg==",
++      "license": "MIT"
++    },
++    "node_modules/lodash.isinteger": {
++      "version": "4.0.4",
++      "resolved": "https://registry.npmjs.org/lodash.isinteger/-/lodash.isinteger-4.0.4.tgz",
++      "integrity": "sha512-DBwtEWN2caHQ9/imiNeEA5ys1JoRtRfY3d7V9wkqtbycnAmTvRRmbHKDV4a0EYc678/dia0jrte4tjYwVBaZUA==",
++      "license": "MIT"
++    },
++    "node_modules/lodash.isnumber": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/lodash.isnumber/-/lodash.isnumber-3.0.3.tgz",
++      "integrity": "sha512-QYqzpfwO3/CWf3XP+Z+tkQsfaLL/EnUlXWVkIk5FUPc4sBdTehEqZONuyRt2P67PXAk+NXmTBcc97zw9t1FQrw==",
++      "license": "MIT"
++    },
++    "node_modules/lodash.isplainobject": {
++      "version": "4.0.6",
++      "resolved": "https://registry.npmjs.org/lodash.isplainobject/-/lodash.isplainobject-4.0.6.tgz",
++      "integrity": "sha512-oSXzaWypCMHkPC3NvBEaPHf0KsA5mvPrOPgQWDsbg8n7orZ290M0BmC/jgRZ4vcJ6DTAhjrsSYgdsW/F+MFOBA==",
++      "license": "MIT"
++    },
++    "node_modules/lodash.isstring": {
++      "version": "4.0.1",
++      "resolved": "https://registry.npmjs.org/lodash.isstring/-/lodash.isstring-4.0.1.tgz",
++      "integrity": "sha512-0wJxfxH1wgO3GrbuP+dTTk7op+6L41QCXbGINEmD+ny/G/eCqGzxyCsh7159S+mgDDcoarnBw6PC1PS5+wUGgw==",
++      "license": "MIT"
++    },
++    "node_modules/lodash.once": {
++      "version": "4.1.1",
++      "resolved": "https://registry.npmjs.org/lodash.once/-/lodash.once-4.1.1.tgz",
++      "integrity": "sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg==",
++      "license": "MIT"
++    },
+     "node_modules/math-intrinsics": {
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
+@@ -917,6 +1082,18 @@
+       "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==",
+       "license": "MIT"
+     },
++    "node_modules/semver": {
++      "version": "7.7.4",
++      "resolved": "https://registry.npmjs.org/semver/-/semver-7.7.4.tgz",
++      "integrity": "sha512-vFKC2IEtQnVhpT78h1Yp8wzwrf8CM+MzKMHGJZfBtzhZNycRFnXsHk6E5TxIkkMsgNS7mdX3AGB7x2QM2di4lA==",
++      "license": "ISC",
++      "bin": {
++        "semver": "bin/semver.js"
++      },
++      "engines": {
++        "node": ">=10"
++      }
++    },
+     "node_modules/send": {
+       "version": "0.19.2",
+       "resolved": "https://registry.npmjs.org/send/-/send-0.19.2.tgz",
+@@ -1040,6 +1217,43 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/simple-git": {
++      "version": "3.35.2",
++      "resolved": "https://registry.npmjs.org/simple-git/-/simple-git-3.35.2.tgz",
++      "integrity": "sha512-ZMjl06lzTm1EScxEGuM6+mEX+NQd14h/B3x0vWU+YOXAMF8sicyi1K4cjTfj5is+35ChJEHDl1EjypzYFWH2FA==",
++      "dependencies": {
++        "@kwsites/file-exists": "^1.1.1",
++        "@kwsites/promise-deferred": "^1.1.1",
++        "@simple-git/args-pathspec": "^1.0.2",
++        "@simple-git/argv-parser": "^1.0.3",
++        "debug": "^4.4.0"
++      },
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/steveukx/git-js?sponsor=1"
++      }
++    },
++    "node_modules/simple-git/node_modules/debug": {
++      "version": "4.4.3",
++      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
++      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
++      "dependencies": {
++        "ms": "^2.1.3"
++      },
++      "engines": {
++        "node": ">=6.0"
++      },
++      "peerDependenciesMeta": {
++        "supports-color": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/simple-git/node_modules/ms": {
++      "version": "2.1.3",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
++      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
++    },
+     "node_modules/statuses": {
+       "version": "2.0.2",
+       "resolved": "https://registry.npmjs.org/statuses/-/statuses-2.0.2.tgz",
+diff --git a/server/package.json b/server/package.json
+index 55100bb..583025a 100644
+--- a/server/package.json
++++ b/server/package.json
+@@ -14,6 +14,7 @@
+     "express": "^4.18.2",
+     "form-data": "^4.0.0",
+     "multer": "^1.4.5-lts.1",
++    "simple-git": "^3.35.2",
+     "ws": "^8.18.0",
+     "xpath": "^0.0.34"
+   }

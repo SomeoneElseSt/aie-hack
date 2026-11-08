@@ -1,0 +1,1 @@
+{"Copy-paste error - checking `grantType` twice instead of `rawTokenId` in AccessTokenContext.java line 73": 0.9136318564414978, "Logic error - returns false when grant matches (should return true) in AssertEvents.java line 482": 0.9832245111465454}

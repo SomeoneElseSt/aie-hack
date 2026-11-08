@@ -1,0 +1,913 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d6fd2a6..f379457 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -30,36 +30,6 @@ jobs:
+       - name: Test
+         run: dotnet test FIGLet.Tests/FIGLet.Tests.csproj --no-build --configuration Release --verbosity normal
+ 
+-  # -------------------------------------------------------------------------
+-  # Version sync — C# and TS library versions must match
+-  # -------------------------------------------------------------------------
+-  version-sync:
+-    name: Version Sync Check
+-    runs-on: ubuntu-latest
+-
+-    steps:
+-      - name: Checkout
+-        uses: actions/checkout@v6
+-
+-      - name: Setup Node.js
+-        uses: actions/setup-node@v6
+-        with:
+-          node-version: '22.x'
+-
+-      - name: Check versions match
+-        run: |
+-          CS_VER=$(grep -oPm1 "(?<=<Version>)[^<]+" FIGLet/FIGLet.csproj)
+-          TS_VER=$(node -p "require('./FIGLet.TS/package.json').version")
+-          PY_VER=$(grep -oPm1 '(?<=^version = ")[^"]+' FIGLet.Python/pyproject.toml)
+-          echo "C#     version: $CS_VER"
+-          echo "TS     version: $TS_VER"
+-          echo "Python version: $PY_VER"
+-          if [ "$CS_VER" != "$TS_VER" ] || [ "$CS_VER" != "$PY_VER" ]; then
+-            echo "::error::Version mismatch — FIGLet.csproj ($CS_VER), FIGLet.TS/package.json ($TS_VER), and FIGLet.Python/pyproject.toml ($PY_VER) must all be the same."
+-            exit 1
+-          fi
+-          echo "Versions match: $CS_VER"
+-
+   # -------------------------------------------------------------------------
+   # Python — install and run pytest suite
+   # -------------------------------------------------------------------------
+@@ -111,3 +81,34 @@ jobs:
+       - name: Test
+         working-directory: FIGLet.TS
+         run: npm test
++
++  # -------------------------------------------------------------------------
++  # Version sync — All library versions must match
++  # -------------------------------------------------------------------------
++  version-sync:
++    name: Version Sync Check
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v6
++
++      - name: Setup Node.js
++        uses: actions/setup-node@v6
++        with:
++          node-version: '22.x'
++
++      - name: Check versions match
++        run: |
++          CS_VER=$(grep -oPm1 "(?<=<Version>)[^<]+" FIGLet/FIGLet.csproj)
++          TS_VER=$(node -p "require('./FIGLet.TS/package.json').version")
++          PY_VER=$(grep -oPm1 '(?<=^version = ")[^"]+' FIGLet.Python/pyproject.toml)
++          echo "C#     version: $CS_VER"
++          echo "TS     version: $TS_VER"
++          echo "Python version: $PY_VER"
++          if [ "$CS_VER" != "$TS_VER" ] || [ "$CS_VER" != "$PY_VER" ]; then
++            echo "::error::Version mismatch — FIGLet.csproj ($CS_VER), FIGLet.TS/package.json ($TS_VER), and FIGLet.Python/pyproject.toml ($PY_VER) must all be the same."
++            exit 1
++          fi
++          echo "Versions match: $CS_VER"
++
+diff --git a/.github/workflows/publish-figlet-nuget.yml b/.github/workflows/publish-figlet-nuget.yml
+index 96136af..66315a6 100644
+--- a/.github/workflows/publish-figlet-nuget.yml
++++ b/.github/workflows/publish-figlet-nuget.yml
+@@ -5,8 +5,7 @@ on:
+     types: [closed]
+     branches: [master, main]
+     paths:
+-      - 'FIGLet/**'
+-      - '.github/workflows/publish-figlet-nuget.yml'
++      - 'FIGLet/**/*.cs'
+   workflow_dispatch:
+ 
+ jobs:
+diff --git a/.github/workflows/publish-figlet-py.yml b/.github/workflows/publish-figlet-py.yml
+index 1aea59a..8ff9b44 100644
+--- a/.github/workflows/publish-figlet-py.yml
++++ b/.github/workflows/publish-figlet-py.yml
+@@ -5,8 +5,7 @@ on:
+     types: [closed]
+     branches: [master, main]
+     paths:
+-      - 'FIGLet.Python/**'
+-      - '.github/workflows/publish-figlet-py.yml'
++      - 'FIGLet.Python/**/*.py'
+   workflow_dispatch:
+ 
+ jobs:
+diff --git a/.github/workflows/publish-figlet-ts.yml b/.github/workflows/publish-figlet-ts.yml
+index 48b64eb..4dc3f76 100644
+--- a/.github/workflows/publish-figlet-ts.yml
++++ b/.github/workflows/publish-figlet-ts.yml
+@@ -5,8 +5,8 @@ on:
+     types: [closed]
+     branches: [master, main]
+     paths:
+-      - 'FIGLet.TS/**'
+-      - '.github/workflows/publish-figlet-ts.yml'
++      - 'FIGLet.TS/**/*.ts'
++      - 'FIGLet.TS/**/*.tsx'
+   workflow_dispatch:
+ 
+ jobs:
+diff --git a/.github/workflows/publish-figprint.yml b/.github/workflows/publish-figprint.yml
+index 5695d75..c12444a 100644
+--- a/.github/workflows/publish-figprint.yml
++++ b/.github/workflows/publish-figprint.yml
+@@ -5,8 +5,7 @@ on:
+     types: [closed]
+     branches: [master, main]
+     paths:
+-      - 'FIGPrint/**'
+-      - '.github/workflows/publish-figprint.yml'
++      - 'FIGPrint/**/*.cs'
+   workflow_dispatch:
+ 
+ jobs:
+@@ -191,8 +190,25 @@ jobs:
+           # PowerShell here-strings require "@ at column 0, which conflicts with
+           # YAML indentation. Use string arrays joined with newlines instead.
+           $n = "`n"
+-
+-          @("PackageIdentifier: ByteForge.FIGPrint",
++          $PackageId = "ByteForge.FIGPrint"
++
++          #
++          # ▀██▀                                   ██                      ██    ▄██▄ 
++          #  ██  ███▄██▄ ▀█▄▀▀█▄ ▄█▀▀▀█▄ ▀█▄█▀█▄ ▀▀██▀▀   ▀▀▀█▄  ▀█▄▀▀█▄ ▀▀██▀▀  ▀██▀ 
++          #  ██  ██ █ ██  ██▄▄█▀ ██   ██  ██       ██ ▄▄ ▄█▀▀██   ██  ██   ██ ▄▄  ▀▀  
++          # ▀▀▀▀ ▀▀ ▀ ▀▀ ▄██▄     ▀▀▀▀▀  ▀▀▀▀       ▀▀▀   ▀▀▀ ▀▀  ▀▀  ▀▀    ▀▀▀   ▀▀  
++          # 
++          # NOTE: 'winget validate' reports these manifests as valid (with warnings),
++          # but the winget-pkgs pipeline additionally requires the yaml-language-server
++          # schema header comment on each file. Without it the pipeline fails manifest
++          # validation even though the YAML content itself is correct.
++
++          #
++          # The Version manifest
++          #
++          @("# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json",
++            "",
++            "PackageIdentifier: $PackageId",
+             "PackageVersion: $version",
+             "DefaultLocale: en-US",
+             "ManifestType: version",
+@@ -200,26 +216,12 @@ jobs:
+             "") -join $n |
+             Set-Content "$manifestDir/ByteForge.FIGPrint.yaml" -Encoding UTF8 -NoNewline
+ 
+-          @("PackageIdentifier: ByteForge.FIGPrint",
+-            "PackageVersion: $version",
+-            "InstallerType: zip",
+-            "NestedInstallerType: portable",
+-            "NestedInstallerFiles:",
+-            "- RelativeFilePath: FIGPrint.exe",
+-            "  PortableCommandAlias: figprint",
+-            "Installers:",
+-            "- Architecture: x64",
+-            "  InstallerUrl: $x64Url",
+-            "  InstallerSha256: $x64Sha256",
+-            "- Architecture: arm64",
+-            "  InstallerUrl: $arm64Url",
+-            "  InstallerSha256: $arm64Sha256",
+-            "ManifestType: installer",
+-            "ManifestVersion: 1.12.0",
+-            "") -join $n |
+-            Set-Content "$manifestDir/ByteForge.FIGPrint.installer.yaml" -Encoding UTF8 -NoNewline
+-
+-          @("PackageIdentifier: ByteForge.FIGPrint",
++          #
++          # The Default Locale manifest
++          #
++          @("# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json",
++            "",
++            "PackageIdentifier: $PackageId",
+             "PackageVersion: $version",
+             "PackageLocale: en-US",
+             "Publisher: ByteForge",
+@@ -228,18 +230,45 @@ jobs:
+             "PackageName: FIGPrint",
+             "PackageUrl: https://github.com/${{ github.repository }}",
+             "License: MIT",
+-            "LicenseUrl: https://github.com/${{ github.repository }}/blob/master/LICENSE",
++            "LicenseUrl: https://github.com/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/LICENSE",
+             "ShortDescription: Command-line utility for rendering text using FIGlet fonts",
+             "ManifestType: defaultLocale",
+             "ManifestVersion: 1.12.0",
+             "") -join $n |
+             Set-Content "$manifestDir/ByteForge.FIGPrint.locale.en-US.yaml" -Encoding UTF8 -NoNewline
+ 
+-          # Locate the generated YAML files (wingetcreate nests them under
+-          # manifests/<letter>/<Publisher>/<Package>/<version>/)
++          #
++          # The Installer manifest
++          #
++          @("# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json",
++            "",
++            "PackageIdentifier: $PackageId",
++            "PackageVersion: $version",
++            "Installers:",
++            "- Architecture: x64",
++            "  InstallerUrl: $x64Url",
++            "  InstallerSha256: $x64Sha256",
++            "  InstallerType: zip",
++            "  NestedInstallerType: portable",
++            "  NestedInstallerFiles:",
++            "  - RelativeFilePath: FIGPrint.exe",
++
++            "- Architecture: arm64",
++            "  InstallerUrl: $arm64Url",
++            "  InstallerSha256: $arm64Sha256",
++            "  InstallerType: zip",
++            "  NestedInstallerType: portable",
++            "  NestedInstallerFiles:",
++            "  - RelativeFilePath: FIGPrint.exe",
++            "ManifestType: installer",
++            "ManifestVersion: 1.12.0",
++            "") -join $n |
++            Set-Content "$manifestDir/ByteForge.FIGPrint.installer.yaml" -Encoding UTF8 -NoNewline
++
++          # Locate the generated YAML files.
+           $yamlFiles = Get-ChildItem -Path $manifestsOut -Recurse -Filter "*.yaml"
+           if ($yamlFiles.Count -eq 0) {
+-            Write-Error "wingetcreate did not produce any YAML files in $manifestsOut"
++            Write-Error "No YAML manifest files were found in $manifestsOut"
+             exit 1
+           }
+           Write-Host "Generated $($yamlFiles.Count) manifest file(s):"
+@@ -262,26 +291,43 @@ jobs:
+           if ($LASTEXITCODE -eq 0) {
+             Write-Host "Branch $branchName already exists — deleting and recreating"
+             gh api "repos/$ownerLogin/winget-pkgs/git/refs/heads/$branchName" -X DELETE
++            if ($LASTEXITCODE -ne 0) {
++              Write-Error "Failed to delete existing branch $branchName"
++              exit 1
++            }
+           }
+           gh api "repos/$ownerLogin/winget-pkgs/git/refs" `
+             -X POST `
+             -f ref="refs/heads/$branchName" `
+-            -f sha="$baseSha" | Out-Null
++            -f sha="$baseSha"
++          if ($LASTEXITCODE -ne 0) {
++            Write-Error "Failed to create branch $branchName on fork"
++            exit 1
++          }
+           Write-Host "Created branch $branchName"
+ 
+-          # Upload each YAML file to the correct path in the fork branch
++          # Upload each YAML file to the correct path in the fork branch.
++          # Build the JSON body and pipe via --input to avoid argument-length
++          # issues when passing large base64 strings through -f flags.
+           $targetBase = "manifests/b/ByteForge/FIGPrint/$version"
+           foreach ($file in $yamlFiles) {
+-            $content     = [Convert]::ToBase64String(
+-                             [System.Text.Encoding]::UTF8.GetBytes(
+-                               (Get-Content $file.FullName -Raw)))
+-            $targetPath  = "$targetBase/$($file.Name)"
++            $encoded    = [Convert]::ToBase64String(
++                            [System.Text.Encoding]::UTF8.GetBytes(
++                              (Get-Content $file.FullName -Raw)))
++            $targetPath = "$targetBase/$($file.Name)"
++            $body       = [PSCustomObject]@{
++                            message = "Add $packageId $version"
++                            content = $encoded
++                            branch  = $branchName
++                          } | ConvertTo-Json -Compress
+             Write-Host "Uploading $($file.Name) → $targetPath"
+-            gh api "repos/$ownerLogin/winget-pkgs/contents/$targetPath" `
+-              -X PUT `
+-              -f message="Add $packageId $version" `
+-              -f content="$content" `
+-              -f branch="$branchName" | Out-Null
++            $body | gh api "repos/$ownerLogin/winget-pkgs/contents/$targetPath" `
++              -X PUT --input -
++            if ($LASTEXITCODE -ne 0) {
++              Write-Error "Failed to upload $($file.Name) to $targetPath"
++              exit 1
++            }
++            Write-Host "  ✓ Uploaded successfully"
+           }
+ 
+           # Open the PR with the required winget title format
+diff --git a/.github/workflows/publish-vs-extension.yml b/.github/workflows/publish-vs-extension.yml
+index a130f32..aeede83 100644
+--- a/.github/workflows/publish-vs-extension.yml
++++ b/.github/workflows/publish-vs-extension.yml
+@@ -5,9 +5,8 @@ on:
+     types: [closed]
+     branches: [master, main]
+     paths:
+-      - 'FIGLet.VisualStudioExtension/**'
+-      - 'FIGLet/**'  # VS Extension depends on FIGLet library
+-      - '.github/workflows/publish-vs-extension.yml'
++      - 'FIGLet.VisualStudioExtension/**/*.cs'
++      - 'FIGLet/**/*.cs'  # VS Extension depends on FIGLet library
+   workflow_dispatch:
+ 
+ jobs:
+diff --git a/.github/workflows/publish-vscode-extension.yml b/.github/workflows/publish-vscode-extension.yml
+index b79da05..eb3b189 100644
+--- a/.github/workflows/publish-vscode-extension.yml
++++ b/.github/workflows/publish-vscode-extension.yml
+@@ -5,8 +5,8 @@ on:
+     types: [closed]
+     branches: [master, main]
+     paths:
+-      - 'FIGLet.VSCodeExtension/**'
+-      - '.github/workflows/publish-vscode-extension.yml'
++      - 'FIGLet.VSCodeExtension/**/*.ts'
++      - 'FIGLet.VSCodeExtension/**/*.tsx'
+   workflow_dispatch:
+ 
+ jobs:
+diff --git a/ChangeLog-2026.md b/ChangeLog-2026.md
+index aba082b..c9e74d1 100644
+--- a/ChangeLog-2026.md
++++ b/ChangeLog-2026.md
+@@ -6,6 +6,119 @@
+ 
+ ## April 2026
+ 
++### docs(license): update license with ASCII art and new years
++2026-04-06 : Paulo Santos
++● Add ASCII art banner to the top of the MIT License file
++● Update copyright years to 2024–2026
++● Attribute copyright to Paulo Santos
++
++### feat(config): update commands and remove default font setting
++2026-04-06 : Paulo Santos
++● Remove `figlet.selectDefaultFont` command and `figlet.defaultFont` config option
++● Add `figlet.inspectConfig` command to the command palette
++● Add Node.js types to `tsconfig.json` for reliable type resolution of `fs`, `path`, and other built-ins
++
++### refactor(settings): remove defaultFont and simplify settings UI
++2026-04-06 : Paulo Santos
++● Remove `defaultFont` from extension configuration, settings UI, and all related backend logic
++● Store the last used font in VS Code global state and use it as the pre-selected font when opening the banner panel — matching the behaviour of the Visual Studio extension
++● Allow `github.com` as a valid external link host in the webview so the "Report an issue" link opens correctly
++● Simplify the settings webview to handle only font directory and layout mode
++● Apply minor code style and robustness improvements
++
++### feat(language): add dedicated Batch file comment style
++2026-04-06 : Paulo Santos
++● Introduce `BatchFile` to `CommentStyle` enum for Batch (`::`) comments
++● Add `BatchFile` case to `CommentStyleInfo` with `"::"` prefix
++● Provide `LanguageCommentStyles.BatchFile` static property
++● Update `languageMap` to use `BatchFile` for `bat`, `cmd`, `dos`, and `batch` language identifiers
++● Improve clarity by replacing the generic `Custom` style with a dedicated Batch style
++
++### ci(publish-figprint): add ASCII art banner and clarify schema requirements
++2026-04-05 : Paulo Santos
++● Add ASCII art "FIGPrint" banner to publish-figprint.yml release notes
++● Clarify winget-pkgs pipeline schema header requirements in comments
++● Note that `winget validate` reports valid with warnings but the pipeline requires the yaml-language-server schema header comment on each manifest file
++
++### docs(readme): add note on pending WinGet PR for FIGPrint CLI
++2026-04-05 : Paulo Santos
++● Add asterisk to FIGPrint CLI entry in tools table to indicate pending WinGet inclusion
++● Add explanatory footnote clarifying PR status for WinGet availability
++● Link to the relevant pull request (#355518) for user reference
++
++### ci(winget): add YAML schema reference comments to generated manifests
++2026-04-05 : Paulo Santos
++● Add yaml-language-server schema reference comments to top of all three generated WinGet manifest files (version, defaultLocale, installer)
++● Improves editor support and satisfies the winget-pkgs pipeline validator which requires the schema header even when ManifestVersion is present
++
++### ci(publish-figprint): improve upload error handling
++2026-04-05 : Paulo Santos
++● Add error checks after branch delete/create; exit on failure
++● Pipe JSON body via `--input -` to `gh api` to avoid argument-length issues when passing large base64 strings through `-f` flags
++● Check upload success for each YAML file; exit on failure with a clear error message
++● Add `✓ Uploaded successfully` confirmation per file
++
++### ci(manifest): specify InstallerType and NestedInstallerType per installer
++2026-04-05 : Paulo Santos
++● Explicitly set `InstallerType: zip` and `NestedInstallerType: portable` for both x64 and arm64 entries
++● Define `FIGPrint.exe` as the nested installer file with `figprint` as the portable command alias
++● Improves manifest metadata for schema 1.12.0 compatibility
++
++### refactor(ci): simplify WinGet manifest generation logic
++2026-04-05 : Paulo Santos
++● Refactor manifest generation into clear, commented sections
++● Use `$PackageId` variable consistently throughout all manifest entries
++● Write Default Locale manifest before Installer manifest
++● Add descriptive comments to clarify each manifest section's purpose
++
++### ci(manifest): improve LicenseUrl and error messages
++2026-04-05 : Paulo Santos
++● Update `LicenseUrl` to use `${{ github.event.repository.default_branch }}` dynamically instead of hardcoding `master`
++● Clarify error message when no YAML files are found to remove stale `wingetcreate` references
++
++### ci(winget): always generate manifests manually — remove wingetcreate dependency
++2026-04-05 : Paulo Santos
++● Remove `wingetcreate.exe` download and its `update` subcommand entirely
++● Always build YAML manifests manually to guarantee `ManifestVersion: 1.12.0`
++● `wingetcreate update` was silently generating 1.6.0 manifests which fail the winget-pkgs pipeline validation
++● Retain `$exists` package-detection check only for determining PR title format
++
++### ci(workflows): improve release cleanup logic — address PR #30 Copilot comments
++2026-04-04 : Paulo Santos
++● Increase fetched release limit from 100 to 1000 across all six publish workflows
++● Replace `grep '^prefix'` with `jq '.[] | .tagName | select(startswith("prefix"))'` to avoid exit-code-1 failures under `bash -e`/`pipefail` when no releases match
++● Skip deleting the newly created tag during cleanup by comparing against `$NEW_TAG`
++● Move the cleanup step to run *after* GitHub Release creation so a failed create never leaves zero releases
++
++### ci(release): delete previous GitHub releases on each publish
++2026-04-04 : Paulo Santos
++● Add "Delete previous releases" step to all six publish workflows
++● Use `gh release delete --yes --cleanup-tag` to remove both the release and its associated git tag
++● Filter by component-specific tag prefixes (`figlet-v`, `figlet-ts-v`, `figlet-py-v`, `vscode-v`, `vsext-v`, `figprint-v`)
++● Step runs only when the current tag does not already exist, ensuring only the latest release per component is kept
++
++### fix(releases): address PR #29 Copilot review comments
++2026-04-04 : Paulo Santos
++● Replace hard-coded `blob/master` ChangeLog links with `blob/${{ github.event.repository.default_branch }}` across all five remaining publish workflows
++● Fix VS extension release step: `/tmp/release-notes.md` → `$RUNNER_TEMP` on `windows-latest` where `/tmp/` is unreliable for the native `gh` binary
++
++### fix(nuget): correct branch name and .NET version label in publish workflow
++2026-04-04 : Paulo Santos
++● Fix hard-coded `master` branch reference to use `${{ github.event.repository.default_branch }}`
++● Correct `.NET 9` label to `.NET 10` in release description
++
++### style(banner): update and standardize ASCII art headers
++2026-04-04 : Paulo Santos
++● Replace old ASCII art banners in all six `assets/banners/*.txt` files
++● Use new, consistent stylized banners with `/* ... */` block comment markers
++● Standardize branding and header comments across all components
++
++### feat(releases): add FIGLet ASCII art banners to all GitHub release notes
++2026-04-04 : Paulo Santos
++● Add `assets/banners/` directory with six component banner files: `figlet-net.txt`, `figlet-ts.txt`, `figlet-python.txt`, `figlet-vs-extension.txt`, `figlet-vscode-extension.txt`, `figprint.txt`
++● Update all six publish workflows to read the relevant banner at release time and embed it in the GitHub Release body as a code block
++● Unifies the visual identity of all component releases
++
+ ### fix(py): remove redundant force-include causing duplicate ZIP entries
+ 2026-04-04 : Paulo Santos
+ ● hatchling's `packages = ["byteforge_figlet"]` already includes the entire package directory tree (fonts/ and all)
+diff --git a/ChangeLog.md b/ChangeLog.md
+index 4a8673f..688d261 100644
+--- a/ChangeLog.md
++++ b/ChangeLog.md
+@@ -14,6 +14,8 @@ Master index for the FIGLet Comment Generator / ByteForge FIGLet Suite changelog
+ - Shipped **VS Code Extension v1** to the marketplace (`PaulStSmith.figlet-comment-generator`)
+ - Launched **byteforge-figlet** Python library on PyPI (141-test suite, zero dependencies)
+ - First **FIGPrint** package published to **winget** (`ByteForge.FIGPrint`)
++- Removed `defaultFont` setting; last used font is now remembered per-user in global state (matching Visual Studio extension behaviour)
++- Added dedicated Batch file (`bat`/`cmd`) comment style (`::` prefix)
+ - Automated publish pipelines for NuGet, npm, PyPI, VS Marketplace, VS Code Marketplace, winget, and GitHub Releases
+ - Overhauled TypeScript renderer: ANSI color preservation, paragraph mode, RTL, configurable layout
+ - Full test suite: 81 TypeScript (Vitest) + 141 Python (pytest) + comprehensive C# MSTest suite
+diff --git a/FIGLet.VSCodeExtension/package.json b/FIGLet.VSCodeExtension/package.json
+index 2c1ec39..a2293d1 100644
+--- a/FIGLet.VSCodeExtension/package.json
++++ b/FIGLet.VSCodeExtension/package.json
+@@ -20,7 +20,6 @@
+   "activationEvents": [
+     "onCommand:figlet.insertBanner",
+     "onCommand:figlet.selectFontDirectory",
+-    "onCommand:figlet.selectDefaultFont",
+     "onCommand:figlet.inspectConfig",
+     "onCommand:figlet.openSettings",
+     "onCommand:figlet.showWelcome"
+@@ -40,11 +39,6 @@
+         "category": "FIGlet Comments",
+         "icon": "$(folder)"
+       },
+-      {
+-        "command": "figlet.selectDefaultFont",
+-        "title": "Select Default Font",
+-        "category": "FIGlet Comments"
+-      },
+       {
+         "command": "figlet.inspectConfig",
+         "title": "Inspect FIGlet Configuration"
+@@ -115,12 +109,6 @@
+           "description": "Directory containing FIGlet font files (.flf)",
+           "markdownDescription": "Directory containing FIGlet font files (.flf). [Browse...](command:figlet.selectFontDirectory)"
+         },
+-        "figlet.defaultFont": {
+-          "type": "string",
+-          "default": "small",
+-          "description": "Default FIGlet font to use",
+-          "markdownDescription": "Default FIGlet font to use. [Select Font...](command:figlet.selectDefaultFont)"
+-        },
+         "figlet.layoutMode": {
+           "type": "string",
+           "enum": [
+diff --git a/FIGLet.VSCodeExtension/src/BannerUtils.ts b/FIGLet.VSCodeExtension/src/BannerUtils.ts
+index 35298d6..b9a94ba 100644
+--- a/FIGLet.VSCodeExtension/src/BannerUtils.ts
++++ b/FIGLet.VSCodeExtension/src/BannerUtils.ts
+@@ -57,8 +57,9 @@ export class BannerUtils {
+      * @param figletText The FIGlet banner text
+      */
+     static async insertBanner(editor: vscode.TextEditor, figletText: string, languageId?: string): Promise<void> {
+-        const position = editor.selection.active;
+-        const indentation = this.getIndentation(editor, position);
++        const currentPosition = editor.selection.active;
++        const indentation = this.getIndentation(editor, currentPosition);
++        const position = currentPosition.with(currentPosition.line, 0); // Move to the start of the line
+ 
+         // Wrap the banner with appropriate comments
+         const commentedBanner = this.wrapWithComments(figletText, languageId ?? editor.document.languageId);
+@@ -71,11 +72,7 @@ export class BannerUtils {
+ 
+         // Insert the banner
+         await editor.edit(editBuilder => {
+-            if (editor.selection.isEmpty) {
+-                editBuilder.insert(position, indentedBanner + '\n');
+-            } else {
+-                editBuilder.replace(editor.selection, indentedBanner + '\n');
+-            }
++            editBuilder.insert(position, indentedBanner + '\n');
+         });
+     }
+ }
+\ No newline at end of file
+diff --git a/FIGLet.VSCodeExtension/src/FIGLet/FIGFont.ts b/FIGLet.VSCodeExtension/src/FIGLet/FIGFont.ts
+index a621db3..6792ba5 100644
+--- a/FIGLet.VSCodeExtension/src/FIGLet/FIGFont.ts
++++ b/FIGLet.VSCodeExtension/src/FIGLet/FIGFont.ts
+@@ -213,7 +213,7 @@ export class FIGFont {
+      * line is empty.
+      */
+     private static detectEndmark(lines: string[], blockStart: number): string {
+-        if (blockStart >= lines.length) return '@';
++        if (blockStart >= lines.length) { return '@'; }
+         const firstRaw = lines[blockStart].replace(/[\r\n]+$/, '');
+         return firstRaw.length > 0 ? firstRaw[firstRaw.length - 1] : '@';
+     }
+diff --git a/FIGLet.VSCodeExtension/src/FigletPanel.ts b/FIGLet.VSCodeExtension/src/FigletPanel.ts
+index 22ddee1..9381611 100644
+--- a/FIGLet.VSCodeExtension/src/FigletPanel.ts
++++ b/FIGLet.VSCodeExtension/src/FigletPanel.ts
+@@ -128,7 +128,7 @@ export class FigletPanel {
+         const context = this._context;
+         const config = vscode.workspace.getConfiguration('figlet');
+         const fontDir = config.get<string>('fontDirectory') || null;
+-        const defaultFont = config.get<string>('defaultFont') || 'small';
++        const lastFontUsed = context.globalState.get<string>('lastFontUsed') || 'small';
+         const VALID_LAYOUT_KEYS = new Set<string>(['full', 'kerning', 'smush']);
+         const rawLayout = config.get<string>('layoutMode') ?? 'smush';
+         const defaultLayout = (VALID_LAYOUT_KEYS.has(rawLayout) ? rawLayout : 'smush') as LayoutKey;
+@@ -155,7 +155,7 @@ export class FigletPanel {
+             }
+         }
+ 
+-        await this._panel.webview.postMessage({ type: 'init', fonts, defaultFont, defaultLayout, language });
++        await this._panel.webview.postMessage({ type: 'init', fonts, defaultFont: lastFontUsed, defaultLayout, language });
+     }
+ 
+     /**
+@@ -185,6 +185,7 @@ export class FigletPanel {
+                 const ALLOWED_EXTERNAL_HOSTS = new Set([
+                     'marketplace.visualstudio.com',
+                     'code.visualstudio.com',
++                    'github.com',
+                 ]);
+                 const uri = vscode.Uri.parse(msg.url);
+                 if (uri.scheme === 'https' && ALLOWED_EXTERNAL_HOSTS.has(uri.authority)) {
+@@ -223,6 +224,8 @@ export class FigletPanel {
+                 msg.layoutMode === 'kerning' ? LayoutMode.Kerning :
+                     LayoutMode.Smushing;
+ 
++        await this._context.globalState.update('lastFontUsed', msg.font);
++
+         const figletText = new FIGLetRenderer(font, layoutMode).render(msg.text);
+         await BannerUtils.insertBanner(editor, figletText, msg.language);
+     }
+diff --git a/FIGLet.VSCodeExtension/src/FigletSettingsPanel.ts b/FIGLet.VSCodeExtension/src/FigletSettingsPanel.ts
+index 68959d3..a24f39b 100644
+--- a/FIGLet.VSCodeExtension/src/FigletSettingsPanel.ts
++++ b/FIGLet.VSCodeExtension/src/FigletSettingsPanel.ts
+@@ -11,7 +11,7 @@ interface ReadyMessage { type: 'ready'; }
+ /** Message sent by the webview to request that the extension open a folder-picker dialog for the font directory. */
+ interface BrowseFontDirMsg { type: 'browseFontDir'; }
+ /** Message sent by the webview when the user clicks Save, carrying the new settings values. */
+-interface SaveSettingsMessage { type: 'saveSettings'; settings: { fontDirectory: string; defaultFont: string; layoutMode: LayoutKey }; }
++interface SaveSettingsMessage { type: 'saveSettings'; settings: { fontDirectory: string; layoutMode: LayoutKey }; }
+ /** Message sent by the webview when the user dismisses the settings panel without saving. */
+ interface CloseMessage { type: 'close'; }
+ /** Union of all message types that can be sent from the settings webview to the extension host. */
+@@ -100,7 +100,6 @@ export class FigletSettingsPanel {
+     private async _sendInitData(): Promise<void> {
+         const config = vscode.workspace.getConfiguration('figlet');
+         const fontDirectory = config.get<string>('fontDirectory') || '';
+-        const defaultFont = config.get<string>('defaultFont') || 'small';
+         const VALID_LAYOUT_KEYS = new Set<string>(['full', 'kerning', 'smush']);
+         const rawLayout = config.get<string>('layoutMode') ?? 'smush';
+         const layoutMode = (VALID_LAYOUT_KEYS.has(rawLayout) ? rawLayout : 'smush') as LayoutKey;
+@@ -111,7 +110,7 @@ export class FigletSettingsPanel {
+ 
+         await this._panel.webview.postMessage({
+             type: 'init',
+-            settings: { fontDirectory, defaultFont, layoutMode },
++            settings: { fontDirectory, layoutMode },
+             fonts,
+         });
+     }
+@@ -185,13 +184,12 @@ export class FigletSettingsPanel {
+             }
+ 
+             case 'saveSettings': {
+-                const { fontDirectory, defaultFont } = msg.settings;
++                const { fontDirectory } = msg.settings;
+                 const VALID_LAYOUT_KEYS = new Set<string>(['full', 'kerning', 'smush']);
+                 const layoutMode = (VALID_LAYOUT_KEYS.has(msg.settings.layoutMode)
+                     ? msg.settings.layoutMode : 'smush') as LayoutKey;
+                 const config = vscode.workspace.getConfiguration('figlet');
+                 await config.update('fontDirectory', fontDirectory, vscode.ConfigurationTarget.Global);
+-                await config.update('defaultFont', defaultFont, vscode.ConfigurationTarget.Global);
+                 await config.update('layoutMode', layoutMode, vscode.ConfigurationTarget.Global);
+                 this.dispose();
+                 vscode.window.showInformationMessage('FIGLet settings saved.');
+diff --git a/FIGLet.VSCodeExtension/src/LanguageCommentStyles.ts b/FIGLet.VSCodeExtension/src/LanguageCommentStyles.ts
+index a6af30f..5f3bdb7 100644
+--- a/FIGLet.VSCodeExtension/src/LanguageCommentStyles.ts
++++ b/FIGLet.VSCodeExtension/src/LanguageCommentStyles.ts
+@@ -67,7 +67,12 @@ export enum CommentStyle {
+     /**
+      * Bash-style comments (: ' ... ').
+      */
+-    Bash
++    Bash,
++
++    /**
++     * Batch file comments (::).
++     */
++    BATCHFile
+ }
+ 
+ /*
+@@ -203,6 +208,10 @@ export class CommentStyleInfo {
+                 this._blockCommentStart = blockStart ?? ": '#";
+                 this._blockCommentEnd = blockEnd ?? "#'";
+                 break;
++            
++            case CommentStyle.BATCHFile:
++                this._singleLinePrefix = singleLinePrefix ?? "::";
++                break;
+ 
+             default:
+                 throw new Error(`Invalid comment style: ${primary}`);
+@@ -316,6 +325,11 @@ export class LanguageCommentStyles {
+      */
+     static readonly Bash = new CommentStyleInfo(CommentStyle.Bash);
+ 
++    /**
++     * Batch file comments (::).
++     */
++    static readonly BatchFile = new CommentStyleInfo(CommentStyle.BATCHFile);
++
+     /**
+      * Dictionary mapping language names to their respective comment styles.
+      */
+@@ -381,10 +395,10 @@ export class LanguageCommentStyles {
+         ['shellscript', LanguageCommentStyles.Bash],
+ 
+         // Batch files
+-        ['bat', new CommentStyleInfo(CommentStyle.Custom, '::', null, null)],
+-        ['cmd', new CommentStyleInfo(CommentStyle.Custom, '::', null, null)],
+-        ['dos', new CommentStyleInfo(CommentStyle.Custom, '::', null, null)],
+-        ['batch', new CommentStyleInfo(CommentStyle.Custom, '::', null, null)]
++        ['bat', LanguageCommentStyles.BatchFile],
++        ['cmd', LanguageCommentStyles.BatchFile],
++        ['dos', LanguageCommentStyles.BatchFile],
++        ['batch', LanguageCommentStyles.BatchFile]
+     ]);
+ 
+     /**
+diff --git a/FIGLet.VSCodeExtension/src/configuration.ts b/FIGLet.VSCodeExtension/src/configuration.ts
+index a309a82..31d902a 100644
+--- a/FIGLet.VSCodeExtension/src/configuration.ts
++++ b/FIGLet.VSCodeExtension/src/configuration.ts
+@@ -11,7 +11,6 @@ import * as path from 'path';
+  */
+ export interface FigletConfig {
+     fontDirectory: string;
+-    defaultFont: string;
+     layoutMode: 'full' | 'kerning' | 'smush';
+     defaultWidth?: number;
+ }
+@@ -31,7 +30,6 @@ export class ConfigurationManager {
+         
+         return {
+             layoutMode: config.get<'full' | 'kerning' | 'smush'>('layoutMode') || 'smush',
+-            defaultFont: config.get<string>('defaultFont') || 'small',
+             defaultWidth: config.get<number>('defaultWidth') || 80,
+             fontDirectory: config.get<string>('fontDirectory') || path.join(this.getExtensionPath(), 'resources', 'fonts'),
+         };
+diff --git a/FIGLet.VSCodeExtension/src/extension.ts b/FIGLet.VSCodeExtension/src/extension.ts
+index ee6ed6c..9723131 100644
+--- a/FIGLet.VSCodeExtension/src/extension.ts
++++ b/FIGLet.VSCodeExtension/src/extension.ts
+@@ -1,5 +1,4 @@
+ import * as vscode from 'vscode';
+-import { FIGLetFontManager } from './FIGLetFontManager.js';
+ import { FigletPanel } from './FigletPanel.js';
+ import { FigletSettingsPanel } from './FigletSettingsPanel.js';
+ import { WelcomePanel } from './WelcomePanel.js';
+@@ -83,64 +82,6 @@ export async function activate(context: vscode.ExtensionContext) {
+         }
+     });
+ 
+-    /*
+-     *           _        _   ___        _    ___                              _ 
+-     *   ___ ___| |___ __| |_| __|__ _ _| |_ / __|___ _ __  _ __  __ _ _ _  __| |
+-     *  (_-</ -_) / -_) _|  _| _/ _ \ ' \  _| (__/ _ \ '  \| '  \/ _` | ' \/ _` |
+-     *  /__/\___|_\___\__|\__|_|\___/_||_\__|\___\___/_|_|_|_|_|_\__,_|_||_\__,_|
+-     *                                                                           
+-     */
+-    // Add the font selection command
+-    let selectFontCommand = vscode.commands.registerCommand('figlet.selectDefaultFont', async () => {
+-        try {
+-            const fontDir = vscode.workspace.getConfiguration('figlet').get<string>('fontDirectory');
+-            
+-            if (!fontDir) {
+-                const result = await vscode.window.showErrorMessage(
+-                    'Font directory not configured. Would you like to configure it now?',
+-                    'Yes', 'No'
+-                );
+-                if (result === 'Yes') {
+-                    await vscode.commands.executeCommand('figlet.selectFontDirectory');
+-                }
+-                return;
+-            }
+-            // Load fonts using the manager
+-            await FIGLetFontManager.setFontDirectory(fontDir);
+-            const fonts = FIGLetFontManager.availableFonts;
+-
+-            // Check if we have any fonts beyond the default
+-            if (fonts.length <= 1) {
+-                vscode.window.showErrorMessage('No FIGlet font files (.flf) found in the configured directory.');
+-                return;
+-            }
+-
+-            // Show QuickPick with font options
+-            const quickPickItems: vscode.QuickPickItem[] = fonts.map((font: { name: string; filePath: string | null; }) => ({
+-                label: font.name || '<Default>',
+-                description: font.filePath || ''
+-            }));
+-
+-            const selected = await vscode.window.showQuickPick(quickPickItems, {
+-                placeHolder: 'Select default FIGlet font',
+-                title: 'Available Fonts'
+-            });
+-
+-            if (selected) {
+-                // Update the configuration
+-                await vscode.workspace.getConfiguration().update(
+-                    'figlet.defaultFont',
+-                    selected.label,
+-                    vscode.ConfigurationTarget.Global
+-                );
+-                
+-                vscode.window.showInformationMessage(`Default font updated to: ${selected.label}`);
+-            }
+-        } catch (error) {
+-            vscode.window.showErrorMessage('Failed to load fonts: ' + error);
+-        }
+-    });
+-
+     /*
+      *                      ___      _   _   _               ___                              _ 
+      *   ___ _ __  ___ _ _ / __| ___| |_| |_(_)_ _  __ _ ___/ __|___ _ __  _ __  __ _ _ _  __| |
+@@ -176,16 +117,15 @@ export async function activate(context: vscode.ExtensionContext) {
+         
+         const allSettings = {
+             fontDirectory: config.get('fontDirectory'),
+-            defaultFont: config.get('defaultFont'),
+             layoutMode: config.get('layoutMode'),
+             commentStyle: config.get('commentStyle')
+         };
+-        
++
+         console.log('Current Configuration:', allSettings);
+-        
++
+         // Also show in UI for easier viewing during debug
+         vscode.window.showInformationMessage(
+-            `Current font: ${allSettings.defaultFont}, Layout: ${allSettings.layoutMode}`
++            `Layout: ${allSettings.layoutMode}, Font dir: ${allSettings.fontDirectory || '(default)'}`
+         );
+     });
+ 
+@@ -193,7 +133,6 @@ export async function activate(context: vscode.ExtensionContext) {
+     context.subscriptions.push(
+         insertBannerCommand,
+         selectFontDirCommand,
+-        selectFontCommand,
+         inspectConfigCommand,
+         openSettingsCommand,
+         showWelcomeCommand
+@@ -215,7 +154,6 @@ export async function activate(context: vscode.ExtensionContext) {
+                 const config = vscode.workspace.getConfiguration('figlet');
+                 console.log('Configuration changed:', {
+                     fontDirectory: config.get('fontDirectory'),
+-                    defaultFont: config.get('defaultFont'),
+                     layoutMode: config.get('layoutMode')
+                 });
+             }
+diff --git a/FIGLet.VSCodeExtension/src/webview/SettingsApp.tsx b/FIGLet.VSCodeExtension/src/webview/SettingsApp.tsx
+index 0766624..3dd3f28 100644
+--- a/FIGLet.VSCodeExtension/src/webview/SettingsApp.tsx
++++ b/FIGLet.VSCodeExtension/src/webview/SettingsApp.tsx
+@@ -17,7 +17,6 @@ interface FontRow {
+ 
+ interface Settings {
+     fontDirectory: string;
+-    defaultFont: string;
+     layoutMode: LayoutKey;
+ }
+ 
+@@ -167,7 +166,6 @@ const S = {
+ 
+ export function SettingsApp() {
+     const [fontDirectory, setFontDirectory]   = useState('');
+-    const [defaultFont,   setDefaultFont]     = useState('small');
+     const [layoutMode,    setLayoutMode]       = useState<LayoutKey>('smush');
+     const [fonts,         setFonts]            = useState<FontRow[]>([]);
+     const [selectedFont,  setSelectedFont]     = useState('small');
+@@ -211,9 +209,7 @@ export function SettingsApp() {
+             if (msg.type === 'init') {
+                 const s: Settings = msg.settings;
+                 setFontDirectory(s.fontDirectory || '');
+-                setDefaultFont(s.defaultFont || 'small');
+                 setLayoutMode((s.layoutMode as LayoutKey) || 'smush');
+-                setSelectedFont(s.defaultFont || 'small');
+                 const rows: FontRow[] = (msg.fonts as Array<{ name: string; content: string }>).map(f => {
+                     try {
+                         const fig = FIGFont.fromText(f.content);
+@@ -257,7 +253,7 @@ export function SettingsApp() {
+     const handleSave = () => {
+         getVsCodeApi().postMessage({
+             type: 'saveSettings',
+-            settings: { fontDirectory, defaultFont, layoutMode },
++            settings: { fontDirectory, layoutMode },
+         });
+     };
+ 
+@@ -267,7 +263,6 @@ export function SettingsApp() {
+ 
+     const handleFontRowClick = (name: string) => {
+         setSelectedFont(name);
+-        setDefaultFont(name);
+     };
+ 
+     const handleSort = (col: keyof FontRow) => {
+diff --git a/FIGLet.VSCodeExtension/tsconfig.json b/FIGLet.VSCodeExtension/tsconfig.json
+index 9d90be5..4924aa1 100644
+--- a/FIGLet.VSCodeExtension/tsconfig.json
++++ b/FIGLet.VSCodeExtension/tsconfig.json
+@@ -8,6 +8,13 @@
+ 			"ES2022",
+ 			"DOM"
+ 		],
++		"types": [
++			"node",
++			"vscode",
++			"react",
++			"react-dom",
++			"mocha"
++		],
+ 		"sourceMap": true,
+ 		"rootDir": "src",
+ 		"strict": true,
+diff --git a/FIGPrint/readme.md b/FIGPrint/readme.md
+index 62e2856..f1d376a 100644
+--- a/FIGPrint/readme.md
++++ b/FIGPrint/readme.md
+@@ -42,6 +42,10 @@ Text can be supplied as command-line arguments or piped through standard input,
+ winget install ByteForge.FIGPrint
+ ```
+ 
++#### *NOTE*
++
++A PR for inclusion of _FIGPrint CLI_ into the WinGet library is currently pending review. (see [#355518](https://github.com/microsoft/winget-pkgs/pull/355518))
++
+ ### Manual download
+ 
+ Download the latest release for your platform from the
+diff --git a/readme.md b/readme.md
+index 31c23a9..f7ccd8a 100644
+--- a/readme.md
++++ b/readme.md
+@@ -30,7 +30,9 @@ It includes libraries, IDE extensions, and command‑line tools that make it eas
+ | **FIGLet TS Library** | TypeScript implementation for Node.js and web environments. Powers the VS Code extension. | TypeScript | [NPM](https://www.npmjs.com/package/@byte-forge/figlet) |
+ | **Visual Studio Extension** | Adds FIGLet banner generation directly into Visual Studio. | C# | [VS Extension](https://marketplace.visualstudio.com/items?itemName=PaulStSmith.FIGLetCommentGenerator) |
+ | **VS Code Extension** | Generate FIGLet banners in VS Code with live preview and comment wrapping. | TypeScript | [VSCode Extension](https://marketplace.visualstudio.com/items?itemName=PaulStSmith.figlet-comment-generator) |
+-| **FigPrint CLI** | Command‑line tool for rendering FIGLet text in the terminal. | C# | `winget install ByteForge.FIGPrint` |
++| **FigPrint CLI** | Command‑line tool for rendering FIGLet text in the terminal. | C# | `winget install ByteForge.FIGPrint`(*) |
++
++(*): A PR for inclusion of _FIGPrint CLI_ into the WinGet library is currently pending review. (see [#355518](https://github.com/microsoft/winget-pkgs/pull/355518))
+ 
+ ## 🧱 Architecture
+ 

@@ -1,0 +1,1213 @@
+diff --git a/Pika/AppDelegate.swift b/Pika/AppDelegate.swift
+index 8db46822..5e2d5dcc 100644
+--- a/Pika/AppDelegate.swift
++++ b/Pika/AppDelegate.swift
+@@ -55,6 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
+ 
+     func applicationDidFinishLaunching(_: Notification) {
+         LaunchAtLogin.migrateIfNeeded()
++        migrateHistoryToPalettes()
+ 
+         #if TARGET_MAS
+             if let mainMenu = NSApp.mainMenu?.item(withTitle: PikaText.textAppName)?.submenu {
+@@ -94,6 +95,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
+ 
+         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+             guard Defaults[.historyDrawerVisible] else { return event }
++            if let responder = NSApp.keyWindow?.firstResponder,
++               responder is NSTextView || responder is NSTextField
++            {
++                return event
++            }
+             switch event.keyCode {
+             case 123: // left arrow
+                 self.notificationCenter.post(name: .historyNext, object: self)
+@@ -121,6 +127,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
+         true
+     }
+ 
++    // MARK: - Migration
++
++    private func migrateHistoryToPalettes() {
++        let existing = Defaults[.colorHistory]
++        guard !existing.isEmpty else { return }
++        let history = Palette(id: UUID(), name: nil, pairs: existing, createdAt: Date())
++        Defaults[.palettes] = [history]
++        Defaults[.colorHistory] = []
++    }
++
+     // MARK: - Window forwarding
+ 
+     @objc func closeSplashWindow() { windowCoordinator.closeSplashWindow() }
+@@ -167,6 +183,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
+         notificationCenter.post(name: .toggleColorPreview, object: self)
+     }
+ 
++    @IBAction func triggerToggleCompliance(_: Any) {
++        notificationCenter.post(name: .toggleCompliance, object: self)
++    }
++
+     @IBAction func triggerHistoryPrevious(_: Any) {
+         notificationCenter.post(name: .historyPrevious, object: self)
+     }
+diff --git a/Pika/Assets/en.lproj/Localizable.strings b/Pika/Assets/en.lproj/Localizable.strings
+index eb16d343..e2e29d6d 100644
+--- a/Pika/Assets/en.lproj/Localizable.strings
++++ b/Pika/Assets/en.lproj/Localizable.strings
+@@ -388,12 +388,15 @@
+ /* History */
+ "history.title" = "History";
+ 
+-/* Toggle history */
+-"history.toggle" = "Toggle history";
++/* Toggle palettes */
++"history.toggle" = "Toggle palettes";
+ 
+ /* Toggle color preview */
+ "color.preview.toggle" = "Toggle color preview";
+ 
++/* Toggle compliance */
++"compliance.toggle" = "Toggle compliance";
++
+ /* Sample preview text */
+ "color.preview.sample" = "The quick brown fox jumps over the lazy dog";
+ 
+@@ -408,3 +411,33 @@
+ 
+ /* Clear history */
+ "history.clear" = "Clear history";
++
++/* New palette… */
++"palette.new" = "New palette…";
++
++/* Rename palette */
++"palette.rename" = "Rename palette";
++
++/* Delete palette */
++"palette.delete" = "Delete palette";
++
++/* Remove from palette */
++"palette.remove" = "Remove from palette";
++
++/* Palette name */
++"palette.name.prompt" = "Palette name";
++
++/* My palette */
++"palette.name.placeholder" = "My palette";
++
++/* Add to palette */
++"palette.add" = "Add to palette";
++
++/* Export palette */
++"palette.export" = "Export palette";
++
++/* Export color history */
++"history.export" = "Export color history";
++
++/* Are you sure you want to clear all history? */
++"history.clear.confirm" = "Are you sure you want to clear all history?";
+diff --git a/Pika/ButtonStyles/SwapButtonStyle.swift b/Pika/ButtonStyles/SwapButtonStyle.swift
+index 5e830019..6d90af29 100644
+--- a/Pika/ButtonStyles/SwapButtonStyle.swift
++++ b/Pika/ButtonStyles/SwapButtonStyle.swift
+@@ -88,9 +88,16 @@ struct SwapButtonStyle: ButtonStyle {
+             .opacity(isVisible ? (configuration.isPressed ? 0.8 : 1.0) : 0.0)
+             .foregroundColor(fgColor.opacity(0.8))
+             .frame(height: 32.0)
+-            .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.4), value: showText)
+-            .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.4), value: isVisible)
+-            .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.4), value: configuration.isPressed)
++            .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.3), value: showText)
++            .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.3), value: isVisible)
++            .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.3), value: configuration.isPressed)
++            .onChange(of: isVisible) { _, visible in
++                if !visible {
++                    hoverTask?.cancel()
++                    hoverTask = nil
++                    isHovered = false
++                }
++            }
+         }
+     }
+ 
+diff --git a/Pika/Constants/Constants.swift b/Pika/Constants/Constants.swift
+index 78715cda..3af35a9e 100644
+--- a/Pika/Constants/Constants.swift
++++ b/Pika/Constants/Constants.swift
+@@ -61,9 +61,12 @@ enum PikaConstants {
+     static let ncColorPicked = "colorPicked"
+     static let ncToggleHistory = "toggleHistory"
+     static let ncToggleColorPreview = "toggleColorPreview"
++    static let ncToggleCompliance = "toggleCompliance"
+     static let ncHistoryPrevious = "historyPrevious"
+     static let ncHistoryNext = "historyNext"
+     static let ncHistoryDelete = "historyDelete"
++    static let ncSavePalette = "savePalette"
++    static let ncExportPalette = "exportPalette"
+ 
+     // Disabled formats for SwiftUI copy format
+     static let disabledFormats: [ColorFormat] = [.hex, .hsl, .opengl, .lab, .oklch]
+@@ -93,9 +96,12 @@ extension Notification.Name {
+     static let colorPicked = Notification.Name(PikaConstants.ncColorPicked)
+     static let toggleHistory = Notification.Name(PikaConstants.ncToggleHistory)
+     static let toggleColorPreview = Notification.Name(PikaConstants.ncToggleColorPreview)
++    static let toggleCompliance = Notification.Name(PikaConstants.ncToggleCompliance)
+     static let historyPrevious = Notification.Name(PikaConstants.ncHistoryPrevious)
+     static let historyNext = Notification.Name(PikaConstants.ncHistoryNext)
+     static let historyDelete = Notification.Name(PikaConstants.ncHistoryDelete)
++    static let savePalette = Notification.Name(PikaConstants.ncSavePalette)
++    static let exportPalette = Notification.Name(PikaConstants.ncExportPalette)
+ }
+ 
+ enum PikaText {
+@@ -195,13 +201,26 @@ enum PikaText {
+ 
+     // History
+     static let textHistoryTitle = NSLocalizedString("history.title", comment: "History")
+-    static let textHistoryToggle = NSLocalizedString("history.toggle", comment: "Toggle history")
++    static let textHistoryToggle = NSLocalizedString("history.toggle", comment: "Toggle palettes")
+     static let textColorPreviewToggle = NSLocalizedString("color.preview.toggle", comment: "Toggle color preview")
++    static let textComplianceToggle = NSLocalizedString("compliance.toggle", comment: "Toggle compliance")
+     static let textHistoryApplyForeground = NSLocalizedString("history.apply.foreground", comment: "Apply foreground only")
+     static let textHistoryApplyBackground = NSLocalizedString("history.apply.background", comment: "Apply background only")
+     static let textHistoryRemove = NSLocalizedString("history.remove", comment: "Remove from history")
+     static let textHistoryClear = NSLocalizedString("history.clear", comment: "Clear history")
+ 
++    // Palettes
++    static let textPaletteNew = NSLocalizedString("palette.new", comment: "New palette…")
++    static let textPaletteRename = NSLocalizedString("palette.rename", comment: "Rename palette")
++    static let textPaletteDelete = NSLocalizedString("palette.delete", comment: "Delete palette")
++    static let textPaletteRemoveChip = NSLocalizedString("palette.remove", comment: "Remove from palette")
++    static let textPaletteNamePrompt = NSLocalizedString("palette.name.prompt", comment: "Palette name")
++    static let textPaletteNamePlaceholder = NSLocalizedString("palette.name.placeholder", comment: "My palette")
++    static let textPaletteAddColor = NSLocalizedString("palette.add", comment: "Add to palette")
++    static let textPaletteExport = NSLocalizedString("palette.export", comment: "Export palette")
++    static let textHistoryExport = NSLocalizedString("history.export", comment: "Export color history")
++    static let textHistoryClearConfirm = NSLocalizedString("history.clear.confirm", comment: "Are you sure you want to clear all history?")
++
+     // Keyboard shortcuts
+     static let textPickForeground = NSLocalizedString("color.pick.foreground", comment: "Pick foreground")
+     static let textPickBackground = NSLocalizedString("color.pick.background", comment: "Pick background")
+diff --git a/Pika/Constants/Defaults.swift b/Pika/Constants/Defaults.swift
+index b7b471a8..d30535d1 100644
+--- a/Pika/Constants/Defaults.swift
++++ b/Pika/Constants/Defaults.swift
+@@ -67,8 +67,13 @@ extension Defaults.Keys {
+     static let showColorOverlay = Key<Bool>("showColorOverlay", default: true)
+     static let colorOverlayDuration = Key<Double>("colorOverlayDuration", default: 2.0)
+     static let colorHistory = Key<[ColorPair]>("colorHistory", default: [])
++    static let palettes = Key<[Palette]>("palettes", default: [
++        Palette(id: UUID(), name: nil, pairs: [], createdAt: Date()),
++    ])
++    static let activePaletteIndex = Key<Int>("activePaletteIndex", default: 0)
+     static let undoStack = Key<[[ColorPair]]>("undoStack", default: [])
+     static let redoStack = Key<[[ColorPair]]>("redoStack", default: [])
+     static let historyDrawerVisible = Key<Bool>("historyDrawerVisible", default: false)
+     static let showColorPreview = Key<Bool>("showColorPreview", default: false)
++    static let showCompliance = Key<Bool>("showCompliance", default: true)
+ }
+diff --git a/Pika/Services/ColorPair.swift b/Pika/Services/ColorPair.swift
+index e0a9703b..f88942bc 100644
+--- a/Pika/Services/ColorPair.swift
++++ b/Pika/Services/ColorPair.swift
+@@ -35,3 +35,12 @@ struct ColorPair: Codable, Identifiable, Equatable {
+         lhs.foregroundHex == rhs.foregroundHex && lhs.backgroundHex == rhs.backgroundHex
+     }
+ }
++
++struct Palette: Codable, Identifiable {
++    let id: UUID
++    var name: String?
++    var pairs: [ColorPair]
++    let createdAt: Date
++
++    var isAutoHistory: Bool { name == nil }
++}
+diff --git a/Pika/Services/Exporter.swift b/Pika/Services/Exporter.swift
+index c2024969..f27a1412 100644
+--- a/Pika/Services/Exporter.swift
++++ b/Pika/Services/Exporter.swift
+@@ -1,3 +1,4 @@
++import Defaults
+ import Foundation
+ 
+ class Exporter {
+@@ -68,4 +69,32 @@ class Exporter {
+         }
+         """
+     }
++
++    static func paletteToJSON(pairs: [ColorPair], name: String?) -> String {
++        let isHistory = name == nil
++        let entries: [[String: String]] = pairs.map { pair in
++            var entry: [String: String] = [
++                "foreground": pair.foregroundHex,
++                "background": pair.backgroundHex,
++            ]
++            if isHistory {
++                entry["date"] = ISO8601DateFormatter().string(from: pair.date)
++            }
++            return entry
++        }
++
++        let wrapper: [String: Any] = [
++            "name": name ?? "Color History",
++            "colors": entries,
++        ]
++
++        if let data = try? JSONSerialization.data(
++            withJSONObject: wrapper, options: [.prettyPrinted, .sortedKeys]
++        ),
++            let json = String(data: data, encoding: .utf8)
++        {
++            return json
++        }
++        return "{}"
++    }
+ }
+diff --git a/Pika/Services/Eyedroppers.swift b/Pika/Services/Eyedroppers.swift
+index 060bef33..c3a945df 100644
+--- a/Pika/Services/Eyedroppers.swift
++++ b/Pika/Services/Eyedroppers.swift
+@@ -7,9 +7,10 @@ class Eyedroppers: ObservableObject {
+     @Published var foreground: Eyedropper
+     @Published var background: Eyedropper
+     @Published var activeHistoryID: UUID?
++    private var lastAutoHistoryID: UUID?
+ 
+     init() {
+-        if let latest = Defaults[.colorHistory].first {
++        if let latest = Defaults[.palettes].first?.pairs.first {
+             foreground = Eyedropper(type: .foreground, color: latest.foregroundColor)
+             background = Eyedropper(type: .background, color: latest.backgroundColor)
+             activeHistoryID = latest.id
+@@ -19,9 +20,21 @@ class Eyedroppers: ObservableObject {
+         }
+     }
+ 
++    // MARK: - History helpers
++
++    private var autoHistory: [ColorPair] {
++        get { Defaults[.palettes].first?.pairs ?? [] }
++        set {
++            var palettes = Defaults[.palettes]
++            guard !palettes.isEmpty else { return }
++            palettes[0].pairs = newValue
++            Defaults[.palettes] = palettes
++        }
++    }
++
+     private func pushUndo() {
+         var stack = Defaults[.undoStack]
+-        stack.insert(Defaults[.colorHistory], at: 0)
++        stack.insert(autoHistory, at: 0)
+         if stack.count > ColorPair.maxHistory {
+             stack = Array(stack.prefix(ColorPair.maxHistory))
+         }
+@@ -29,10 +42,17 @@ class Eyedroppers: ObservableObject {
+         Defaults[.redoStack] = []
+     }
+ 
++    private var activePairs: [ColorPair] {
++        let palettes = Defaults[.palettes]
++        let idx = Defaults[.activePaletteIndex]
++        guard idx >= 0, idx < palettes.count else { return autoHistory }
++        return palettes[idx].pairs
++    }
++
+     private var activeIndex: Int {
+-        let history = Defaults[.colorHistory]
++        let pairs = activePairs
+         if let id = activeHistoryID,
+-           let index = history.firstIndex(where: { $0.id == id })
++           let index = pairs.firstIndex(where: { $0.id == id })
+         {
+             return index
+         }
+@@ -43,7 +63,7 @@ class Eyedroppers: ObservableObject {
+         let fgHex = foreground.color.toHexString()
+         let bgHex = background.color.toHexString()
+ 
+-        let history = Defaults[.colorHistory]
++        let history = autoHistory
+         if let last = history.first, last.foregroundHex == fgHex, last.backgroundHex == bgHex {
+             return
+         }
+@@ -54,7 +74,7 @@ class Eyedroppers: ObservableObject {
+         if updated.count > ColorPair.maxHistory {
+             updated = Array(updated.prefix(ColorPair.maxHistory))
+         }
+-        Defaults[.colorHistory] = updated
++        autoHistory = updated
+         activeHistoryID = pair.id
+     }
+ 
+@@ -64,42 +84,47 @@ class Eyedroppers: ObservableObject {
+         foreground.color = background.color
+         background.color = temp
+ 
+-        var history = Defaults[.colorHistory]
+-        guard !history.isEmpty else { return }
+-        let index = activeIndex
+-        let entry = history[index]
+-        history[index] = ColorPair(
++        let paletteIndex = Defaults[.activePaletteIndex]
++        var palettes = Defaults[.palettes]
++        guard paletteIndex >= 0, paletteIndex < palettes.count else { return }
++
++        guard let id = activeHistoryID,
++              let index = palettes[paletteIndex].pairs.firstIndex(where: { $0.id == id })
++        else { return }
++
++        let entry = palettes[paletteIndex].pairs[index]
++        palettes[paletteIndex].pairs[index] = ColorPair(
+             id: entry.id,
+             foregroundHex: entry.backgroundHex,
+             backgroundHex: entry.foregroundHex,
+             date: entry.date
+         )
+-        Defaults[.colorHistory] = history
++        Defaults[.palettes] = palettes
+     }
+ 
+     func undo() {
+         var undoStack = Defaults[.undoStack]
+         guard !undoStack.isEmpty else { return }
+-        let current = Defaults[.colorHistory]
++        let current = autoHistory
+         let snapshot = undoStack.removeFirst()
+         Defaults[.undoStack] = undoStack
+         var redoStack = Defaults[.redoStack]
+         redoStack.insert(current, at: 0)
+         Defaults[.redoStack] = redoStack
+-        Defaults[.colorHistory] = snapshot
++        autoHistory = snapshot
+         applyRestoredSnapshot(snapshot, previous: current)
+     }
+ 
+     func redo() {
+         var redoStack = Defaults[.redoStack]
+         guard !redoStack.isEmpty else { return }
+-        let current = Defaults[.colorHistory]
++        let current = autoHistory
+         let snapshot = redoStack.removeFirst()
+         Defaults[.redoStack] = redoStack
+         var undoStack = Defaults[.undoStack]
+         undoStack.insert(current, at: 0)
+         Defaults[.undoStack] = undoStack
+-        Defaults[.colorHistory] = snapshot
++        autoHistory = snapshot
+         applyRestoredSnapshot(snapshot, previous: current)
+     }
+ 
+@@ -122,12 +147,25 @@ class Eyedroppers: ObservableObject {
+             backgroundHex: background.color.toHexString(),
+             date: Date()
+         )
+-        Defaults[.colorHistory] = [pair]
++        autoHistory = [pair]
+         activeHistoryID = pair.id
+     }
+ 
++    func deleteCurrentEntry() {
++        let paletteIndex = Defaults[.activePaletteIndex]
++        if paletteIndex == 0 {
++            deleteCurrentHistoryEntry()
++        } else if let id = activeHistoryID {
++            deleteChipFromPalette(paletteIndex: paletteIndex, pairID: id)
++            let palettes = Defaults[.palettes]
++            if paletteIndex < palettes.count, let first = palettes[paletteIndex].pairs.first {
++                applyEntry(first)
++            }
++        }
++    }
++
+     func deleteCurrentHistoryEntry() {
+-        var history = Defaults[.colorHistory]
++        var history = autoHistory
+ 
+         if history.count <= 1 {
+             clearHistory()
+@@ -138,14 +176,14 @@ class Eyedroppers: ObservableObject {
+ 
+         pushUndo()
+         history.remove(at: index)
+-        Defaults[.colorHistory] = history
++        autoHistory = history
+ 
+         let newIndex = index > 0 ? index - 1 : 0
+         applyHistoryEntry(history[newIndex])
+     }
+ 
+     func deleteHistoryEntry(id: UUID) {
+-        var history = Defaults[.colorHistory]
++        var history = autoHistory
+ 
+         if history.count <= 1 {
+             clearHistory()
+@@ -158,7 +196,7 @@ class Eyedroppers: ObservableObject {
+ 
+         pushUndo()
+         history.remove(at: index)
+-        Defaults[.colorHistory] = history
++        autoHistory = history
+ 
+         if isActive {
+             let newIndex = index > 0 ? index - 1 : 0
+@@ -166,27 +204,113 @@ class Eyedroppers: ObservableObject {
+         }
+     }
+ 
++    private var hasActiveSelection: Bool {
++        guard let id = activeHistoryID else { return false }
++        return activePairs.contains { $0.id == id }
++    }
++
+     func navigatePrevious() {
+-        let history = Defaults[.colorHistory]
+-        guard history.count > 1 else { return }
++        let pairs = activePairs
++        guard !pairs.isEmpty else { return }
++        if !hasActiveSelection {
++            applyEntry(pairs[pairs.count - 1])
++            return
++        }
+         let nextIndex = activeIndex + 1
+-        guard nextIndex < history.count else { return }
+-        applyHistoryEntry(history[nextIndex])
++        guard nextIndex < pairs.count else { return }
++        applyEntry(pairs[nextIndex])
+     }
+ 
+     func navigateNext() {
+-        let history = Defaults[.colorHistory]
+-        guard history.count > 1 else { return }
++        let pairs = activePairs
++        guard !pairs.isEmpty else { return }
++        if !hasActiveSelection {
++            applyEntry(pairs[0])
++            return
++        }
+         let nextIndex = activeIndex - 1
+         guard nextIndex >= 0 else { return }
+-        applyHistoryEntry(history[nextIndex])
++        applyEntry(pairs[nextIndex])
+     }
+ 
+-    func applyHistoryEntry(_ pair: ColorPair) {
++    func applyEntry(_ pair: ColorPair) {
+         foreground.color = pair.foregroundColor
+         background.color = pair.backgroundColor
++        if Defaults[.activePaletteIndex] != 0 {
++            recordHistory()
++            lastAutoHistoryID = activeHistoryID
++        }
++        activeHistoryID = pair.id
++    }
++
++    func applyHistoryEntry(_ pair: ColorPair) {
++        applyEntry(pair)
++    }
++
++    func restoreAutoHistorySelection() {
++        if let id = lastAutoHistoryID,
++           autoHistory.contains(where: { $0.id == id })
++        {
++            activeHistoryID = id
++        } else if let first = autoHistory.first {
++            activeHistoryID = first.id
++        }
++        lastAutoHistoryID = nil
++    }
++
++    // MARK: - Palette management
++
++    func savePalette(name: String) {
++        let current = ColorPair(
++            id: UUID(),
++            foregroundHex: foreground.color.toHexString(),
++            backgroundHex: background.color.toHexString(),
++            date: Date()
++        )
++        let palette = Palette(id: UUID(), name: name, pairs: [current], createdAt: Date())
++        var palettes = Defaults[.palettes]
++        palettes.append(palette)
++        Defaults[.palettes] = palettes
++        Defaults[.activePaletteIndex] = palettes.count - 1
++    }
++
++    func renamePalette(at index: Int, to name: String) {
++        var palettes = Defaults[.palettes]
++        guard index > 0, index < palettes.count else { return }
++        palettes[index].name = name
++        Defaults[.palettes] = palettes
++    }
++
++    func deletePalette(at index: Int) {
++        var palettes = Defaults[.palettes]
++        guard index > 0, index < palettes.count else { return }
++        palettes.remove(at: index)
++        Defaults[.palettes] = palettes
++        if Defaults[.activePaletteIndex] >= palettes.count {
++            Defaults[.activePaletteIndex] = 0
++        }
++    }
++
++    func addCurrentToPalette(at index: Int) {
++        var palettes = Defaults[.palettes]
++        guard index > 0, index < palettes.count else { return }
++        let pair = ColorPair(
++            id: UUID(),
++            foregroundHex: foreground.color.toHexString(),
++            backgroundHex: background.color.toHexString(),
++            date: Date()
++        )
++        palettes[index].pairs.insert(pair, at: 0)
++        Defaults[.palettes] = palettes
+         activeHistoryID = pair.id
+     }
++
++    func deleteChipFromPalette(paletteIndex: Int, pairID: UUID) {
++        var palettes = Defaults[.palettes]
++        guard paletteIndex > 0, paletteIndex < palettes.count else { return }
++        palettes[paletteIndex].pairs.removeAll { $0.id == pairID }
++        Defaults[.palettes] = palettes
++    }
+ }
+ 
+ class Eyedropper: ObservableObject {
+diff --git a/Pika/Services/WindowCoordinator.swift b/Pika/Services/WindowCoordinator.swift
+index 6fe924f8..bf39792f 100644
+--- a/Pika/Services/WindowCoordinator.swift
++++ b/Pika/Services/WindowCoordinator.swift
+@@ -27,8 +27,8 @@ class WindowCoordinator: NSObject {
+             .frame(minWidth: 480,
+                    idealWidth: 480,
+                    maxWidth: 650,
+-                   minHeight: 260,
+-                   idealHeight: 260,
++                   minHeight: 280,
++                   idealHeight: 280,
+                    maxHeight: 400,
+                    alignment: .center)
+ 
+diff --git a/Pika/Views/ColorHistoryDrawer.swift b/Pika/Views/ColorHistoryDrawer.swift
+index df1c8191..84b6ec56 100644
+--- a/Pika/Views/ColorHistoryDrawer.swift
++++ b/Pika/Views/ColorHistoryDrawer.swift
+@@ -8,14 +8,14 @@ struct ColorHistoryChip: View {
+     let onApplyForeground: () -> Void
+     let onApplyBackground: () -> Void
+     let onRemove: () -> Void
+-    let onClearAll: () -> Void
++    let onClearAll: (() -> Void)?
+ 
+     @State private var isHovered = false
+ 
+     var body: some View {
+         RoundedRectangle(cornerRadius: 6)
+             .fill(Color.clear)
+-            .frame(width: 30, height: 30)
++            .frame(width: 24, height: 24)
+             .overlay(
+                 VStack(spacing: 0) {
+                     Color(pair.foregroundColor)
+@@ -41,69 +41,262 @@ struct ColorHistoryChip: View {
+                 Button(PikaText.textHistoryApplyBackground, action: onApplyBackground)
+                 Divider()
+                 Button(PikaText.textHistoryRemove, action: onRemove)
+-                Button(PikaText.textHistoryClear, action: onClearAll)
++                if let onClearAll = onClearAll {
++                    Button(PikaText.textHistoryClear, action: onClearAll)
++                }
+             }
+             .help("\(pair.foregroundHex) / \(pair.backgroundHex)")
+     }
+ }
+ 
++struct PaletteNameField: View {
++    let placeholder: String
++    let onSubmit: (String) -> Void
++    let onCancel: () -> Void
++
++    @State private var text = ""
++    @FocusState private var isFocused: Bool
++
++    var body: some View {
++        HStack(spacing: 6) {
++            TextField(placeholder, text: $text)
++                .textFieldStyle(.plain)
++                .font(.system(size: 11))
++                .focused($isFocused)
++                .onSubmit { submit() }
++                .onExitCommand { onCancel() }
++                .frame(width: 120)
++
++            Button(action: { submit() }) {
++                Image(systemName: "checkmark.circle.fill")
++                    .font(.system(size: 12))
++                    .foregroundColor(.accentColor)
++            }
++            .buttonStyle(.plain)
++            .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
++
++            Button(action: { onCancel() }) {
++                Image(systemName: "xmark.circle.fill")
++                    .font(.system(size: 12))
++                    .foregroundColor(.secondary)
++            }
++            .buttonStyle(.plain)
++        }
++        .padding(.horizontal, 8)
++        .padding(.vertical, 4)
++        .background(
++            RoundedRectangle(cornerRadius: 4)
++                .fill(Color(nsColor: .controlBackgroundColor))
++                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
++        )
++        .onAppear { isFocused = true }
++    }
++
++    private func submit() {
++        let name = text.trimmingCharacters(in: .whitespaces)
++        guard !name.isEmpty else { return }
++        onSubmit(name)
++    }
++}
++
++struct PaletteTabBar: View {
++    @EnvironmentObject var eyedroppers: Eyedroppers
++    @Default(.palettes) var palettes
++    @Default(.activePaletteIndex) var activePaletteIndex
++    @Default(.historyDrawerVisible) var historyDrawerVisible
++
++    @State private var isShowingNewField = false
++    @State private var renamingIndex: Int?
++
++    var body: some View {
++        ScrollView(.horizontal, showsIndicators: false) {
++            HStack(spacing: 0) {
++                ForEach(Array(palettes.enumerated()), id: \.element.id) { index, palette in
++                    if renamingIndex == index {
++                        PaletteNameField(
++                            placeholder: palette.name ?? PikaText.textPaletteNamePlaceholder,
++                            onSubmit: { name in
++                                eyedroppers.renamePalette(at: index, to: name)
++                                renamingIndex = nil
++                            },
++                            onCancel: { renamingIndex = nil }
++                        )
++                    } else {
++                        paletteTab(palette: palette, index: index)
++                    }
++                }
++
++                if isShowingNewField {
++                    PaletteNameField(
++                        placeholder: PikaText.textPaletteNamePlaceholder,
++                        onSubmit: { name in
++                            eyedroppers.savePalette(name: name)
++                            isShowingNewField = false
++                        },
++                        onCancel: { isShowingNewField = false }
++                    )
++                } else {
++                    Button(action: { isShowingNewField = true }) {
++                        Image(systemName: "plus")
++                            .font(.system(size: 10, weight: .semibold))
++                            .foregroundColor(.secondary)
++                            .frame(width: 28, height: 22)
++                    }
++                    .buttonStyle(.plain)
++                    .help(PikaText.textPaletteNew)
++                }
++            }
++            .padding(.horizontal, 8)
++        }
++        .frame(height: 28)
++        .background(Color.black.opacity(0.05))
++        .onReceive(NotificationCenter.default.publisher(for: .savePalette)) { _ in
++            if !historyDrawerVisible {
++                withAnimation(.easeInOut(duration: 0.25)) {
++                    historyDrawerVisible = true
++                }
++            }
++            isShowingNewField = true
++        }
++    }
++
++    @ViewBuilder
++    private func paletteTab(palette: Palette, index: Int) -> some View {
++        let isSelected = index == activePaletteIndex
++
++        Button(action: {
++            activePaletteIndex = index
++            if index == 0 { eyedroppers.restoreAutoHistorySelection() }
++        }) {
++            if palette.isAutoHistory {
++                Image(systemName: "clock")
++                    .font(.system(size: 10))
++            } else {
++                Text(palette.name ?? "")
++                    .font(.system(size: 11))
++                    .lineLimit(1)
++            }
++        }
++        .buttonStyle(.plain)
++        .padding(.horizontal, 8)
++        .padding(.vertical, 4)
++        .foregroundColor(isSelected ? .accentColor : .secondary)
++        .background(
++            RoundedRectangle(cornerRadius: 4)
++                .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
++        )
++        .contextMenu {
++            if palette.isAutoHistory {
++                Button(PikaText.textHistoryExport) {
++                    NotificationCenter.default.post(name: .exportPalette, object: index)
++                }
++            } else {
++                Button(PikaText.textPaletteRename) {
++                    renamingIndex = index
++                }
++                Button(PikaText.textPaletteExport) {
++                    NotificationCenter.default.post(name: .exportPalette, object: index)
++                }
++                Divider()
++                Button(PikaText.textPaletteDelete) {
++                    eyedroppers.deletePalette(at: index)
++                }
++            }
++        }
++    }
++}
++
+ struct ColorHistoryDrawer: View {
+     @EnvironmentObject var eyedroppers: Eyedroppers
+     @ObservedObject var foreground: Eyedropper
+     @ObservedObject var background: Eyedropper
+-    @Default(.colorHistory) var colorHistory
++    @Default(.palettes) var palettes
++    @Default(.activePaletteIndex) var activePaletteIndex
++
++    @State private var isShowingClearConfirm = false
++
++    private var activePalette: Palette? {
++        let idx = activePaletteIndex
++        guard idx >= 0, idx < palettes.count else { return palettes.first }
++        return palettes[idx]
++    }
++
++    private var isAutoHistory: Bool {
++        activePaletteIndex == 0
++    }
+ 
+     var body: some View {
+         Divider()
+-        HStack(spacing: 0) {
+-            ScrollView(.horizontal, showsIndicators: false) {
+-                HStack(spacing: 6) {
+-                    ForEach(colorHistory) { pair in
+-                        ColorHistoryChip(
+-                            pair: pair,
+-                            isActive: isActivePair(pair),
+-                            onApplyBoth: { applyBoth(pair) },
+-                            onApplyForeground: { applyForeground(pair) },
+-                            onApplyBackground: { applyBackground(pair) },
+-                            onRemove: { removePair(pair) },
+-                            onClearAll: { eyedroppers.clearHistory() }
+-                        )
+-                        .transition(.scale.combined(with: .opacity))
++        VStack(spacing: 0) {
++            PaletteTabBar()
++            Divider()
++            HStack(spacing: 0) {
++                ScrollView(.horizontal, showsIndicators: false) {
++                    HStack(spacing: 6) {
++                        ForEach(Array((activePalette?.pairs ?? []).enumerated()), id: \.element.id) { index, pair in
++                            ColorHistoryChip(
++                                pair: pair,
++                                isActive: isActivePair(pair),
++                                onApplyBoth: { applyBoth(pair) },
++                                onApplyForeground: { applyForeground(pair) },
++                                onApplyBackground: { applyBackground(pair) },
++                                onRemove: { removePair(pair) },
++                                onClearAll: isAutoHistory ? { isShowingClearConfirm = true } : nil
++                            )
++                            .transition(.opacity)
++                            .animation(
++                                .easeInOut(duration: 0.15).delay(Double(index) * 0.03),
++                                value: activePalette?.id
++                            )
++                        }
+                     }
++                    .animation(.easeInOut(duration: 0.2), value: activePalette?.pairs)
++                    .padding(.horizontal, 8)
+                 }
+-                .animation(.easeInOut(duration: 0.2), value: colorHistory)
+-                .padding(.horizontal, 12)
+-            }
+ 
+-            ZStack(alignment: .leading) {
+-                Rectangle()
+-                    .fill(
+-                        LinearGradient(
+-                            colors: [.clear, .black.opacity(0.15)],
+-                            startPoint: .leading,
+-                            endPoint: .trailing
++                HStack(spacing: 0) {
++                    Rectangle()
++                        .fill(
++                            LinearGradient(
++                                colors: [.clear, .black.opacity(0.15)],
++                                startPoint: .leading,
++                                endPoint: .trailing
++                            )
+                         )
+-                    )
+-                    .frame(width: 6)
+-                    .offset(x: -6)
++                        .frame(width: 6)
+ 
+-                HStack(spacing: 0) {
+                     Divider()
+ 
+-                    Button(action: { eyedroppers.clearHistory() }) {
+-                        Image(systemName: "trash.fill")
+-                            .font(.system(size: 14))
+-                            .foregroundColor(.secondary)
+-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
++                    if isAutoHistory {
++                        Button(action: { isShowingClearConfirm = true }) {
++                            Image(systemName: "trash.fill")
++                                .font(.system(size: 14))
++                                .foregroundColor(.secondary)
++                                .frame(maxWidth: .infinity, maxHeight: .infinity)
++                                .offset(x: -2, y: -2)
++                                .contentShape(Rectangle())
++                        }
++                        .buttonStyle(.plain)
++                        .help(PikaText.textHistoryClear)
++                    } else {
++                        Button(action: {
++                            eyedroppers.addCurrentToPalette(at: activePaletteIndex)
++                        }) {
++                            Image(systemName: "plus")
++                                .font(.system(size: 16, weight: .semibold))
++                                .foregroundColor(.secondary)
++                                .frame(maxWidth: .infinity, maxHeight: .infinity)
++                                .offset(x: -2, y: -2)
++                                .contentShape(Rectangle())
++                        }
++                        .buttonStyle(.plain)
++                        .help(PikaText.textPaletteAddColor)
+                     }
+-                    .buttonStyle(.plain)
+-                    .help(PikaText.textHistoryClear)
+-                    .frame(width: 38)
+                 }
++                .frame(width: 50)
+             }
+-            .fixedSize(horizontal: true, vertical: false)
++            .frame(maxWidth: .infinity, maxHeight: 44, alignment: .leading)
+         }
+-        .frame(maxWidth: .infinity, maxHeight: 50, alignment: .leading)
+         .background(
+             ZStack {
+                 VisualEffect(
+@@ -113,6 +306,14 @@ struct ColorHistoryDrawer: View {
+                 Color.black.opacity(0.2)
+             }
+         )
++        .alert(PikaText.textHistoryClear, isPresented: $isShowingClearConfirm) {
++            Button("Clear", role: .destructive) {
++                eyedroppers.clearHistory()
++            }
++            Button("Cancel", role: .cancel) {}
++        } message: {
++            Text(PikaText.textHistoryClearConfirm)
++        }
+     }
+ 
+     private func isActivePair(_ pair: ColorPair) -> Bool {
+@@ -134,6 +335,10 @@ struct ColorHistoryDrawer: View {
+     }
+ 
+     private func removePair(_ pair: ColorPair) {
+-        eyedroppers.deleteHistoryEntry(id: pair.id)
++        if isAutoHistory {
++            eyedroppers.deleteHistoryEntry(id: pair.id)
++        } else {
++            eyedroppers.deleteChipFromPalette(paletteIndex: activePaletteIndex, pairID: pair.id)
++        }
+     }
+ }
+diff --git a/Pika/Views/ColorPickers.swift b/Pika/Views/ColorPickers.swift
+index f30c580b..96820547 100644
+--- a/Pika/Views/ColorPickers.swift
++++ b/Pika/Views/ColorPickers.swift
+@@ -12,7 +12,6 @@ struct ColorPickers: View {
+                 Divider()
+             }
+         }
+-        .clipped()
+     }
+ }
+ 
+diff --git a/Pika/Views/ColorPreview.swift b/Pika/Views/ColorPreview.swift
+index a3aaced0..cc0a1816 100644
+--- a/Pika/Views/ColorPreview.swift
++++ b/Pika/Views/ColorPreview.swift
+@@ -25,10 +25,9 @@ struct PreviewPill: View {
+                 .fill(bgColor)
+                 .overlay(
+                     RoundedRectangle(cornerRadius: 100, style: .continuous)
+-                        .stroke(fgColor)
++                        .strokeBorder(fgColor)
+                 )
+         )
+-        .clipShape(RoundedRectangle(cornerRadius: 100, style: .continuous))
+         .shadow(color: Color.black.opacity(0.15), radius: 1, x: 0, y: 1)
+         .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 2)
+     }
+@@ -90,8 +89,11 @@ struct SwapPreviewButton: View {
+                             )
+                     }
+                 }
+-                .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.4), value: isVisible)
+-                .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.4), value: swapHovered)
++                .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.3), value: isVisible)
++                .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.3), value: swapHovered)
++                .onChange(of: isVisible) { _, visible in
++                    if !visible { swapHovered = false }
++                }
+ 
+             case .standalone:
+                 swapButton
+@@ -104,19 +106,21 @@ struct SwapPreviewButton: View {
+         }
+         .opacity(fadePhase == .visible ? 1 : 0)
+         .allowsHitTesting(fadePhase == .visible)
++        .onReceive(NotificationCenter.default.publisher(for: .triggerSwap)) { _ in
++            angle -= 180
++        }
+         .onChange(of: showPreview) { _, newValue in
+             let targetMode: DisplayMode = newValue ? .preview : .standalone
+-            guard targetMode != displayMode else { return }
+ 
+             transitionTask?.cancel()
+             transitionTask = Task { @MainActor in
+-                withAnimation(.easeInOut(duration: 0.2)) {
++                withAnimation(.easeInOut(duration: 0.15)) {
+                     fadePhase = .fadingOut
+                 }
+-                try? await Task.sleep(for: .milliseconds(250))
++                try? await Task.sleep(for: .milliseconds(150))
+                 guard !Task.isCancelled else { return }
+                 displayMode = targetMode
+-                withAnimation(.easeInOut(duration: 0.25)) {
++                withAnimation(.easeInOut(duration: 0.15)) {
+                     fadePhase = .visible
+                 }
+             }
+diff --git a/Pika/Views/ContentView.swift b/Pika/Views/ContentView.swift
+index 76718c8b..703f3827 100644
+--- a/Pika/Views/ContentView.swift
++++ b/Pika/Views/ContentView.swift
+@@ -1,6 +1,7 @@
+ import Combine
+ import Defaults
+ import SwiftUI
++import UniformTypeIdentifiers
+ 
+ struct ContentView: View {
+     @EnvironmentObject var eyedroppers: Eyedroppers
+@@ -9,6 +10,9 @@ struct ContentView: View {
+     @Default(.colorFormat) var colorFormat
+     @Default(.historyDrawerVisible) var historyDrawerVisible
+     @Default(.showColorPreview) var showColorPreview
++    @Default(.showCompliance) var showCompliance
++    @Default(.palettes) var palettes
++    @Default(.activePaletteIndex) var activePaletteIndex
+     @Environment(\.colorScheme) var colorScheme: ColorScheme
+     let pasteboard = NSPasteboard.general
+ 
+@@ -59,14 +63,17 @@ struct ContentView: View {
+                 }
+ 
+             Divider()
+-            Footer(foreground: eyedroppers.foreground, background: eyedroppers.background)
++            if showCompliance {
++                Footer(foreground: eyedroppers.foreground, background: eyedroppers.background)
++                    .transition(.move(edge: .bottom).combined(with: .opacity))
++            }
+             if historyDrawerVisible {
+                 ColorHistoryDrawer(foreground: eyedroppers.foreground, background: eyedroppers.background)
+                     .transition(.move(edge: .bottom).combined(with: .opacity))
+             }
+         }
+         .onAppear {
+-            if Defaults[.colorHistory].isEmpty {
++            if Defaults[.palettes].first?.pairs.isEmpty ?? true {
+                 eyedroppers.recordHistory()
+             }
+         }
+@@ -85,6 +92,11 @@ struct ContentView: View {
+                 showColorPreview.toggle()
+             }
+         }
++        .onReceive(NotificationCenter.default.publisher(for: .toggleCompliance)) { _ in
++            withAnimation(.easeInOut(duration: 0.25)) {
++                showCompliance.toggle()
++            }
++        }
+         .onReceive(NotificationCenter.default.publisher(for: .historyPrevious)) { _ in
+             guard historyDrawerVisible else { return }
+             eyedroppers.navigatePrevious()
+@@ -96,7 +108,7 @@ struct ContentView: View {
+         .onReceive(NotificationCenter.default.publisher(for: .historyDelete)) { _ in
+             guard historyDrawerVisible else { return }
+             withAnimation(.easeInOut(duration: 0.2)) {
+-                eyedroppers.deleteCurrentHistoryEntry()
++                eyedroppers.deleteCurrentEntry()
+             }
+         }
+         .onReceive(NotificationCenter.default.publisher(for: .triggerCopyText)) { _ in
+@@ -115,6 +127,31 @@ struct ContentView: View {
+             )
+             pasteboard.setString(contents, forType: .string)
+         }
++        .onReceive(NotificationCenter.default.publisher(for: .exportPalette)) { notification in
++            let idx: Int
++            if let paletteIndex = notification.object as? Int {
++                idx = paletteIndex
++            } else if !historyDrawerVisible {
++                idx = 0
++            } else {
++                idx = activePaletteIndex
++            }
++            let palette: Palette? = (idx >= 0 && idx < palettes.count) ? palettes[idx] : palettes.first
++            guard let palette = palette else { return }
++
++            let json = Exporter.paletteToJSON(pairs: palette.pairs, name: palette.name)
++            let fileName = (palette.name ?? "color-history")
++                .lowercased()
++                .replacingOccurrences(of: " ", with: "-")
++
++            let savePanel = NSSavePanel()
++            savePanel.allowedContentTypes = [.json]
++            savePanel.nameFieldStringValue = "\(fileName).json"
++            savePanel.isExtensionHidden = false
++            if savePanel.runModal() == .OK, let url = savePanel.url {
++                try? json.write(to: url, atomically: true, encoding: .utf8)
++            }
++        }
+     }
+ }
+ 
+diff --git a/Pika/Views/HelpView.swift b/Pika/Views/HelpView.swift
+index 028bcbbb..b24bb1ba 100644
+--- a/Pika/Views/HelpView.swift
++++ b/Pika/Views/HelpView.swift
+@@ -214,6 +214,7 @@ private let shortcutGroups: [ShortcutGroup] = [
+     ("Actions", [
+         ShortcutEntry(title: PikaText.textColorSwapDetail, keys: ["X"], notificationName: .triggerSwap),
+         ShortcutEntry(title: PikaText.textHistoryToggle, keys: ["H"], notificationName: .toggleHistory),
++        ShortcutEntry(title: PikaText.textComplianceToggle, keys: ["C"], notificationName: .toggleCompliance),
+         ShortcutEntry(title: PikaText.textColorPreviewToggle, keys: ["P"], notificationName: .toggleColorPreview),
+         ShortcutEntry(title: PikaText.textColorUndo, keys: ["⌘", "Z"], notificationName: .triggerUndo),
+         ShortcutEntry(title: PikaText.textColorRedo, keys: ["⇧", "⌘", "Z"], notificationName: .triggerRedo),
+diff --git a/Pika/Views/NavigationMenu.swift b/Pika/Views/NavigationMenu.swift
+index 092c617f..3e653ec4 100644
+--- a/Pika/Views/NavigationMenu.swift
++++ b/Pika/Views/NavigationMenu.swift
+@@ -6,6 +6,7 @@ struct NavigationMenu: View {
+     @Default(.copyFormat) var copyFormat
+     @Default(.historyDrawerVisible) var historyDrawerVisible
+     @Default(.showColorPreview) var showColorPreview
++    @Default(.showCompliance) var showCompliance
+ 
+     func isFormatDisabled(_ format: ColorFormat) -> Bool {
+         if copyFormat == .swiftUI {
+@@ -38,6 +39,16 @@ struct NavigationMenu: View {
+             .foregroundColor(showColorPreview ? .accentColor : .primary)
+             .help(PikaText.textColorPreviewToggle)
+ 
++            Button(action: {
++                NSApp.sendAction(#selector(AppDelegate.triggerToggleCompliance), to: nil, from: nil)
++            }, label: {
++                IconImage(name: showCompliance ? "checkmark.shield" : "checkmark.shield")
++            })
++            .buttonStyle(PlainButtonStyle())
++            .padding(.horizontal, 6.0)
++            .foregroundColor(showCompliance ? .accentColor : .primary)
++            .help(PikaText.textComplianceToggle)
++
+             Button(action: {
+                 withAnimation(.easeInOut(duration: 0.25)) {
+                     historyDrawerVisible.toggle()
+@@ -86,6 +97,10 @@ struct NavigationMenu: View {
+                     NSApp.sendAction(#selector(AppDelegate.triggerToggleColorPreview), to: nil, from: nil)
+                 })
+                 .keyboardShortcut("p", modifiers: [])
++                Button(PikaText.textComplianceToggle, action: {
++                    NSApp.sendAction(#selector(AppDelegate.triggerToggleCompliance), to: nil, from: nil)
++                })
++                .keyboardShortcut("c", modifiers: [])
+             }
+             .opacity(0)
+             .frame(width: 0, height: 0)
+diff --git a/Pika/Views/NavigationMenuItems.swift b/Pika/Views/NavigationMenuItems.swift
+index 8bad746c..42b1a9f2 100644
+--- a/Pika/Views/NavigationMenuItems.swift
++++ b/Pika/Views/NavigationMenuItems.swift
+@@ -18,6 +18,19 @@ struct MenuGroup<Content>: View where Content: View {
+ }
+ 
+ struct NavigationMenuItems: View {
++    @Default(.palettes) var palettes
++    @Default(.activePaletteIndex) var activePaletteIndex
++    @Default(.historyDrawerVisible) var historyDrawerVisible
++
++    private var exportLabel: String {
++        guard historyDrawerVisible else { return PikaText.textHistoryExport }
++        let idx = activePaletteIndex
++        if idx > 0, idx < palettes.count, palettes[idx].name != nil {
++            return PikaText.textPaletteExport
++        }
++        return PikaText.textHistoryExport
++    }
++
+     var body: some View {
+         Group {
+             Button("\(PikaText.textPickForeground)...", action: {
+@@ -73,6 +86,10 @@ struct NavigationMenuItems: View {
+             NSApp.sendAction(#selector(AppDelegate.triggerToggleHistory), to: nil, from: nil)
+         })
+ 
++        Button(PikaText.textComplianceToggle, action: {
++            NSApp.sendAction(#selector(AppDelegate.triggerToggleCompliance), to: nil, from: nil)
++        })
++
+         Button(PikaText.textColorPreviewToggle, action: {
+             NSApp.sendAction(#selector(AppDelegate.triggerToggleColorPreview), to: nil, from: nil)
+         })
+@@ -81,6 +98,18 @@ struct NavigationMenuItems: View {
+             Divider()
+         }
+ 
++        Button(PikaText.textPaletteNew, action: {
++            NotificationCenter.default.post(name: .savePalette, object: nil)
++        })
++
++        Button(exportLabel, action: {
++            NotificationCenter.default.post(name: .exportPalette, object: nil)
++        })
++
++        VStack {
++            Divider()
++        }
++
+         Button(PikaText.textColorSwapDetail, action: {
+             NSApp.sendAction(#selector(AppDelegate.triggerSwap), to: nil, from: nil)
+         })

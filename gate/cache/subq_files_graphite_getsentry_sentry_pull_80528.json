@@ -1,0 +1,1 @@
+{"The modified `config` variable is never used - line 168 returns the original unmodified `monitor_environment.monitor.config` instead of the modified `config` variable, causing schedule_type to always appear in raw format rather than human-readable display format": 0.6762368679046631}

@@ -1,0 +1,1 @@
+{"get_monitor_environment_context() creates a modified copy of monitor.config (including replacing schedule_type with its display string) but returns the original unmodified config instead, causing schedule_type to be emitted as an integer (e.g. 1/2) in issue occurrence event contexts rather than 'crontab'/'interval'": 0.9461687207221985}

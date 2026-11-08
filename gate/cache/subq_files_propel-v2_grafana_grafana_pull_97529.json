@@ -1,0 +1,1 @@
+{"Removing the cacheMu lock around BuildIndex allows concurrent calls for the same NamespacedResource to race, creating duplicate indexes where the losing index instance is leaked (open files/memory) and duplicate work is performed under load": 0.8843105435371399}

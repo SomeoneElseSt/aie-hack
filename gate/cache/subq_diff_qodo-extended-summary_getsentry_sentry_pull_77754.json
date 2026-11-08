@@ -1,0 +1,1 @@
+{"AssignmentSource.queued is set to timezone.now() at class definition time, so all AssignmentSource() instances created without an explicit queued value will share the same timestamp. This breaks per-event context metadata and can mislead any logic/debugging that relies on queued representing when a specific assignment was queued.": 0.6958988308906555}

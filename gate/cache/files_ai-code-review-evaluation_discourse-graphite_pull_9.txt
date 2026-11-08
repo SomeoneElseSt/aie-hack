@@ -1,0 +1,773 @@
+===== FILE app/controllers/application_controller.rb (after PR) =====
+require 'current_user'
+require_dependency 'canonical_url'
+require_dependency 'discourse'
+require_dependency 'custom_renderer'
+require_dependency 'archetype'
+require_dependency 'rate_limiter'
+require_dependency 'crawler_detection'
+require_dependency 'json_error'
+require_dependency 'letter_avatar'
+require_dependency 'distributed_cache'
+require_dependency 'global_path'
+
+class ApplicationController < ActionController::Base
+  include CurrentUser
+  include CanonicalURL::ControllerExtensions
+  include JsonError
+  include GlobalPath
+
+  serialization_scope :guardian
+
+  protect_from_forgery
+
+  # Default Rails 3.2 lets the request through with a blank session
+  #  we are being more pedantic here and nulling session / current_user
+  #  and then raising a CSRF exception
+  def handle_unverified_request
+    # NOTE: API key is secret, having it invalidates the need for a CSRF token
+    unless is_api?
+      super
+      clear_current_user
+      render text: "['BAD CSRF']", status: 403
+    end
+  end
+
+  before_filter :set_current_user_for_logs
+  before_filter :set_locale
+  before_filter :set_mobile_view
+  before_filter :inject_preview_style
+  before_filter :disable_customization
+  before_filter :block_if_readonly_mode
+  before_filter :authorize_mini_profiler
+  before_filter :preload_json
+  before_filter :redirect_to_login_if_required
+  before_filter :check_xhr
+  after_filter  :add_readonly_header
+
+  layout :set_layout
+
+  def has_escaped_fragment?
+    SiteSetting.enable_escaped_fragments? && params.key?("_escaped_fragment_")
+  end
+
+  def use_crawler_layout?
+    @use_crawler_layout ||= (has_escaped_fragment? || CrawlerDetection.crawler?(request.user_agent))
+  end
+
+  def add_readonly_header
+    response.headers['Discourse-Readonly'] = 'true' if Discourse.readonly_mode?
+  end
+
+  def slow_platform?
+    request.user_agent =~ /Android/
+  end
+
+  def set_layout
+    use_crawler_layout? ? 'crawler' : 'application'
+  end
+
+  # Some exceptions
+  class RenderEmpty < StandardError; end
+
+  # Render nothing
+  rescue_from RenderEmpty do
+    render 'default/empty'
+  end
+
+  # If they hit the rate limiter
+  rescue_from RateLimiter::LimitExceeded do |e|
+
+    time_left = ""
+    if e.available_in < 1.minute.to_i
+      time_left = I18n.t("rate_limiter.seconds", count: e.available_in)
+    elsif e.available_in < 1.hour.to_i
+      time_left = I18n.t("rate_limiter.minutes", count: (e.available_in / 1.minute.to_i))
+    else
+      time_left = I18n.t("rate_limiter.hours", count: (e.available_in / 1.hour.to_i))
+    end
+
+    render_json_error I18n.t("rate_limiter.too_many_requests", time_left: time_left), type: :rate_limit, status: 429
+  end
+
+  rescue_from PG::ReadOnlySqlTransaction do |e|
+    Discourse.received_readonly!
+    raise Discourse::ReadOnly
+  end
+
+  rescue_from Discourse::NotLoggedIn do |e|
+    raise e if Rails.env.test?
+
+    if (request.format && request.format.json?) || request.xhr? || !request.get?
+      rescue_discourse_actions(:not_logged_in, 403, true)
+    else
+      redirect_to path("/")
+    end
+
+  end
+
+  rescue_from Discourse::NotFound do
+    rescue_discourse_actions(:not_found, 404)
+  end
+
+  rescue_from Discourse::InvalidAccess do
+    rescue_discourse_actions(:invalid_access, 403, true)
+  end
+
+  rescue_from Discourse::ReadOnly do
+    render_json_error I18n.t('read_only_mode_enabled'), type: :read_only, status: 405
+  end
+
+  def rescue_discourse_actions(type, status_code, include_ember=false)
+
+    if (request.format && request.format.json?) || (request.xhr?)
+      # HACK: do not use render_json_error for topics#show
+      if request.params[:controller] == 'topics' && request.params[:action] == 'show'
+        return render status: status_code, layout: false, text: (status_code == 404) ? build_not_found_page(status_code) : I18n.t(type)
+      end
+
+      render_json_error I18n.t(type), type: type, status: status_code
+    else
+      render text: build_not_found_page(status_code, include_ember ? 'application' : 'no_ember')
+    end
+  end
+
+  class PluginDisabled < StandardError; end
+
+  # If a controller requires a plugin, it will raise an exception if that plugin is
+  # disabled. This allows plugins to be disabled programatically.
+  def self.requires_plugin(plugin_name)
+    before_filter do
+      raise PluginDisabled.new if Discourse.disabled_plugin_names.include?(plugin_name)
+    end
+  end
+
+  def set_current_user_for_logs
+    if current_user
+      Logster.add_to_env(request.env,"username",current_user.username)
+      response.headers["X-Discourse-Username"] = current_user.username
+    end
+    response.headers["X-Discourse-Route"] = "#{controller_name}/#{action_name}"
+  end
+
+  def set_locale
+    I18n.locale = if current_user
+                    current_user.effective_locale
+                  else
+                    SiteSetting.default_locale
+                  end
+
+    I18n.fallbacks.ensure_loaded!
+  end
+
+  def store_preloaded(key, json)
+    @preloaded ||= {}
+    # I dislike that there is a gsub as opposed to a gsub!
+    #  but we can not be mucking with user input, I wonder if there is a way
+    #  to inject this safty deeper in the library or even in AM serializer
+    @preloaded[key] = json.gsub("</", "<\\/")
+  end
+
+  # If we are rendering HTML, preload the session data
+  def preload_json
+    # We don't preload JSON on xhr or JSON request
+    return if request.xhr? || request.format.json?
+
+    # if we are posting in makes no sense to preload
+    return if request.method != "GET"
+
+    # TODO should not be invoked on redirection so this should be further deferred
+    preload_anonymous_data
+
+    if current_user
+      preload_current_user_data
+      current_user.sync_notification_channel_position
+    end
+  end
+
+  def set_mobile_view
+    session[:mobile_view] = params[:mobile_view] if params.has_key?(:mobile_view)
+  end
+
+  def inject_preview_style
+    style = request['preview-style']
+
+    if style.nil?
+      session[:preview_style] = cookies[:preview_style]
+    else
+      cookies.delete(:preview_style)
+
+      if style.blank? || style == 'default'
+        session[:preview_style] = nil
+      else
+        session[:preview_style] = style
+        if request['sticky']
+          cookies[:preview_style] = style
+        end
+      end
+    end
+
+  end
+
+  def disable_customization
+    session[:disable_customization] = params[:customization] == "0" if params.has_key?(:customization)
+  end
+
+  def guardian
+    @guardian ||= Guardian.new(current_user)
+  end
+
+  def current_homepage
+    current_user ? SiteSetting.homepage : SiteSetting.anonymous_homepage
+  end
+
+  def serialize_data(obj, serializer, opts=nil)
+    # If it's an array, apply the serializer as an each_serializer to the elements
+    serializer_opts = {scope: guardian}.merge!(opts || {})
+    if obj.respond_to?(:to_ary)
+      serializer_opts[:each_serializer] = serializer
+      ActiveModel::ArraySerializer.new(obj.to_ary, serializer_opts).as_json
+    else
+      serializer.new(obj, serializer_opts).as_json
+    end
+  end
+
+  # This is odd, but it seems that in Rails `render json: obj` is about
+  # 20% slower than calling MultiJSON.dump ourselves. I'm not sure why
+  # Rails doesn't call MultiJson.dump when you pass it json: obj but
+  # it seems we don't need whatever Rails is doing.
+  def render_serialized(obj, serializer, opts=nil)
+    render_json_dump(serialize_data(obj, serializer, opts), opts)
+  end
+
+  def render_json_dump(obj, opts=nil)
+    opts ||= {}
+    if opts[:rest_serializer]
+      obj['__rest_serializer'] = "1"
+      opts.each do |k, v|
+        obj[k] = v if k.to_s.start_with?("refresh_")
+      end
+    end
+
+
+    render json: MultiJson.dump(obj), status: opts[:status] || 200
+  end
+
+  def can_cache_content?
+    !current_user.present?
+  end
+
+  # Our custom cache method
+  def discourse_expires_in(time_length)
+    return unless can_cache_content?
+    Middleware::AnonymousCache.anon_cache(request.env, time_length)
+  end
+
+  def fetch_user_from_params(opts=nil)
+    opts ||= {}
+    user = if params[:username]
+      username_lower = params[:username].downcase
+      username_lower.gsub!(/\.json$/, '')
+      find_opts = {username_lower: username_lower}
+      find_opts[:active] = true unless opts[:include_inactive]
+      User.find_by(find_opts)
+    elsif params[:external_id]
+      external_id = params[:external_id].gsub(/\.json$/, '')
+      SingleSignOnRecord.find_by(external_id: external_id).try(:user)
+    end
+    raise Discourse::NotFound if user.blank?
+
+    guardian.ensure_can_see!(user)
+    user
+  end
+
+  def post_ids_including_replies
+    post_ids = params[:post_ids].map {|p| p.to_i}
+    if params[:reply_post_ids]
+      post_ids << PostReply.where(post_id: params[:reply_post_ids].map {|p| p.to_i}).pluck(:reply_id)
+      post_ids.flatten!
+      post_ids.uniq!
+    end
+    post_ids
+  end
+
+  def no_cookies
+    # do your best to ensure response has no cookies
+    # longer term we may want to push this into middleware
+    headers.delete 'Set-Cookie'
+    request.session_options[:skip] = true
+  end
+
+  private
+
+    def preload_anonymous_data
+      store_preloaded("site", Site.json_for(guardian))
+      store_preloaded("siteSettings", SiteSetting.client_settings_json)
+      store_preloaded("customHTML", custom_html_json)
+      store_preloaded("banner", banner_json)
+      store_preloaded("customEmoji", custom_emoji)
+    end
+
+    def preload_current_user_data
+      store_preloaded("currentUser", MultiJson.dump(CurrentUserSerializer.new(current_user, scope: guardian, root: false)))
+      serializer = ActiveModel::ArraySerializer.new(TopicTrackingState.report([current_user.id]), each_serializer: TopicTrackingStateSerializer)
+      store_preloaded("topicTrackingStates", MultiJson.dump(serializer))
+    end
+
+    def custom_html_json
+      target = view_context.mobile_view? ? :mobile : :desktop
+      data = {
+        top: SiteCustomization.custom_top(session[:preview_style], target),
+        footer: SiteCustomization.custom_footer(session[:preview_style], target)
+      }
+
+      if DiscoursePluginRegistry.custom_html
+        data.merge! DiscoursePluginRegistry.custom_html
+      end
+
+      MultiJson.dump(data)
+    end
+
+    def self.banner_json_cache
+      @banner_json_cache ||= DistributedCache.new("banner_json")
+    end
+
+    def banner_json
+      json = ApplicationController.banner_json_cache["json"]
+
+      unless json
+        topic = Topic.where(archetype: Archetype.banner).limit(1).first
+        banner = topic.present? ? topic.banner : {}
+        ApplicationController.banner_json_cache["json"] = json = MultiJson.dump(banner)
+      end
+
+      json
+    end
+
+    def custom_emoji
+      serializer = ActiveModel::ArraySerializer.new(Emoji.custom, each_serializer: EmojiSerializer)
+      MultiJson.dump(serializer)
+    end
+
+    # Render action for a JSON error.
+    #
+    # obj      - a translated string, an ActiveRecord model, or an array of translated strings
+    # opts:
+    #   type   - a machine-readable description of the error
+    #   status - HTTP status code to return
+    def render_json_error(obj, opts={})
+      opts = { status: opts } if opts.is_a?(Fixnum)
+      render json: MultiJson.dump(create_errors_json(obj, opts[:type])), status: opts[:status] || 422
+    end
+
+    def success_json
+      { success: 'OK' }
+    end
+
+    def failed_json
+      { failed: 'FAILED' }
+    end
+
+    def json_result(obj, opts={})
+      if yield(obj)
+        json = success_json
+
+        # If we were given a serializer, add the class to the json that comes back
+        if opts[:serializer].present?
+          json[obj.class.name.underscore] = opts[:serializer].new(obj, scope: guardian).serializable_hash
+        end
+
+        render json: MultiJson.dump(json)
+      else
+        error_obj = nil
+        if opts[:additional_errors]
+          error_target = opts[:additional_errors].find do |o|
+            target = obj.send(o)
+            target && target.errors.present?
+          end
+          error_obj = obj.send(error_target) if error_target
+        end
+        render_json_error(error_obj || obj)
+      end
+    end
+
+    def mini_profiler_enabled?
+      defined?(Rack::MiniProfiler) && guardian.is_developer?
+    end
+
+    def authorize_mini_profiler
+      return unless mini_profiler_enabled?
+      Rack::MiniProfiler.authorize_request
+    end
+
+    def check_xhr
+      # bypass xhr check on PUT / POST / DELETE provided api key is there, otherwise calling api is annoying
+      return if !request.get? && api_key_valid?
+      raise RenderEmpty.new unless ((request.format && request.format.json?) || request.xhr?)
+    end
+
+    def ensure_logged_in
+      raise Discourse::NotLoggedIn.new unless current_user.present?
+    end
+
+    def ensure_staff
+      raise Discourse::InvalidAccess.new unless current_user && current_user.staff?
+    end
+
+    def redirect_to_login_if_required
+      return if current_user || (request.format.json? && api_key_valid?)
+
+      # save original URL in a cookie
+      cookies[:destination_url] = request.original_url unless request.original_url =~ /uploads/
+
+      # redirect user to the SSO page if we need to log in AND SSO is enabled
+      if SiteSetting.login_required?
+        if SiteSetting.enable_sso?
+          redirect_to path('/session/sso')
+        else
+          redirect_to :login
+        end
+      end
+    end
+
+    def block_if_readonly_mode
+      return if request.fullpath.start_with?(path "/admin/backups")
+      raise Discourse::ReadOnly.new if !(request.get? || request.head?) && Discourse.readonly_mode?
+    end
+
+    def build_not_found_page(status=404, layout=false)
+      category_topic_ids = Category.pluck(:topic_id).compact
+      @container_class = "container not-found-container"
+      @top_viewed = Topic.where.not(id: category_topic_ids).top_viewed(10)
+      @recent = Topic.where.not(id: category_topic_ids).recent(10)
+      @slug =  params[:slug].class == String ? params[:slug] : ''
+      @slug =  (params[:id].class == String ? params[:id] : '') if @slug.blank?
+      @slug.gsub!('-',' ')
+      render_to_string status: status, layout: layout, formats: [:html], template: '/exceptions/not_found'
+    end
+
+  protected
+
+    def render_post_json(post, add_raw=true)
+      post_serializer = PostSerializer.new(post, scope: guardian, root: false)
+      post_serializer.add_raw = add_raw
+
+      counts = PostAction.counts_for([post], current_user)
+      if counts && counts = counts[post.id]
+        post_serializer.post_actions = counts
+      end
+      render_json_dump(post_serializer)
+    end
+
+    def api_key_valid?
+      request["api_key"] && ApiKey.where(key: request["api_key"]).exists?
+    end
+
+    # returns an array of integers given a param key
+    # returns nil if key is not found
+    def param_to_integer_list(key, delimiter = ',')
+      if params[key]
+        params[key].split(delimiter).map(&:to_i)
+      end
+    end
+
+end
+
+
+===== FILE config/cloud/cloud66/files/production.rb (after PR) =====
+Discourse::Application.configure do
+  # Settings specified here will take precedence over those in config/application.rb
+
+  # Code is not reloaded between requests
+  config.cache_classes = true
+
+  # Full error reports are disabled and caching is turned on
+  config.consider_all_requests_local       = false
+  config.action_controller.perform_caching = true
+
+  # Disable Rails's static asset server (Apache or nginx will already do this)
+  config.serve_static_assets = false
+
+  # Compress JavaScripts and CSS
+  config.assets.compress = true
+
+  # stuff should be pre-compiled
+  config.assets.compile = false
+
+  # Generate digests for assets URLs
+  config.assets.digest = true
+
+  # Specifies the header that your server uses for sending files
+  config.action_dispatch.x_sendfile_header = 'X-Accel-Redirect' # for nginx
+
+  # you may use other configuration here for mail eg: sendgrid
+
+  config.action_mailer.delivery_method = :smtp
+  config.action_mailer.smtp_settings = {
+     :address              => ENV['SMTP_ADDRESS'],
+     :port                 => ENV['SMTP_PORT'],
+     :domain               => ENV['SMTP_DOMAIN'],
+     :user_name            => ENV['SMTP_USERNAME'],
+     :password             => ENV['SMTP_PASSWORD'],
+     :authentication       => 'plain',
+     :enable_starttls_auto => true  }
+
+  #config.action_mailer.delivery_method = :sendmail
+  #config.action_mailer.sendmail_settings = {arguments: '-i'}
+
+  # Send deprecation notices to registered listeners
+  config.active_support.deprecation = :notify
+
+  # this will cause all handlebars templates to be pre-compiles, making your page faster
+  config.handlebars.precompile = true
+
+  # this setting enables rack_cache so it caches various requests in redis
+  config.enable_rack_cache = true
+
+  # allows developers to use mini profiler
+  config.load_mini_profiler = true
+
+  # allows Cross-origin resource sharing (CORS) for API access in JavaScript (default to false for security).
+  # See the initializer and https://github.com/cyu/rack-cors for configuration documentation.
+  #
+  # config.enable_rack_cors = false
+  # config.rack_cors_origins = ['*']
+  # config.rack_cors_resource = ['*', { :headers => :any, :methods => [:get, :post, :options] }]
+
+  # Discourse strongly recommend you use a CDN.
+  # For origin pull cdns all you need to do is register an account and configure
+  # config.action_controller.asset_host = "http://YOUR_CDN_HERE"
+
+end
+
+
+===== FILE config/environments/production.rb (after PR) =====
+Discourse::Application.configure do
+  # Settings specified here will take precedence over those in config/application.rb
+
+  # Code is not reloaded between requests
+  config.cache_classes = true
+  config.eager_load = true
+
+  # Full error reports are disabled and caching is turned on
+  config.consider_all_requests_local       = false
+  config.action_controller.perform_caching = true
+
+  # Disable Rails's static asset server (Apache or nginx will already do this)
+  config.serve_static_assets = GlobalSetting.serve_static_assets
+
+  config.assets.js_compressor = :uglifier
+
+  config.assets.css_compressor = :sass
+
+  # stuff should be pre-compiled
+  config.assets.compile = false
+
+  # Generate digests for assets URLs
+  config.assets.digest = true
+
+  config.log_level = :info
+
+  if GlobalSetting.smtp_address
+    settings = {
+      address:              GlobalSetting.smtp_address,
+      port:                 GlobalSetting.smtp_port,
+      domain:               GlobalSetting.smtp_domain,
+      user_name:            GlobalSetting.smtp_user_name,
+      password:             GlobalSetting.smtp_password,
+      authentication:       GlobalSetting.smtp_authentication,
+      enable_starttls_auto: GlobalSetting.smtp_enable_start_tls
+    }
+
+    settings[:openssl_verify_mode] = GlobalSetting.smtp_openssl_verify_mode if GlobalSetting.smtp_openssl_verify_mode
+
+    config.action_mailer.smtp_settings = settings.reject{|_, y| y.nil?}
+  else
+    config.action_mailer.delivery_method = :sendmail
+    config.action_mailer.sendmail_settings = {arguments: '-i'}
+  end
+
+  # Send deprecation notices to registered listeners
+  config.active_support.deprecation = :notify
+
+  # this will cause all handlebars templates to be pre-compiles, making your page faster
+  config.handlebars.precompile = true
+
+  # allows developers to use mini profiler
+  config.load_mini_profiler = GlobalSetting.load_mini_profiler
+
+  # Discourse strongly recommend you use a CDN.
+  # For origin pull cdns all you need to do is register an account and configure
+  config.action_controller.asset_host = GlobalSetting.cdn_url
+
+  # a comma delimited list of emails your devs have
+  # developers have god like rights and may impersonate anyone in the system
+  # normal admins may only impersonate other moderators (not admins)
+  if emails = GlobalSetting.developer_emails
+    config.developer_emails = emails.split(",").map(&:strip)
+  end
+
+end
+
+
+===== FILE config/environments/profile.rb (after PR) =====
+Discourse::Application.configure do
+  # Settings specified here will take precedence over those in config/application.rb
+
+  config.eager_load = true
+
+  # Code is not reloaded between requests
+  config.cache_classes = true
+
+  config.log_level = :info
+
+  # Full error reports are disabled and caching is turned on
+  config.consider_all_requests_local       = false
+  config.action_controller.perform_caching = true
+
+  # in profile mode we serve static assets
+  config.serve_static_assets = true
+
+  # Compress JavaScripts and CSS
+  config.assets.compress = true
+
+  # stuff should be pre-compiled, allow compilation to make life easier
+  config.assets.compile = true
+
+  # Generate digests for assets URLs
+  config.assets.digest = true
+
+  # Specifies the header that your server uses for sending files
+  config.action_dispatch.x_sendfile_header = 'X-Accel-Redirect' # for nginx
+
+  # we recommend you use mailcatcher https://github.com/sj26/mailcatcher
+  config.action_mailer.smtp_settings = { address: "localhost", port: 1025 }
+
+  # Send deprecation notices to registered listeners
+  config.active_support.deprecation = :notify
+
+  # precompile handlebar assets
+  config.handlebars.precompile = true
+
+  # allows users to use mini profiler
+  config.load_mini_profiler = false
+
+  # we don't need full logster support, but need to keep it working
+  config.after_initialize do
+    Logster.logger = Rails.logger
+  end
+
+  # for profiling with perftools
+  # config.middleware.use ::Rack::PerftoolsProfiler, default_printer: 'gif'
+end
+
+
+===== FILE config/initializers/i18n.rb (after PR) =====
+# order: after 02-freedom_patches.rb
+
+# Include pluralization module
+require 'i18n/backend/pluralization'
+I18n::Backend::Simple.send(:include, I18n::Backend::Pluralization)
+
+# Include fallbacks module
+require 'i18n/backend/fallbacks'
+I18n.backend.class.send(:include, I18n::Backend::Fallbacks)
+
+# Configure custom fallback order
+class FallbackLocaleList < Hash
+  def [](locale)
+    # user locale, site locale, english
+    # TODO - this can be extended to be per-language for a better user experience
+    # (e.g. fallback zh_TW to zh_CN / vice versa)
+    [locale, SiteSetting.default_locale.to_sym, :en].uniq.compact
+  end
+
+  def ensure_loaded!
+    self[I18n.locale].each { |l| I18n.ensure_loaded! l }
+  end
+end
+I18n.fallbacks = FallbackLocaleList.new
+
+
+===== FILE lib/freedom_patches/translate_accelerator.rb (after PR) =====
+# This patch performs 2 functions
+#
+# 1. It caches all translations which drastically improves
+#    translation performance in an LRU cache
+#
+# 2. It patches I18n so it only loads the translations it needs
+#    on demand
+#
+# This patch depends on the convention that locale yml files must be named [locale_name].yml
+
+module I18n
+  module Backend
+
+    class Simple
+      def available_locales
+        # in case you are wondering this is:
+        # Dir.glob( File.join(Rails.root, 'config', 'locales', 'client.*.yml') )
+        #    .map {|x| x.split('.')[-2]}.sort
+        LocaleSiteSetting.supported_locales.map(&:to_sym)
+      end
+    end
+
+    module Base
+      # force explicit loading
+      def load_translations(*filenames)
+        unless filenames.empty?
+          filenames.flatten.each { |filename| load_file(filename) }
+        end
+      end
+
+    end
+  end
+  # this accelerates translation a tiny bit (halves the time it takes)
+  class << self
+    alias_method :translate_no_cache, :translate
+    alias_method :reload_no_cache!, :reload!
+    LRU_CACHE_SIZE = 300
+
+    def reload!
+      @loaded_locales = []
+      @cache = nil
+      reload_no_cache!
+    end
+
+    LOAD_MUTEX = Mutex.new
+    def load_locale(locale)
+      LOAD_MUTEX.synchronize do
+        return if @loaded_locales.include?(locale)
+
+        if @loaded_locales.empty?
+          # load all rb files
+          I18n.backend.load_translations(I18n.load_path.grep(/\.rb$/))
+        end
+
+        # load it
+        I18n.backend.load_translations(I18n.load_path.grep Regexp.new("\\.#{locale}\\.yml$"))
+
+        @loaded_locales << locale
+      end
+    end
+
+    def ensure_loaded!(locale)
+      @loaded_locales ||= []
+      load_locale locale unless @loaded_locales.include?(locale)
+    end
+
+    def translate(key, *args)
+      load_locale(config.locale) unless @loaded_locales.include?(config.locale)
+      return translate_no_cache(key, *args) if args.length > 0
+
+      @cache ||= LruRedux::ThreadSafeCache.new(LRU_CACHE_SIZE)
+      k = "#{key}#{config.locale}#{config.backend.object_id}"
+
+      @cache.getset(k) do
+        translate_no_cache(key).freeze
+      end
+    end
+
+    alias_method :t, :translate
+  end
+end

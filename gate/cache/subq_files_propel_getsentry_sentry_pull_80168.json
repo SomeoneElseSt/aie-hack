@@ -1,0 +1,1 @@
+{"Switching MetricAlertDetectorHandler to inherit from StatefulDetectorHandler makes it abstract, but the class doesn't implement required abstract methods (counter_names, get_dedupe_value, get_group_key_values, build_occurrence_and_event_data), causing TypeError when attempting to instantiate via MetricAlertFire.detector_handler": 0.9410795569419861}

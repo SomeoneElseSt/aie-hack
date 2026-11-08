@@ -1,0 +1,1 @@
+{"The blacklist email check is case-sensitive while the blacklist is lowercased, allowing blacklisted emails to bypass the filter using different casing (e.g., 'Test@Example.com' bypasses blacklisted 'test@example.com')": 0.9531160593032837}

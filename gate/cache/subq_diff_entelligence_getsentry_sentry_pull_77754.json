@@ -1,0 +1,1 @@
+{"Using `queued: datetime = timezone.now()` evaluates the timestamp once at import time, so every instance shares the same queued value. This breaks per-instance timing and can skew assignment ordering. Use `field(default_factory=timezone.now)` instead.": 0.8898540735244751}

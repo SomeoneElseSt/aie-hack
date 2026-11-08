@@ -1,0 +1,1 @@
+{"When CreateOrUpdateDevice returns ErrDeviceLimitReached, the local cache entry set at line 88 remains even though the device was not stored. On the next request with the same device ID (within the 29-minute TTL), the cache hit at line 83 returns nil without checking the database, allowing the request to succeed and bypassing the device limit enforcement.": 0.9123257398605347}

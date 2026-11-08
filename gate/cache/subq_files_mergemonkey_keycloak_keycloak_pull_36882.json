@@ -1,0 +1,1 @@
+{"RECREATE_UPGRADE_EXIT_CODE changed from 4 to 3 which is a breaking change - external scripts, CI pipelines, or tooling that checks for exit code 4 to detect a recreate-upgrade scenario will now silently get the wrong behavior since exit code 4 now means feature-disabled instead": 0.7409658432006836}

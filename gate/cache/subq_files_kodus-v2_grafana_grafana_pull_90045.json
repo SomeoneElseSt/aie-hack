@@ -1,0 +1,1 @@
+{"In pkg/apiserver/rest/dualwriter_mode3.go line 106, the Delete success path passes the object's unique name as the kind metric label to recordStorageDuration instead of options.Kind, creating an unbounded number of Prometheus time-series (one per unique object name), leading to cardinality explosion and potential memory exhaustion in the metrics backend": 0.9918870329856873}

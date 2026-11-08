@@ -1,0 +1,1 @@
+{"Removing cacheMu.Lock() from the entry point of BuildIndex and narrowing it only to the final cache write introduces a race condition where concurrent goroutines can both observe a nil cache entry and simultaneously enter the build path for the same key": 0.8760180473327637}

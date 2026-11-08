@@ -1,0 +1,1 @@
+{"Invalid Zod schema syntax - the syntax `[z.string().toString()]: z.number()` attempts to use dynamic computed keys which Zod doesn't support, causing a runtime error": 0.6212788820266724}

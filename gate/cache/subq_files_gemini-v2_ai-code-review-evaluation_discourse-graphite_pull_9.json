@@ -1,0 +1,1 @@
+{"Locale should be normalized to a symbol in ensure_loaded! before checking the @loaded_locales cache to ensure consistency and prevent redundant expensive translation loading when the same locale is requested in different formats": 0.24797871708869934}

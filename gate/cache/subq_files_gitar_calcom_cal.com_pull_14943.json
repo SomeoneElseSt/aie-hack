@@ -1,0 +1,1 @@
+{"Delete query removes non-SMS reminders with retryCount > 1 because the second OR branch (retryCount: { gt: 1 }) has no method filter, meaning any WorkflowReminder with retryCount > 1 will be deleted including email and WhatsApp reminders, even though this is the SMS-specific cron job": 0.9799832701683044}

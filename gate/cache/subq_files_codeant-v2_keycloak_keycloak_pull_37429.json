@@ -1,0 +1,1 @@
+{"The regex character class `[a-zA-Z-_]` incorrectly defines a range from `'-'` to `'_'` which matches unintended characters like `/` and `.`, causing the regex to consume directory segments and produce an invalid path when deriving the English properties file path, leading to FileNotFoundException at runtime": 0.6973927617073059}

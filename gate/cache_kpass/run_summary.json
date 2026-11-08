@@ -1,0 +1,351 @@
+{
+  "counts": {
+    "successful_fresh_responses": 284,
+    "observed_error_responses": 60,
+    "confirmed_completed_HTTP_attempts": 344
+  },
+  "errors": [
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/80329 pass4",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/90045 pass4",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/90939 pass4",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/90045 pass4",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/80329 pass4",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/90939 pass4",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/80329 pass4",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/90045 pass4",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/90939 pass4",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/90045 pass4",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/80329 pass4",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "coderabbit https://github.com/grafana/grafana/pull/90939 pass4",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2",
+      "attempt": 6,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2",
+      "attempt": 6,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2",
+      "attempt": 6,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/77754 pass3",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80168 pass3",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80528 pass3",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/77754 pass3",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80168 pass3",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80528 pass3",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/77754 pass3",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80528 pass3",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80168 pass3",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/77754 pass3",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80168 pass3",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80528 pass3",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/77754 pass3",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80528 pass3",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/80168 pass3",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/95633 pass4",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/107534 pass4",
+      "attempt": 1,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/95633 pass4",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/107534 pass4",
+      "attempt": 2,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/95633 pass4",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/107534 pass4",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4",
+      "attempt": 3,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/95633 pass4",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/107534 pass4",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4",
+      "attempt": 4,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/107534 pass4",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/getsentry/sentry/pull/95633 pass4",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    },
+    {
+      "tag": "copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4",
+      "attempt": 5,
+      "error": "HTTP Error 429: Too Many Requests"
+    }
+  ],
+  "checks": [
+    "- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1: identical=True; changed probabilities=0/6; max absolute difference=0.",
+    "- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10: identical=True; changed probabilities=0/11; max absolute difference=0.",
+    "- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/2: identical=True; changed probabilities=0/7; max absolute difference=0."
+  ],
+  "repeat": false,
+  "summaries": {
+    "coderabbit": {
+      "variant1": 0.10605043185238502,
+      "variant2": 0.09906280346769783,
+      "variant3": 0.10994364406684828,
+      "variant4": 0.10462502888393779,
+      "1_mean": 0.10605043185238502,
+      "1_min": 0.10605043185238502,
+      "2_mean": 0.12254039228879812,
+      "2_min": 0.11286278492827698,
+      "4_mean": 0.12881358185152783,
+      "4_min": 0.09624104631473043
+    },
+    "copilot-v2": {
+      "variant1": 0.06527740289083109,
+      "variant3": 0.07439243924392436,
+      "1_mean": 0.06527740289083109,
+      "1_min": 0.06527740289083109
+    },
+    "gemini-v2": {
+      "variant1": 0.05410226524581635,
+      "1_mean": 0.05410226524581635,
+      "1_min": 0.05410226524581635
+    },
+    "sourcery": {
+      "variant1": 0.05560711958464057,
+      "1_mean": 0.05560711958464057,
+      "1_min": 0.05560711958464057
+    }
+  },
+  "completed": [
+    "coderabbit",
+    "copilot-v2",
+    "gemini-v2",
+    "sourcery"
+  ]
+}

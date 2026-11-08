@@ -1,0 +1,1 @@
+{"Passing `groupResource.getId()` to `hasPermission` causes `resourceStore.findByName` to always return `null` because it looks up by ID instead of name, falling back to the `all-groups` resource": 0.7883278727531433}

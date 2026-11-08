@@ -1,0 +1,1 @@
+{"The `dark-light-choose` call for `.topic-meta-data h5 a` incorrectly uses `lightness: 70%` for the light theme instead of the original `30%`, making links in embedded posts significantly lighter and less visible in light themes. The values should be swapped: 30% for light themes and 70% for dark themes.": 0.9585837721824646}

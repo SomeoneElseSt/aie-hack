@@ -1,0 +1,1 @@
+{"Overriding the hash indexer in FallbackLocaleList to always compute a new array and never consult the underlying Hash storage causes any fallbacks configured via the standard I18n.fallbacks[locale] = [...] or mapping APIs to be silently ignored, breaking the expected contract of I18n.fallbacks and making per-locale configuration ineffective": 0.8618351817131042}

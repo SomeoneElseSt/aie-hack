@@ -1,0 +1,2910 @@
+===== FILE pkg/server/module_server_test.go (after PR) =====
+package server
+
+import (
+	"context"
+	"net/http"
+	"os"
+	"testing"
+	"time"
+
+	"cuelang.org/go/pkg/regexp"
+	"github.com/grafana/grafana/pkg/api"
+	"github.com/grafana/grafana/pkg/infra/db"
+	"github.com/grafana/grafana/pkg/modules"
+	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/tests/testsuite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestMain(m *testing.M) {
+	testsuite.Run(m)
+}
+
+func TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	dbType := os.Getenv("GRAFANA_TEST_DB")
+	if dbType == "" {
+		t.Skip("skipping - GRAFANA_TEST_DB not defined")
+	}
+	if dbType == "sqlite3" {
+		t.Skip("skipping - sqlite not supported for storage server target")
+	}
+	// TODO - fix this test for postgres
+	if dbType == "postgres" {
+		t.Skip("skipping - test not working with postgres in Drone. Works locally.")
+	}
+
+	_, cfg := db.InitTestDBWithCfg(t)
+	cfg.HTTPPort = "3001"
+	cfg.GRPCServer.Network = "tcp"
+	cfg.GRPCServer.Address = "localhost:10000"
+	addStorageServerToConfig(t, cfg, dbType)
+	cfg.Target = []string{modules.StorageServer}
+
+	ms, err := InitializeModuleServer(cfg, Options{}, api.ServerOptions{})
+	require.NoError(t, err)
+
+	go func() {
+		err = ms.Run()
+		if err.Error() != "context canceled" {
+			t.Error(err)
+		}
+	}()
+	time.Sleep(500 * time.Millisecond) // wait for http server to be running
+
+	client := http.Client{}
+	res, err := client.Get("http://localhost:3001/metrics")
+	require.NoError(t, err)
+	err = res.Body.Close()
+	require.NoError(t, err)
+	assert.Equal(t, 200, res.StatusCode)
+
+	err = ms.Shutdown(context.Background(), "test over")
+	require.NoError(t, err)
+}
+
+func addStorageServerToConfig(t *testing.T, cfg *setting.Cfg, dbType string) {
+	s, err := cfg.Raw.NewSection("resource_api")
+	require.NoError(t, err)
+	_, err = s.NewKey("db_type", dbType)
+	require.NoError(t, err)
+
+	if dbType == "postgres" {
+		_, _ = s.NewKey("db_host", "localhost")
+		_, _ = s.NewKey("db_name", "grafanatest")
+		_, _ = s.NewKey("db_user", "grafanatest")
+		_, _ = s.NewKey("db_pass", "grafanatest")
+	} else {
+		// cant use localhost as hostname in drone tests for mysql, so need to parse it from connection string
+		sec, err := cfg.Raw.GetSection("database")
+		require.NoError(t, err)
+		connString := sec.Key("connection_string").String()
+		matches, err := regexp.FindSubmatch("(.+):(.+)@tcp\\((.+):(\\d+)\\)/(.+)\\?", connString)
+		require.NoError(t, err)
+		_, _ = s.NewKey("db_host", matches[3])
+		_, _ = s.NewKey("db_name", matches[5])
+		_, _ = s.NewKey("db_user", matches[1])
+		_, _ = s.NewKey("db_pass", matches[2])
+	}
+}
+
+
+===== FILE pkg/storage/unified/resource/search.go (after PR) =====
+package resource
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/hashicorp/golang-lru/v2/expirable"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/grafana/authlib/authz"
+)
+
+type NamespacedResource struct {
+	Namespace string
+	Group     string
+	Resource  string
+}
+
+// All fields are set
+func (s *NamespacedResource) Valid() bool {
+	return s.Namespace != "" && s.Group != "" && s.Resource != ""
+}
+
+type ResourceIndex interface {
+	// Add a document to the index.  Note it may not be searchable until after flush is called
+	Write(doc *IndexableDocument) error
+
+	// Mark a resource as deleted.  Note it may not be searchable until after flush is called
+	Delete(key *ResourceKey) error
+
+	// Make sure any changes to the index are flushed and available in the next search/origin calls
+	Flush() error
+
+	// Search within a namespaced resource
+	// When working with federated queries, the additional indexes will be passed in explicitly
+	Search(ctx context.Context, access authz.AccessClient, req *ResourceSearchRequest, federate []ResourceIndex) (*ResourceSearchResponse, error)
+
+	// Execute an origin query -- access control is not not checked for each item
+	// NOTE: this will likely be used for provisioning, or it will be removed
+	Origin(ctx context.Context, req *OriginRequest) (*OriginResponse, error)
+
+	// Get the number of documents in the index
+	DocCount() (int, error)
+}
+
+// SearchBackend contains the technology specific logic to support search
+type SearchBackend interface {
+	// This will return nil if the key does not exist
+	GetIndex(ctx context.Context, key NamespacedResource) (ResourceIndex, error)
+
+	// Build an index from scratch
+	BuildIndex(ctx context.Context,
+		key NamespacedResource,
+
+		// When the size is known, it will be passed along here
+		// Depending on the size, the backend may choose different options (eg: memory vs disk)
+		size int64,
+
+		// The last known resource version (can be used to know that nothing has changed)
+		resourceVersion int64,
+
+		// The non-standard index fields
+		fields SearchableDocumentFields,
+
+		// The builder will write all documents before returning
+		builder func(index ResourceIndex) (int64, error),
+	) (ResourceIndex, error)
+
+	// Gets the total number of documents across all indexes
+	TotalDocs() int64
+}
+
+const tracingPrexfixSearch = "unified_search."
+
+// This supports indexing+search regardless of implementation
+type searchSupport struct {
+	tracer      trace.Tracer
+	log         *slog.Logger
+	storage     StorageBackend
+	search      SearchBackend
+	access      authz.AccessClient
+	builders    *builderCache
+	initWorkers int
+	initMinSize int
+}
+
+var (
+	_ ResourceIndexServer = (*searchSupport)(nil)
+)
+
+func newSearchSupport(opts SearchOptions, storage StorageBackend, access authz.AccessClient, blob BlobSupport, tracer trace.Tracer) (support *searchSupport, err error) {
+	// No backend search support
+	if opts.Backend == nil {
+		return nil, nil
+	}
+
+	if opts.WorkerThreads < 1 {
+		opts.WorkerThreads = 1
+	}
+
+	support = &searchSupport{
+		access:      access,
+		tracer:      tracer,
+		storage:     storage,
+		search:      opts.Backend,
+		log:         slog.Default().With("logger", "resource-search"),
+		initWorkers: opts.WorkerThreads,
+		initMinSize: opts.InitMinCount,
+	}
+
+	info, err := opts.Resources.GetDocumentBuilders()
+	if err != nil {
+		return nil, err
+	}
+
+	support.builders, err = newBuilderCache(info, 100, time.Minute*2) // TODO? opts
+	if support.builders != nil {
+		support.builders.blob = blob
+	}
+
+	return support, err
+}
+
+// History implements ResourceIndexServer.
+func (s *searchSupport) History(context.Context, *HistoryRequest) (*HistoryResponse, error) {
+	return nil, fmt.Errorf("not implemented yet... likely should not be the serarch server")
+}
+
+// Origin implements ResourceIndexServer.
+func (s *searchSupport) Origin(context.Context, *OriginRequest) (*OriginResponse, error) {
+	return nil, fmt.Errorf("TBD.. rename to repository")
+}
+
+// Search implements ResourceIndexServer.
+func (s *searchSupport) Search(ctx context.Context, req *ResourceSearchRequest) (*ResourceSearchResponse, error) {
+	nsr := NamespacedResource{
+		Group:     req.Options.Key.Group,
+		Namespace: req.Options.Key.Namespace,
+		Resource:  req.Options.Key.Resource,
+	}
+	idx, err := s.getOrCreateIndex(ctx, nsr)
+	if err != nil {
+		return &ResourceSearchResponse{
+			Error: AsErrorResult(err),
+		}, nil
+	}
+
+	// Get the federated indexes
+	federate := make([]ResourceIndex, len(req.Federated))
+	for i, f := range req.Federated {
+		nsr.Group = f.Group
+		nsr.Resource = f.Resource
+		federate[i], err = s.getOrCreateIndex(ctx, nsr)
+		if err != nil {
+			return &ResourceSearchResponse{
+				Error: AsErrorResult(err),
+			}, nil
+		}
+	}
+
+	return idx.Search(ctx, s.access, req, federate)
+}
+
+// init is called during startup.  any failure will block startup and continued execution
+func (s *searchSupport) init(ctx context.Context) error {
+	ctx, span := s.tracer.Start(ctx, tracingPrexfixSearch+"Init")
+	defer span.End()
+	start := time.Now().Unix()
+
+	totalBatchesIndexed := 0
+	group := errgroup.Group{}
+	group.SetLimit(s.initWorkers)
+
+	stats, err := s.storage.GetResourceStats(ctx, "", s.initMinSize)
+	if err != nil {
+		return err
+	}
+
+	for _, info := range stats {
+		group.Go(func() error {
+			s.log.Debug("initializing search index", "namespace", info.Namespace, "group", info.Group, "resource", info.Resource)
+			totalBatchesIndexed++
+			_, _, err = s.build(ctx, info.NamespacedResource, info.Count, info.ResourceVersion)
+			return err
+		})
+	}
+
+	err = group.Wait()
+	if err != nil {
+		return err
+	}
+	span.AddEvent("namespaces indexed", trace.WithAttributes(attribute.Int("namespaced_indexed", totalBatchesIndexed)))
+
+	// Now start listening for new events
+	watchctx := context.Background() // new context?
+	events, err := s.storage.WatchWriteEvents(watchctx)
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			v := <-events
+
+			s.handleEvent(watchctx, v)
+		}
+	}()
+
+	end := time.Now().Unix()
+	s.log.Info("search index initialized", "duration_secs", end-start, "total_docs", s.search.TotalDocs())
+	if IndexMetrics != nil {
+		IndexMetrics.IndexCreationTime.WithLabelValues().Observe(float64(end - start))
+	}
+
+	return nil
+}
+
+// Async event
+func (s *searchSupport) handleEvent(ctx context.Context, evt *WrittenEvent) {
+	if !slices.Contains([]WatchEvent_Type{WatchEvent_ADDED, WatchEvent_MODIFIED, WatchEvent_DELETED}, evt.Type) {
+		s.log.Info("ignoring watch event", "type", evt.Type)
+		return
+	}
+
+	nsr := NamespacedResource{
+		Namespace: evt.Key.Namespace,
+		Group:     evt.Key.Group,
+		Resource:  evt.Key.Resource,
+	}
+
+	index, err := s.getOrCreateIndex(ctx, nsr)
+	if err != nil {
+		s.log.Warn("error getting index for watch event", "error", err)
+		return
+	}
+
+	builder, err := s.builders.get(ctx, nsr)
+	if err != nil {
+		s.log.Warn("error getting builder for watch event", "error", err)
+		return
+	}
+
+	doc, err := builder.BuildDocument(ctx, evt.Key, evt.ResourceVersion, evt.Value)
+	if err != nil {
+		s.log.Warn("error building document watch event", "error", err)
+		return
+	}
+
+	switch evt.Type {
+	case WatchEvent_ADDED, WatchEvent_MODIFIED:
+		err = index.Write(doc)
+		if err != nil {
+			s.log.Warn("error writing document watch event", "error", err)
+			return
+		}
+		if evt.Type == WatchEvent_ADDED {
+			IndexMetrics.IndexedKinds.WithLabelValues(evt.Key.Resource).Inc()
+		}
+	case WatchEvent_DELETED:
+		err = index.Delete(evt.Key)
+		if err != nil {
+			s.log.Warn("error deleting document watch event", "error", err)
+			return
+		}
+		IndexMetrics.IndexedKinds.WithLabelValues(evt.Key.Resource).Dec()
+	default:
+		// do nothing
+		s.log.Warn("unknown watch event", "type", evt.Type)
+	}
+
+	// record latency from when event was created to when it was indexed
+	latencySeconds := float64(time.Now().UnixMicro()-evt.ResourceVersion) / 1e6
+	if latencySeconds > 5 {
+		s.log.Warn("high index latency", "latency", latencySeconds)
+	}
+	if IndexMetrics != nil {
+		IndexMetrics.IndexLatency.WithLabelValues(evt.Key.Resource).Observe(latencySeconds)
+	}
+}
+
+func (s *searchSupport) getOrCreateIndex(ctx context.Context, key NamespacedResource) (ResourceIndex, error) {
+	// TODO???
+	// We want to block while building the index and return the same index for the key
+	// simple mutex not great... we don't want to block while anything in building, just the same key
+
+	idx, err := s.search.GetIndex(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	if idx == nil {
+		idx, _, err = s.build(ctx, key, 10, 0) // unknown size and RV
+		if err != nil {
+			return nil, err
+		}
+		if idx == nil {
+			return nil, fmt.Errorf("nil index after build")
+		}
+	}
+	return idx, nil
+}
+
+func (s *searchSupport) build(ctx context.Context, nsr NamespacedResource, size int64, rv int64) (ResourceIndex, int64, error) {
+	ctx, span := s.tracer.Start(ctx, tracingPrexfixSearch+"Build")
+	defer span.End()
+
+	builder, err := s.builders.get(ctx, nsr)
+	if err != nil {
+		return nil, 0, err
+	}
+	fields := s.builders.GetFields(nsr)
+
+	s.log.Debug(fmt.Sprintf("TODO, build %+v (size:%d, rv:%d) // builder:%+v\n", nsr, size, rv, builder))
+
+	key := &ResourceKey{
+		Group:     nsr.Group,
+		Resource:  nsr.Resource,
+		Namespace: nsr.Namespace,
+	}
+	index, err := s.search.BuildIndex(ctx, nsr, size, rv, fields, func(index ResourceIndex) (int64, error) {
+		rv, err = s.storage.ListIterator(ctx, &ListRequest{
+			Limit: 1000000000000, // big number
+			Options: &ListOptions{
+				Key: key,
+			},
+		}, func(iter ListIterator) error {
+			for iter.Next() {
+				if err = iter.Error(); err != nil {
+					return err
+				}
+
+				// Update the key name
+				// Or should we read it from the body?
+				key.Name = iter.Name()
+
+				// Convert it to an indexable document
+				doc, err := builder.BuildDocument(ctx, key, iter.ResourceVersion(), iter.Value())
+				if err != nil {
+					return err
+				}
+
+				// And finally write it to the index
+				if err = index.Write(doc); err != nil {
+					return err
+				}
+			}
+			return err
+		})
+		return rv, err
+	})
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Record the number of objects indexed for the kind/resource
+	docCount, err := index.DocCount()
+	if err != nil {
+		s.log.Warn("error getting doc count", "error", err)
+	}
+	if IndexMetrics != nil {
+		IndexMetrics.IndexedKinds.WithLabelValues(key.Resource).Add(float64(docCount))
+	}
+
+	if err == nil {
+		err = index.Flush()
+	}
+
+	// rv is the last RV we read.  when watching, we must add all events since that time
+	return index, rv, err
+}
+
+type builderCache struct {
+	// The default builder
+	defaultBuilder DocumentBuilder
+
+	// Possible blob support
+	blob BlobSupport
+
+	// searchable fields initialized once on startup
+	fields map[schema.GroupResource]SearchableDocumentFields
+
+	// lookup by group, then resource (namespace)
+	// This is only modified at startup, so we do not need mutex for access
+	lookup map[string]map[string]DocumentBuilderInfo
+
+	// For namespaced based resources that require a cache
+	ns *expirable.LRU[NamespacedResource, DocumentBuilder]
+	mu sync.Mutex // only locked for a cache miss
+}
+
+func newBuilderCache(cfg []DocumentBuilderInfo, nsCacheSize int, ttl time.Duration) (*builderCache, error) {
+	cache := &builderCache{
+		fields: make(map[schema.GroupResource]SearchableDocumentFields),
+		lookup: make(map[string]map[string]DocumentBuilderInfo),
+		ns:     expirable.NewLRU[NamespacedResource, DocumentBuilder](nsCacheSize, nil, ttl),
+	}
+	if len(cfg) == 0 {
+		return cache, fmt.Errorf("no builders configured")
+	}
+
+	for _, b := range cfg {
+		// the default
+		if b.GroupResource.Group == "" && b.GroupResource.Resource == "" {
+			if b.Builder == nil {
+				return cache, fmt.Errorf("default document builder is missing")
+			}
+			cache.defaultBuilder = b.Builder
+			continue
+		}
+		g, ok := cache.lookup[b.GroupResource.Group]
+		if !ok {
+			g = make(map[string]DocumentBuilderInfo)
+			cache.lookup[b.GroupResource.Group] = g
+		}
+		g[b.GroupResource.Resource] = b
+
+		// Any custom fields
+		cache.fields[b.GroupResource] = b.Fields
+	}
+	return cache, nil
+}
+
+func (s *builderCache) GetFields(key NamespacedResource) SearchableDocumentFields {
+	return s.fields[schema.GroupResource{Group: key.Group, Resource: key.Resource}]
+}
+
+// context is typically background.  Holds an LRU cache for a
+func (s *builderCache) get(ctx context.Context, key NamespacedResource) (DocumentBuilder, error) {
+	g, ok := s.lookup[key.Group]
+	if ok {
+		r, ok := g[key.Resource]
+		if ok {
+			if r.Builder != nil {
+				return r.Builder, nil
+			}
+
+			// The builder needs context
+			builder, ok := s.ns.Get(key)
+			if ok {
+				return builder, nil
+			}
+			{
+				s.mu.Lock()
+				defer s.mu.Unlock()
+
+				b, err := r.Namespaced(ctx, key.Namespace, s.blob)
+				if err == nil {
+					_ = s.ns.Add(key, b)
+				}
+				return b, err
+			}
+		}
+	}
+	return s.defaultBuilder, nil
+}
+
+
+===== FILE pkg/storage/unified/resource/server.go (after PR) =====
+package resource
+
+import (
+	context "context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/grafana/authlib/authz"
+	"github.com/grafana/authlib/claims"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/apimachinery/utils"
+)
+
+// ResourceServer implements all gRPC services
+type ResourceServer interface {
+	ResourceStoreServer
+	ResourceIndexServer
+	BlobStoreServer
+	DiagnosticsServer
+}
+
+type ListIterator interface {
+	Next() bool // sql.Rows
+
+	// Iterator error (if exts)
+	Error() error
+
+	// The token that can be used to start iterating *after* this item
+	ContinueToken() string
+
+	// ResourceVersion of the current item
+	ResourceVersion() int64
+
+	// Namespace of the current item
+	// Used for fast(er) authz filtering
+	Namespace() string
+
+	// Name of the current item
+	// Used for fast(er) authz filtering
+	Name() string
+
+	// Folder of the current item
+	// Used for fast(er) authz filtering
+	Folder() string
+
+	// Value for the current item
+	Value() []byte
+}
+
+type BackendReadResponse struct {
+	// Metadata
+	Key    *ResourceKey
+	Folder string
+
+	// The new resource version
+	ResourceVersion int64
+	// The properties
+	Value []byte
+	// Error details
+	Error *ErrorResult
+}
+
+// The StorageBackend is an internal abstraction that supports interacting with
+// the underlying raw storage medium.  This interface is never exposed directly,
+// it is provided by concrete instances that actually write values.
+type StorageBackend interface {
+	// Write a Create/Update/Delete,
+	// NOTE: the contents of WriteEvent have been validated
+	// Return the revisionVersion for this event or error
+	WriteEvent(context.Context, WriteEvent) (int64, error)
+
+	// Read a resource from storage optionally at an explicit version
+	ReadResource(context.Context, *ReadRequest) *BackendReadResponse
+
+	// When the ResourceServer executes a List request, this iterator will
+	// query the backend for potential results.  All results will be
+	// checked against the kubernetes requirements before finally returning
+	// results.  The list options can be used to improve performance
+	// but are the the final answer.
+	ListIterator(context.Context, *ListRequest, func(ListIterator) error) (int64, error)
+
+	// Get all events from the store
+	// For HA setups, this will be more events than the local WriteEvent above!
+	WatchWriteEvents(ctx context.Context) (<-chan *WrittenEvent, error)
+
+	// Get resource stats within the storage backend.  When namespace is empty, it will apply to all
+	GetResourceStats(ctx context.Context, namespace string, minCount int) ([]ResourceStats, error)
+}
+
+type ResourceStats struct {
+	NamespacedResource
+
+	Count           int64
+	ResourceVersion int64
+}
+
+// This interface is not exposed to end users directly
+// Access to this interface is already gated by access control
+type BlobSupport interface {
+	// Indicates if storage layer supports signed urls
+	SupportsSignedURLs() bool
+
+	// Get the raw blob bytes and metadata -- limited to protobuf message size
+	// For larger payloads, we should use presigned URLs to upload from the client
+	PutResourceBlob(context.Context, *PutBlobRequest) (*PutBlobResponse, error)
+
+	// Get blob contents.  When possible, this will return a signed URL
+	// For large payloads, signed URLs are required to avoid protobuf message size limits
+	GetResourceBlob(ctx context.Context, resource *ResourceKey, info *utils.BlobInfo, mustProxy bool) (*GetBlobResponse, error)
+
+	// TODO? List+Delete?  This is for admin access
+}
+
+type BlobConfig struct {
+	// The CDK configuration URL
+	URL string
+
+	// Directly implemented blob support
+	Backend BlobSupport
+}
+
+// Passed as input to the constructor
+type SearchOptions struct {
+	// The raw index backend (eg, bleve, frames, parquet, etc)
+	Backend SearchBackend
+
+	// The supported resource types
+	Resources DocumentBuilderSupplier
+
+	// How many threads should build indexes
+	WorkerThreads int
+
+	// Skip building index on startup for small indexes
+	InitMinCount int
+}
+
+type ResourceServerOptions struct {
+	// OTel tracer
+	Tracer trace.Tracer
+
+	// Real storage backend
+	Backend StorageBackend
+
+	// The blob configuration
+	Blob BlobConfig
+
+	// Search options
+	Search SearchOptions
+
+	// Diagnostics
+	Diagnostics DiagnosticsServer
+
+	// Check if a user has access to write folders
+	// When this is nil, no resources can have folders configured
+	WriteHooks WriteAccessHooks
+
+	// Link RBAC
+	AccessClient authz.AccessClient
+
+	// Callbacks for startup and shutdown
+	Lifecycle LifecycleHooks
+
+	// Get the current time in unix millis
+	Now func() int64
+
+	// Registerer to register prometheus Metrics for the Resource server
+	Reg prometheus.Registerer
+}
+
+func NewResourceServer(opts ResourceServerOptions) (ResourceServer, error) {
+	if opts.Tracer == nil {
+		opts.Tracer = noop.NewTracerProvider().Tracer("resource-server")
+	}
+
+	if opts.Backend == nil {
+		return nil, fmt.Errorf("missing Backend implementation")
+	}
+
+	if opts.AccessClient == nil {
+		opts.AccessClient = &staticAuthzClient{allowed: true} // everything OK
+	}
+
+	if opts.Diagnostics == nil {
+		opts.Diagnostics = &noopService{}
+	}
+	if opts.Now == nil {
+		opts.Now = func() int64 {
+			return time.Now().UnixMilli()
+		}
+	}
+
+	// Initialize the blob storage
+	blobstore := opts.Blob.Backend
+	if blobstore == nil && opts.Blob.URL != "" {
+		ctx := context.Background()
+		bucket, err := OpenBlobBucket(ctx, opts.Blob.URL)
+		if err != nil {
+			return nil, err
+		}
+
+		blobstore, err = NewCDKBlobSupport(ctx, CDKBlobSupportOptions{
+			Tracer: opts.Tracer,
+			Bucket: NewInstrumentedBucket(bucket, opts.Reg, opts.Tracer),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	logger := slog.Default().With("logger", "resource-server")
+	// register metrics
+	if err := prometheus.Register(NewStorageMetrics()); err != nil {
+		logger.Warn("failed to register storage metrics", "error", err)
+	}
+
+	// Make this cancelable
+	ctx, cancel := context.WithCancel(claims.WithClaims(context.Background(),
+		&identity.StaticRequester{
+			Type:           claims.TypeServiceAccount,
+			Login:          "watcher", // admin user for watch
+			UserID:         1,
+			IsGrafanaAdmin: true,
+		}))
+	s := &server{
+		tracer:      opts.Tracer,
+		log:         logger,
+		backend:     opts.Backend,
+		blob:        blobstore,
+		diagnostics: opts.Diagnostics,
+		access:      opts.AccessClient,
+		writeHooks:  opts.WriteHooks,
+		lifecycle:   opts.Lifecycle,
+		now:         opts.Now,
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+
+	if opts.Search.Resources != nil {
+		var err error
+		s.search, err = newSearchSupport(opts.Search, s.backend, s.access, s.blob, opts.Tracer)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err := s.Init(ctx)
+	if err != nil {
+		s.log.Error("error initializing resource server", "error", err)
+		return nil, err
+	}
+
+	return s, nil
+}
+
+var _ ResourceServer = &server{}
+
+type server struct {
+	tracer       trace.Tracer
+	log          *slog.Logger
+	backend      StorageBackend
+	blob         BlobSupport
+	search       *searchSupport
+	diagnostics  DiagnosticsServer
+	access       authz.AccessClient
+	writeHooks   WriteAccessHooks
+	lifecycle    LifecycleHooks
+	now          func() int64
+	mostRecentRV atomic.Int64 // The most recent resource version seen by the server
+
+	// Background watch task -- this has permissions for everything
+	ctx         context.Context
+	cancel      context.CancelFunc
+	broadcaster Broadcaster[*WrittenEvent]
+
+	// init checking
+	once    sync.Once
+	initErr error
+}
+
+// Init implements ResourceServer.
+func (s *server) Init(ctx context.Context) error {
+	s.once.Do(func() {
+		// Call lifecycle hooks
+		if s.lifecycle != nil {
+			err := s.lifecycle.Init(ctx)
+			if err != nil {
+				s.initErr = fmt.Errorf("initialize Resource Server: %w", err)
+			}
+		}
+
+		// initialize the search index
+		if s.initErr == nil && s.search != nil {
+			s.initErr = s.search.init(ctx)
+		}
+
+		// Start watching for changes
+		if s.initErr == nil {
+			s.initErr = s.initWatcher()
+		}
+
+		if s.initErr != nil {
+			s.log.Error("error initializing resource server", "error", s.initErr)
+		}
+	})
+	return s.initErr
+}
+
+func (s *server) Stop(ctx context.Context) error {
+	s.initErr = fmt.Errorf("service is stopping")
+
+	var stopFailed bool
+	if s.lifecycle != nil {
+		err := s.lifecycle.Stop(ctx)
+		if err != nil {
+			stopFailed = true
+			s.initErr = fmt.Errorf("service stopeed with error: %w", err)
+		}
+	}
+
+	// Stops the streaming
+	s.cancel()
+
+	// mark the value as done
+	if stopFailed {
+		return s.initErr
+	}
+	s.initErr = fmt.Errorf("service is stopped")
+
+	return nil
+}
+
+// Old value indicates an update -- otherwise a create
+func (s *server) newEvent(ctx context.Context, user claims.AuthInfo, key *ResourceKey, value, oldValue []byte) (*WriteEvent, *ErrorResult) {
+	tmp := &unstructured.Unstructured{}
+	err := tmp.UnmarshalJSON(value)
+	if err != nil {
+		return nil, AsErrorResult(err)
+	}
+	obj, err := utils.MetaAccessor(tmp)
+	if err != nil {
+		return nil, AsErrorResult(err)
+	}
+
+	if obj.GetUID() == "" {
+		// TODO! once https://github.com/grafana/grafana/pull/96086 is deployed everywhere
+		// return nil, NewBadRequestError("object is missing UID")
+		s.log.Error("object is missing UID", "key", key)
+	}
+
+	if obj.GetResourceVersion() != "" {
+		s.log.Error("object must not include a resource version", "key", key)
+	}
+
+	check := authz.CheckRequest{
+		Verb:      "create",
+		Group:     key.Group,
+		Resource:  key.Resource,
+		Namespace: key.Namespace,
+	}
+
+	event := &WriteEvent{
+		Value:  value,
+		Key:    key,
+		Object: obj,
+	}
+	if oldValue == nil {
+		event.Type = WatchEvent_ADDED
+	} else {
+		event.Type = WatchEvent_MODIFIED
+		check.Verb = "update"
+
+		temp := &unstructured.Unstructured{}
+		err = temp.UnmarshalJSON(oldValue)
+		if err != nil {
+			return nil, AsErrorResult(err)
+		}
+		event.ObjectOld, err = utils.MetaAccessor(temp)
+		if err != nil {
+			return nil, AsErrorResult(err)
+		}
+	}
+
+	if key.Namespace != obj.GetNamespace() {
+		return nil, NewBadRequestError("key/namespace do not match")
+	}
+
+	gvk := obj.GetGroupVersionKind()
+	if gvk.Kind == "" {
+		return nil, NewBadRequestError("expecting resources with a kind in the body")
+	}
+	if gvk.Version == "" {
+		return nil, NewBadRequestError("expecting resources with an apiVersion")
+	}
+	if gvk.Group != "" && gvk.Group != key.Group {
+		return nil, NewBadRequestError(
+			fmt.Sprintf("group in key does not match group in the body (%s != %s)", key.Group, gvk.Group),
+		)
+	}
+
+	// This needs to be a create function
+	if key.Name == "" {
+		if obj.GetName() == "" {
+			return nil, NewBadRequestError("missing name")
+		}
+		key.Name = obj.GetName()
+	} else if key.Name != obj.GetName() {
+		return nil, NewBadRequestError(
+			fmt.Sprintf("key/name do not match (key: %s, name: %s)", key.Name, obj.GetName()))
+	}
+	if err := validateName(obj.GetName()); err != nil {
+		return nil, err
+	}
+
+	check.Folder = obj.GetFolder()
+	check.Name = key.Name
+	a, err := s.access.Check(ctx, user, check)
+	if err != nil {
+		return nil, AsErrorResult(err)
+	}
+	if !a.Allowed {
+		return nil, &ErrorResult{
+			Code: http.StatusForbidden,
+		}
+	}
+
+	repo, err := obj.GetRepositoryInfo()
+	if err != nil {
+		return nil, NewBadRequestError("invalid repository info")
+	}
+	if repo != nil {
+		err = s.writeHooks.CanWriteValueFromRepository(ctx, user, repo.Name)
+		if err != nil {
+			return nil, AsErrorResult(err)
+		}
+	}
+	return event, nil
+}
+
+func (s *server) Create(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "storage_server.Create")
+	defer span.End()
+
+	rsp := &CreateResponse{}
+	user, ok := claims.From(ctx)
+	if !ok || user == nil {
+		rsp.Error = &ErrorResult{
+			Message: "no user found in context",
+			Code:    http.StatusUnauthorized,
+		}
+		return rsp, nil
+	}
+
+	found := s.backend.ReadResource(ctx, &ReadRequest{Key: req.Key})
+	if found != nil && len(found.Value) > 0 {
+		rsp.Error = &ErrorResult{
+			Code:    http.StatusConflict,
+			Message: "key already exists", // TODO?? soft delete replace?
+		}
+		return rsp, nil
+	}
+
+	event, e := s.newEvent(ctx, user, req.Key, req.Value, nil)
+	if e != nil {
+		rsp.Error = e
+		return rsp, nil
+	}
+
+	var err error
+	rsp.ResourceVersion, err = s.backend.WriteEvent(ctx, *event)
+	if err != nil {
+		rsp.Error = AsErrorResult(err)
+	}
+	s.log.Debug("server.WriteEvent", "type", event.Type, "rv", rsp.ResourceVersion, "previousRV", event.PreviousRV, "group", event.Key.Group, "namespace", event.Key.Namespace, "name", event.Key.Name, "resource", event.Key.Resource)
+	return rsp, nil
+}
+
+func (s *server) Update(ctx context.Context, req *UpdateRequest) (*UpdateResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "storage_server.Update")
+	defer span.End()
+
+	rsp := &UpdateResponse{}
+	user, ok := claims.From(ctx)
+	if !ok || user == nil {
+		rsp.Error = &ErrorResult{
+			Message: "no user found in context",
+			Code:    http.StatusUnauthorized,
+		}
+		return rsp, nil
+	}
+	if req.ResourceVersion < 0 {
+		rsp.Error = AsErrorResult(apierrors.NewBadRequest("update must include the previous version"))
+		return rsp, nil
+	}
+
+	latest := s.backend.ReadResource(ctx, &ReadRequest{
+		Key: req.Key,
+	})
+	if latest.Error != nil {
+		return rsp, nil
+	}
+	if latest.Value == nil {
+		rsp.Error = NewBadRequestError("current value does not exist")
+		return rsp, nil
+	}
+
+	if req.ResourceVersion > 0 && latest.ResourceVersion != req.ResourceVersion {
+		return nil, ErrOptimisticLockingFailed
+	}
+
+	event, e := s.newEvent(ctx, user, req.Key, req.Value, latest.Value)
+	if e != nil {
+		rsp.Error = e
+		return rsp, nil
+	}
+
+	event.Type = WatchEvent_MODIFIED
+	event.PreviousRV = latest.ResourceVersion
+
+	var err error
+	rsp.ResourceVersion, err = s.backend.WriteEvent(ctx, *event)
+	if err != nil {
+		rsp.Error = AsErrorResult(err)
+	}
+	return rsp, nil
+}
+
+func (s *server) Delete(ctx context.Context, req *DeleteRequest) (*DeleteResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "storage_server.Delete")
+	defer span.End()
+
+	rsp := &DeleteResponse{}
+	if req.ResourceVersion < 0 {
+		return nil, apierrors.NewBadRequest("update must include the previous version")
+	}
+	user, ok := claims.From(ctx)
+	if !ok || user == nil {
+		rsp.Error = &ErrorResult{
+			Message: "no user found in context",
+			Code:    http.StatusUnauthorized,
+		}
+		return rsp, nil
+	}
+
+	latest := s.backend.ReadResource(ctx, &ReadRequest{
+		Key: req.Key,
+	})
+	if latest.Error != nil {
+		rsp.Error = latest.Error
+		return rsp, nil
+	}
+	if req.ResourceVersion > 0 && latest.ResourceVersion != req.ResourceVersion {
+		rsp.Error = AsErrorResult(ErrOptimisticLockingFailed)
+		return rsp, nil
+	}
+
+	access, err := s.access.Check(ctx, user, authz.CheckRequest{
+		Verb:      "delete",
+		Group:     req.Key.Group,
+		Resource:  req.Key.Resource,
+		Namespace: req.Key.Namespace,
+		Name:      req.Key.Name,
+		Folder:    latest.Folder,
+	})
+	if err != nil {
+		rsp.Error = AsErrorResult(err)
+		return rsp, nil
+	}
+	if !access.Allowed {
+		rsp.Error = &ErrorResult{
+			Code: http.StatusForbidden,
+		}
+		return rsp, nil
+	}
+
+	now := metav1.NewTime(time.UnixMilli(s.now()))
+	event := WriteEvent{
+		Key:        req.Key,
+		Type:       WatchEvent_DELETED,
+		PreviousRV: latest.ResourceVersion,
+	}
+	requester, ok := claims.From(ctx)
+	if !ok {
+		return nil, apierrors.NewBadRequest("unable to get user")
+	}
+	marker := &DeletedMarker{}
+	err = json.Unmarshal(latest.Value, marker)
+	if err != nil {
+		return nil, apierrors.NewBadRequest(
+			fmt.Sprintf("unable to read previous object, %v", err))
+	}
+	obj, err := utils.MetaAccessor(marker)
+	if err != nil {
+		return nil, err
+	}
+	obj.SetDeletionTimestamp(&now)
+	obj.SetUpdatedTimestamp(&now.Time)
+	obj.SetManagedFields(nil)
+	obj.SetFinalizers(nil)
+	obj.SetUpdatedBy(requester.GetUID())
+	marker.TypeMeta = metav1.TypeMeta{
+		Kind:       "DeletedMarker",
+		APIVersion: "common.grafana.app/v0alpha1", // ?? or can we stick this in common?
+	}
+	marker.Annotations["RestoreResourceVersion"] = fmt.Sprintf("%d", event.PreviousRV)
+	event.Value, err = json.Marshal(marker)
+	if err != nil {
+		return nil, apierrors.NewBadRequest(
+			fmt.Sprintf("unable creating deletion marker, %v", err))
+	}
+
+	rsp.ResourceVersion, err = s.backend.WriteEvent(ctx, event)
+	if err != nil {
+		rsp.Error = AsErrorResult(err)
+	}
+	return rsp, nil
+}
+
+func (s *server) Read(ctx context.Context, req *ReadRequest) (*ReadResponse, error) {
+	user, ok := claims.From(ctx)
+	if !ok || user == nil {
+		return &ReadResponse{
+			Error: &ErrorResult{
+				Message: "no user found in context",
+				Code:    http.StatusUnauthorized,
+			}}, nil
+	}
+
+	// if req.Key.Group == "" {
+	// 	status, _ := AsErrorResult(apierrors.NewBadRequest("missing group"))
+	// 	return &ReadResponse{Status: status}, nil
+	// }
+	if req.Key.Resource == "" {
+		return &ReadResponse{Error: NewBadRequestError("missing resource")}, nil
+	}
+
+	rsp := s.backend.ReadResource(ctx, req)
+
+	a, err := s.access.Check(ctx, user, authz.CheckRequest{
+		Verb:      "get",
+		Group:     req.Key.Group,
+		Resource:  req.Key.Resource,
+		Namespace: req.Key.Namespace,
+		Name:      req.Key.Name,
+		Folder:    rsp.Folder,
+	})
+	if err != nil {
+		return &ReadResponse{Error: AsErrorResult(err)}, nil
+	}
+	if !a.Allowed {
+		return &ReadResponse{
+			Error: &ErrorResult{
+				Code: http.StatusForbidden,
+			}}, nil
+	}
+	return &ReadResponse{
+		ResourceVersion: rsp.ResourceVersion,
+		Value:           rsp.Value,
+		Error:           rsp.Error,
+	}, nil
+}
+
+func (s *server) List(ctx context.Context, req *ListRequest) (*ListResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "storage_server.List")
+	defer span.End()
+
+	user, ok := claims.From(ctx)
+	if !ok || user == nil {
+		return &ListResponse{
+			Error: &ErrorResult{
+				Message: "no user found in context",
+				Code:    http.StatusUnauthorized,
+			}}, nil
+	}
+
+	if req.Limit < 1 {
+		req.Limit = 50 // default max 50 items in a page
+	}
+	maxPageBytes := 1024 * 1024 * 2 // 2mb/page
+	pageBytes := 0
+	rsp := &ListResponse{}
+
+	key := req.Options.Key
+	checker, err := s.access.Compile(ctx, user, authz.ListRequest{
+		Group:     key.Group,
+		Resource:  key.Resource,
+		Namespace: key.Namespace,
+	})
+	if err != nil {
+		return &ListResponse{Error: AsErrorResult(err)}, nil
+	}
+	if checker == nil {
+		return &ListResponse{Error: &ErrorResult{
+			Code: http.StatusForbidden,
+		}}, nil
+	}
+
+	rv, err := s.backend.ListIterator(ctx, req, func(iter ListIterator) error {
+		for iter.Next() {
+			if err := iter.Error(); err != nil {
+				return err
+			}
+
+			item := &ResourceWrapper{
+				ResourceVersion: iter.ResourceVersion(),
+				Value:           iter.Value(),
+			}
+
+			if !checker(iter.Namespace(), iter.Name(), iter.Folder()) {
+				continue
+			}
+
+			pageBytes += len(item.Value)
+			rsp.Items = append(rsp.Items, item)
+			if len(rsp.Items) >= int(req.Limit) || pageBytes >= maxPageBytes {
+				t := iter.ContinueToken()
+				if iter.Next() {
+					rsp.NextPageToken = t
+				}
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		rsp.Error = AsErrorResult(err)
+		return rsp, nil
+	}
+
+	if rv < 1 {
+		rsp.Error = &ErrorResult{
+			Code:    http.StatusInternalServerError,
+			Message: fmt.Sprintf("invalid resource version for list: %v", rv),
+		}
+		return rsp, nil
+	}
+	rsp.ResourceVersion = rv
+	return rsp, err
+}
+
+func (s *server) initWatcher() error {
+	var err error
+	s.broadcaster, err = NewBroadcaster(s.ctx, func(out chan<- *WrittenEvent) error {
+		events, err := s.backend.WatchWriteEvents(s.ctx)
+		if err != nil {
+			return err
+		}
+		go func() {
+			for {
+				// pipe all events
+				v := <-events
+				s.log.Debug("Server. Streaming Event", "type", v.Type, "previousRV", v.PreviousRV, "group", v.Key.Group, "namespace", v.Key.Namespace, "resource", v.Key.Resource, "name", v.Key.Name)
+				s.mostRecentRV.Store(v.ResourceVersion)
+				out <- v
+			}
+		}()
+		return nil
+	})
+	return err
+}
+
+//nolint:gocyclo
+func (s *server) Watch(req *WatchRequest, srv ResourceStore_WatchServer) error {
+	ctx := srv.Context()
+
+	user, ok := claims.From(ctx)
+	if !ok || user == nil {
+		return apierrors.NewUnauthorized("no user found in context")
+	}
+
+	key := req.Options.Key
+	checker, err := s.access.Compile(ctx, user, authz.ListRequest{
+		Group:     key.Group,
+		Resource:  key.Resource,
+		Namespace: key.Namespace,
+	})
+	if err != nil {
+		return err
+	}
+	if checker == nil {
+		return apierrors.NewUnauthorized("not allowed to list anything") // ?? or a single error?
+	}
+
+	// Start listening -- this will buffer any changes that happen while we backfill.
+	// If events are generated faster than we can process them, then some events will be dropped.
+	// TODO: Think of a way to allow the client to catch up.
+	stream, err := s.broadcaster.Subscribe(ctx)
+	if err != nil {
+		return err
+	}
+	defer s.broadcaster.Unsubscribe(stream)
+
+	if !req.SendInitialEvents && req.Since == 0 {
+		// This is a temporary hack only relevant for tests to ensure that the first events are sent.
+		// This is required because the SQL backend polls the database every 100ms.
+		// TODO: Implement a getLatestResourceVersion method in the backend.
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	mostRecentRV := s.mostRecentRV.Load() // get the latest resource version
+	var initialEventsRV int64             // resource version coming from the initial events
+	if req.SendInitialEvents {
+		// Backfill the stream by adding every existing entities.
+		initialEventsRV, err = s.backend.ListIterator(ctx, &ListRequest{Options: req.Options}, func(iter ListIterator) error {
+			for iter.Next() {
+				if err := iter.Error(); err != nil {
+					return err
+				}
+				if err := srv.Send(&WatchEvent{
+					Type: WatchEvent_ADDED,
+					Resource: &WatchEvent_Resource{
+						Value:   iter.Value(),
+						Version: iter.ResourceVersion(),
+					},
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if req.SendInitialEvents && req.AllowWatchBookmarks {
+		if err := srv.Send(&WatchEvent{
+			Type: WatchEvent_BOOKMARK,
+			Resource: &WatchEvent_Resource{
+				Version: initialEventsRV,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+
+	var since int64 // resource version to start watching from
+	switch {
+	case req.SendInitialEvents:
+		since = initialEventsRV
+	case req.Since == 0:
+		since = mostRecentRV
+	default:
+		since = req.Since
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+
+		case event, ok := <-stream:
+			if !ok {
+				s.log.Debug("watch events closed")
+				return nil
+			}
+			s.log.Debug("Server Broadcasting", "type", event.Type, "rv", event.ResourceVersion, "previousRV", event.PreviousRV, "group", event.Key.Group, "namespace", event.Key.Namespace, "resource", event.Key.Resource, "name", event.Key.Name)
+			if event.ResourceVersion > since && matchesQueryKey(req.Options.Key, event.Key) {
+				if !checker(event.Key.Namespace, event.Key.Name, event.Folder) {
+					continue
+				}
+
+				value := event.Value
+				// remove the delete marker stored in the value for deleted objects
+				if event.Type == WatchEvent_DELETED {
+					value = []byte{}
+				}
+				resp := &WatchEvent{
+					Timestamp: event.Timestamp,
+					Type:      event.Type,
+					Resource: &WatchEvent_Resource{
+						Value:   value,
+						Version: event.ResourceVersion,
+					},
+				}
+				if event.PreviousRV > 0 {
+					prevObj, err := s.Read(ctx, &ReadRequest{Key: event.Key, ResourceVersion: event.PreviousRV})
+					if err != nil {
+						// This scenario should never happen, but if it does, we should log it and continue
+						// sending the event without the previous object. The client will decide what to do.
+						s.log.Error("error reading previous object", "key", event.Key, "resource_version", event.PreviousRV, "error", prevObj.Error)
+					} else {
+						if prevObj.ResourceVersion != event.PreviousRV {
+							s.log.Error("resource version mismatch", "key", event.Key, "resource_version", event.PreviousRV, "actual", prevObj.ResourceVersion)
+							return fmt.Errorf("resource version mismatch")
+						}
+						resp.Previous = &WatchEvent_Resource{
+							Value:   prevObj.Value,
+							Version: prevObj.ResourceVersion,
+						}
+					}
+				}
+				if err := srv.Send(resp); err != nil {
+					return err
+				}
+
+				// record latency - resource version is a unix timestamp in microseconds so we convert to seconds
+				latencySeconds := float64(time.Now().UnixMicro()-event.ResourceVersion) / 1e6
+				if latencySeconds > 0 {
+					StorageServerMetrics.WatchEventLatency.WithLabelValues(event.Key.Resource).Observe(latencySeconds)
+				}
+			}
+		}
+	}
+}
+
+func (s *server) Search(ctx context.Context, req *ResourceSearchRequest) (*ResourceSearchResponse, error) {
+	if s.search == nil {
+		return nil, fmt.Errorf("search index not configured")
+	}
+	return s.search.Search(ctx, req)
+}
+
+// History implements ResourceServer.
+func (s *server) History(ctx context.Context, req *HistoryRequest) (*HistoryResponse, error) {
+	return s.search.History(ctx, req)
+}
+
+// Origin implements ResourceServer.
+func (s *server) Origin(ctx context.Context, req *OriginRequest) (*OriginResponse, error) {
+	return s.search.Origin(ctx, req)
+}
+
+// IsHealthy implements ResourceServer.
+func (s *server) IsHealthy(ctx context.Context, req *HealthCheckRequest) (*HealthCheckResponse, error) {
+	return s.diagnostics.IsHealthy(ctx, req)
+}
+
+// GetBlob implements BlobStore.
+func (s *server) PutBlob(ctx context.Context, req *PutBlobRequest) (*PutBlobResponse, error) {
+	if s.blob == nil {
+		return &PutBlobResponse{Error: &ErrorResult{
+			Message: "blob store not configured",
+			Code:    http.StatusNotImplemented,
+		}}, nil
+	}
+
+	rsp, err := s.blob.PutResourceBlob(ctx, req)
+	if err != nil {
+		rsp.Error = AsErrorResult(err)
+	}
+	return rsp, nil
+}
+
+func (s *server) getPartialObject(ctx context.Context, key *ResourceKey, rv int64) (utils.GrafanaMetaAccessor, *ErrorResult) {
+	if r := verifyRequestKey(key); r != nil {
+		return nil, r
+	}
+
+	rsp := s.backend.ReadResource(ctx, &ReadRequest{
+		Key:             key,
+		ResourceVersion: rv,
+	})
+	if rsp.Error != nil {
+		return nil, rsp.Error
+	}
+
+	partial := &metav1.PartialObjectMetadata{}
+	err := json.Unmarshal(rsp.Value, partial)
+	if err != nil {
+		return nil, AsErrorResult(err)
+	}
+	obj, err := utils.MetaAccessor(partial)
+	if err != nil {
+		return nil, AsErrorResult(err)
+	}
+	return obj, nil
+}
+
+// GetBlob implements BlobStore.
+func (s *server) GetBlob(ctx context.Context, req *GetBlobRequest) (*GetBlobResponse, error) {
+	if s.blob == nil {
+		return &GetBlobResponse{Error: &ErrorResult{
+			Message: "blob store not configured",
+			Code:    http.StatusNotImplemented,
+		}}, nil
+	}
+
+	// The linked blob is stored in the resource metadata attributes
+	obj, status := s.getPartialObject(ctx, req.Resource, req.ResourceVersion)
+	if status != nil {
+		return &GetBlobResponse{Error: status}, nil
+	}
+
+	info := obj.GetBlob()
+	if info == nil || info.UID == "" {
+		return &GetBlobResponse{Error: &ErrorResult{
+			Message: "Resource does not have a linked blob",
+			Code:    404,
+		}}, nil
+	}
+
+	rsp, err := s.blob.GetResourceBlob(ctx, req.Resource, info, req.MustProxyBytes)
+	if err != nil {
+		rsp.Error = AsErrorResult(err)
+	}
+	return rsp, nil
+}
+
+
+===== FILE pkg/storage/unified/search/bleve.go (after PR) =====
+package search
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"github.com/blevesearch/bleve/v2"
+	"github.com/blevesearch/bleve/v2/search"
+	"github.com/blevesearch/bleve/v2/search/query"
+	"go.opentelemetry.io/otel/trace"
+	"k8s.io/apimachinery/pkg/selection"
+
+	"github.com/grafana/authlib/authz"
+	"github.com/grafana/grafana/pkg/storage/unified/resource"
+)
+
+const tracingPrexfixBleve = "unified_search.bleve."
+
+var _ resource.SearchBackend = &bleveBackend{}
+var _ resource.ResourceIndex = &bleveIndex{}
+
+type BleveOptions struct {
+	// The root folder where file objects are saved
+	Root string
+
+	// The resource count where values switch from memory to file based
+	FileThreshold int64
+
+	// How big should a batch get before flushing
+	// ?? not totally sure the units
+	BatchSize int
+}
+
+type bleveBackend struct {
+	tracer trace.Tracer
+	log    *slog.Logger
+	opts   BleveOptions
+
+	// cache info
+	cache   map[resource.NamespacedResource]*bleveIndex
+	cacheMu sync.RWMutex
+}
+
+func NewBleveBackend(opts BleveOptions, tracer trace.Tracer) *bleveBackend {
+	b := &bleveBackend{
+		log:    slog.Default().With("logger", "bleve-backend"),
+		tracer: tracer,
+		cache:  make(map[resource.NamespacedResource]*bleveIndex),
+		opts:   opts,
+	}
+
+	return b
+}
+
+// This will return nil if the key does not exist
+func (b *bleveBackend) GetIndex(ctx context.Context, key resource.NamespacedResource) (resource.ResourceIndex, error) {
+	b.cacheMu.RLock()
+	defer b.cacheMu.RUnlock()
+
+	idx, ok := b.cache[key]
+	if ok {
+		return idx, nil
+	}
+	return nil, nil
+}
+
+// Build an index from scratch
+func (b *bleveBackend) BuildIndex(ctx context.Context,
+	key resource.NamespacedResource,
+
+	// When the size is known, it will be passed along here
+	// Depending on the size, the backend may choose different options (eg: memory vs disk)
+	size int64,
+
+	// The last known resource version can be used to know that we can skip calling the builder
+	resourceVersion int64,
+
+	// the non-standard searchable fields
+	fields resource.SearchableDocumentFields,
+
+	// The builder will write all documents before returning
+	builder func(index resource.ResourceIndex) (int64, error),
+) (resource.ResourceIndex, error) {
+	_, span := b.tracer.Start(ctx, tracingPrexfixBleve+"BuildIndex")
+	defer span.End()
+
+	var err error
+	var index bleve.Index
+
+	mapper := getBleveMappings(fields)
+
+	if size > b.opts.FileThreshold {
+		dir := filepath.Join(b.opts.Root, key.Namespace, fmt.Sprintf("%s.%s", key.Resource, key.Group))
+		index, err = bleve.New(dir, mapper)
+
+		// TODO, check last RV so we can see if the numbers have changed
+
+		resource.IndexMetrics.IndexTenants.WithLabelValues(key.Namespace, "file").Inc()
+	} else {
+		index, err = bleve.NewMemOnly(mapper)
+		resource.IndexMetrics.IndexTenants.WithLabelValues(key.Namespace, "memory").Inc()
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Batch all the changes
+	idx := &bleveIndex{
+		key:       key,
+		index:     index,
+		batch:     index.NewBatch(),
+		batchSize: b.opts.BatchSize,
+		fields:    fields,
+		standard:  resource.StandardSearchFields(),
+	}
+
+	idx.allFields, err = getAllFields(idx.standard, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = builder(idx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Flush the batch
+	err = idx.Flush()
+	if err != nil {
+		return nil, err
+	}
+
+	b.cacheMu.Lock()
+	b.cache[key] = idx
+	b.cacheMu.Unlock()
+	return idx, nil
+}
+
+// TotalDocs returns the total number of documents across all indices
+func (b *bleveBackend) TotalDocs() int64 {
+	var totalDocs int64
+	for _, v := range b.cache {
+		c, err := v.index.DocCount()
+		if err != nil {
+			continue
+		}
+		totalDocs += int64(c)
+	}
+	return totalDocs
+}
+
+type bleveIndex struct {
+	key   resource.NamespacedResource
+	index bleve.Index
+
+	standard resource.SearchableDocumentFields
+	fields   resource.SearchableDocumentFields
+
+	// The values returned with all
+	allFields []*resource.ResourceTableColumnDefinition
+
+	// only valid in single thread
+	batch     *bleve.Batch
+	batchSize int // ??? not totally sure the units here
+}
+
+// Write implements resource.DocumentIndex.
+func (b *bleveIndex) Write(v *resource.IndexableDocument) error {
+	// remove references (for now!)
+	v.References = nil
+	if b.batch != nil {
+		err := b.batch.Index(v.Key.SearchID(), v)
+		if err != nil {
+			return err
+		}
+		if b.batch.Size() > b.batchSize {
+			err = b.index.Batch(b.batch)
+			b.batch.Reset() // clear the batch
+		}
+		return err // nil
+	}
+	return b.index.Index(v.Key.SearchID(), v)
+}
+
+// Delete implements resource.DocumentIndex.
+func (b *bleveIndex) Delete(key *resource.ResourceKey) error {
+	if b.batch != nil {
+		return fmt.Errorf("unexpected delete while building batch")
+	}
+	return b.index.Delete(key.SearchID())
+}
+
+// Flush implements resource.DocumentIndex.
+func (b *bleveIndex) Flush() (err error) {
+	if b.batch != nil {
+		err = b.index.Batch(b.batch)
+		b.batch.Reset()
+		b.batch = nil
+	}
+	return err
+}
+
+// Origin implements resource.DocumentIndex.
+func (b *bleveIndex) Origin(ctx context.Context, req *resource.OriginRequest) (*resource.OriginResponse, error) {
+	panic("unimplemented")
+}
+
+// Search implements resource.DocumentIndex.
+func (b *bleveIndex) Search(
+	ctx context.Context,
+	access authz.AccessClient,
+	req *resource.ResourceSearchRequest,
+	federate []resource.ResourceIndex, // For federated queries, these will match the values in req.federate
+) (*resource.ResourceSearchResponse, error) {
+	if req.Options == nil || req.Options.Key == nil {
+		return &resource.ResourceSearchResponse{
+			Error: resource.NewBadRequestError("missing query key"),
+		}, nil
+	}
+
+	response := &resource.ResourceSearchResponse{
+		Error: b.verifyKey(req.Options.Key),
+	}
+	if response.Error != nil {
+		return response, nil
+	}
+
+	// Verifies the index federation
+	index, err := b.getIndex(req, federate)
+	if err != nil {
+		return nil, err
+	}
+
+	// convert protobuf request to bleve request
+	searchrequest, e := toBleveSearchRequest(req, access)
+	if e != nil {
+		response.Error = e
+		return response, nil
+	}
+
+	// Show all fields when nothing is selected
+	if len(searchrequest.Fields) < 1 && req.Limit > 0 {
+		f, err := b.index.Fields()
+		if err != nil {
+			return nil, err
+		}
+		searchrequest.Fields = f
+	}
+
+	res, err := index.Search(searchrequest)
+	if err != nil {
+		return nil, err
+	}
+
+	response.TotalHits = int64(res.Total)
+	response.QueryCost = float64(res.Cost)
+	response.MaxScore = res.MaxScore
+
+	response.Results, err = b.hitsToTable(searchrequest.Fields, res.Hits, req.Explain)
+	if err != nil {
+		return nil, err
+	}
+
+	// Write frame as JSON
+	//response.Frame, err = frame.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+
+	// parse the facet fields
+	for k, v := range res.Facets {
+		f := &resource.ResourceSearchResponse_Facet{
+			Field:   v.Field,
+			Total:   int64(v.Total),
+			Missing: int64(v.Missing),
+		}
+		if v.Terms != nil {
+			for _, t := range v.Terms.Terms() {
+				f.Terms = append(f.Terms, &resource.ResourceSearchResponse_TermFacet{
+					Term:  t.Term,
+					Count: int64(t.Count),
+				})
+			}
+		}
+		if response.Facet == nil {
+			response.Facet = make(map[string]*resource.ResourceSearchResponse_Facet)
+		}
+		response.Facet[k] = f
+	}
+	return response, nil
+}
+
+func (b *bleveIndex) DocCount() (int, error) {
+	count, err := b.index.DocCount()
+	return int(count), err
+}
+
+// make sure the request key matches the index
+func (b *bleveIndex) verifyKey(key *resource.ResourceKey) *resource.ErrorResult {
+	if key.Namespace != b.key.Namespace {
+		return resource.NewBadRequestError("namespace mismatch (expected " + b.key.Namespace + ")")
+	}
+	if key.Group != b.key.Group {
+		return resource.NewBadRequestError("group mismatch (expected " + b.key.Group + ")")
+	}
+	if key.Resource != b.key.Resource {
+		return resource.NewBadRequestError("resource mismatch (expected " + b.key.Resource + ")")
+	}
+	return nil
+}
+
+func (b *bleveIndex) getIndex(
+	req *resource.ResourceSearchRequest,
+	federate []resource.ResourceIndex,
+) (bleve.Index, error) {
+	if len(req.Federated) != len(federate) {
+		return nil, fmt.Errorf("federation is misconfigured")
+	}
+
+	// Search across resources using
+	// https://blevesearch.com/docs/IndexAlias/
+	if len(federate) > 0 {
+		all := []bleve.Index{b.index}
+		for i, extra := range federate {
+			typedindex, ok := extra.(*bleveIndex)
+			if !ok {
+				return nil, fmt.Errorf("federated indexes must be the same type")
+			}
+			if typedindex.verifyKey(req.Federated[i]) != nil {
+				return nil, fmt.Errorf("federated index keys do not match")
+			}
+			all = append(all, typedindex.index)
+		}
+		return bleve.NewIndexAlias(all...), nil
+	}
+	return b.index, nil
+}
+
+func toBleveSearchRequest(req *resource.ResourceSearchRequest, access authz.AccessClient) (*bleve.SearchRequest, *resource.ErrorResult) {
+	searchrequest := &bleve.SearchRequest{
+		Fields:  req.Fields,
+		Size:    int(req.Limit),
+		From:    int(req.Offset),
+		Explain: req.Explain,
+	}
+
+	// Currently everything is within an AND query
+	queries := []query.Query{}
+	if len(req.Options.Labels) > 0 {
+		for _, v := range req.Options.Labels {
+			q, err := requirementQuery(v, "labels.")
+			if err != nil {
+				return nil, err
+			}
+			queries = append(queries, q)
+		}
+	}
+	if len(req.Options.Fields) > 0 {
+		for _, v := range req.Options.Fields {
+			q, err := requirementQuery(v, "")
+			if err != nil {
+				return nil, err
+			}
+			queries = append(queries, q)
+		}
+	}
+
+	if req.Query != "" {
+		// ??? Should expose the full power of query parsing here?
+		// it is great for exploration, but also hard to change in the future
+		q := bleve.NewQueryStringQuery(req.Query)
+		queries = append(queries, q)
+	}
+
+	if access != nil {
+		// TODO AUTHZ!!!!
+		// Need to add an authz filter into the mix
+		// See: https://github.com/grafana/grafana/blob/v11.3.0/pkg/services/searchV2/bluge.go
+		// NOTE, we likely want to pass in the already called checker because the resource server
+		// will first need to check if we can see anything (or everything!) for this resource
+		fmt.Printf("TODO... check authorization\n")
+	}
+
+	switch len(queries) {
+	case 0:
+		searchrequest.Query = bleve.NewMatchAllQuery()
+	case 1:
+		searchrequest.Query = queries[0]
+	default:
+		searchrequest.Query = bleve.NewConjunctionQuery(queries...) // AND
+	}
+
+	for k, v := range req.Facet {
+		if searchrequest.Facets == nil {
+			searchrequest.Facets = make(bleve.FacetsRequest)
+		}
+		searchrequest.Facets[k] = bleve.NewFacetRequest(v.Field, int(v.Limit))
+	}
+
+	// Add the sort fields
+	for _, sort := range req.SortBy {
+		// hardcoded (for now)
+		if strings.HasPrefix(sort.Field, "stats.") {
+			searchrequest.Sort = append(searchrequest.Sort, &search.SortField{
+				Field:   sort.Field,
+				Desc:    sort.Desc,
+				Type:    search.SortFieldAsNumber, // force for now!
+				Mode:    search.SortFieldDefault,  // ???
+				Missing: search.SortFieldMissingLast,
+			})
+			continue
+		}
+
+		// Default support
+		input := sort.Field
+		if sort.Desc {
+			input = "-" + sort.Field
+		}
+		s := search.ParseSearchSortString(input)
+		searchrequest.Sort = append(searchrequest.Sort, s)
+	}
+
+	// Always sort by *something*, otherwise the order is unstable
+	if len(searchrequest.Sort) == 0 {
+		searchrequest.Sort = append(searchrequest.Sort, &search.SortDocID{
+			Desc: false,
+		})
+	}
+
+	return searchrequest, nil
+}
+
+// Convert a "requirement" into a bleve query
+func requirementQuery(req *resource.Requirement, prefix string) (query.Query, *resource.ErrorResult) {
+	switch selection.Operator(req.Operator) {
+	case selection.Equals, selection.DoubleEquals:
+		if len(req.Values) != 1 {
+			return nil, resource.NewBadRequestError("equals query can have one value")
+		}
+		q := query.NewMatchQuery(req.Values[0])
+		q.FieldVal = prefix + req.Key
+		return q, nil
+
+	case selection.NotEquals:
+	case selection.DoesNotExist:
+	case selection.GreaterThan:
+	case selection.LessThan:
+	case selection.Exists:
+	case selection.In:
+	case selection.NotIn:
+	}
+	return nil, resource.NewBadRequestError(
+		fmt.Sprintf("unsupported query operation (%s %s %v)", req.Key, req.Operator, req.Values),
+	)
+}
+
+func (b *bleveIndex) hitsToTable(selectFields []string, hits search.DocumentMatchCollection, explain bool) (*resource.ResourceTable, error) {
+	fields := []*resource.ResourceTableColumnDefinition{}
+	for _, name := range selectFields {
+		if name == "_all" {
+			fields = b.allFields
+			break
+		}
+
+		f := b.standard.Field(name)
+		if f == nil && b.fields != nil {
+			f = b.fields.Field(name)
+		}
+		if f == nil {
+			// Labels as a string
+			if strings.HasPrefix(name, "labels.") {
+				f = &resource.ResourceTableColumnDefinition{
+					Name: name,
+					Type: resource.ResourceTableColumnDefinition_STRING,
+				}
+			}
+
+			// return nil, fmt.Errorf("unknown response field: " + name)
+			if f == nil {
+				continue // OK for now
+			}
+		}
+		fields = append(fields, f)
+	}
+	if explain {
+		fields = append(fields, b.standard.Field(resource.SEARCH_FIELD_EXPLAIN))
+	}
+
+	builder, err := resource.NewTableBuilder(fields)
+	if err != nil {
+		return nil, err
+	}
+	encoders := builder.Encoders()
+
+	table := &resource.ResourceTable{
+		Columns: fields,
+		Rows:    make([]*resource.ResourceTableRow, hits.Len()),
+	}
+	for rowID, match := range hits {
+		row := &resource.ResourceTableRow{
+			Key:   &resource.ResourceKey{},
+			Cells: make([][]byte, len(fields)),
+		}
+		table.Rows[rowID] = row
+
+		err := row.Key.ReadSearchID(match.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, f := range fields {
+			if f.Name == resource.SEARCH_FIELD_ID {
+				row.Cells[i] = []byte(match.ID)
+				continue
+			}
+
+			// QUICK QUICK... more options yes
+			v := match.Fields[f.Name]
+			if v != nil {
+				// Encode the value to protobuf
+				row.Cells[i], err = encoders[i](v)
+				if err != nil {
+					return nil, fmt.Errorf("error encoding (row:%d/col:%d) %v %w", rowID, i, v, err)
+				}
+			}
+		}
+	}
+
+	return table, nil
+}
+
+func getAllFields(standard resource.SearchableDocumentFields, custom resource.SearchableDocumentFields) ([]*resource.ResourceTableColumnDefinition, error) {
+	fields := []*resource.ResourceTableColumnDefinition{
+		standard.Field(resource.SEARCH_FIELD_ID),
+		standard.Field(resource.SEARCH_FIELD_TITLE),
+		standard.Field(resource.SEARCH_FIELD_TAGS),
+		standard.Field(resource.SEARCH_FIELD_FOLDER),
+		standard.Field(resource.SEARCH_FIELD_RV),
+		standard.Field(resource.SEARCH_FIELD_CREATED),
+	}
+
+	if custom != nil {
+		for _, name := range custom.Fields() {
+			f := custom.Field(name)
+			if f.Priority > 10 {
+				continue
+			}
+			fields = append(fields, f)
+		}
+	}
+	for _, field := range fields {
+		if field == nil {
+			return nil, fmt.Errorf("invalid all field")
+		}
+	}
+	return fields, nil
+}
+
+
+===== FILE pkg/storage/unified/sql/backend.go (after PR) =====
+package sql
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"math"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+	"google.golang.org/protobuf/proto"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
+	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/storage/unified/resource"
+	"github.com/grafana/grafana/pkg/storage/unified/sql/db"
+	"github.com/grafana/grafana/pkg/storage/unified/sql/dbutil"
+	"github.com/grafana/grafana/pkg/storage/unified/sql/sqltemplate"
+)
+
+const tracePrefix = "sql.resource."
+const defaultPollingInterval = 100 * time.Millisecond
+
+type Backend interface {
+	resource.StorageBackend
+	resource.DiagnosticsServer
+	resource.LifecycleHooks
+}
+
+type BackendOptions struct {
+	DBProvider      db.DBProvider
+	Tracer          trace.Tracer
+	PollingInterval time.Duration
+}
+
+func NewBackend(opts BackendOptions) (Backend, error) {
+	if opts.DBProvider == nil {
+		return nil, errors.New("no db provider")
+	}
+	if opts.Tracer == nil {
+		opts.Tracer = noop.NewTracerProvider().Tracer("sql-backend")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pollingInterval := opts.PollingInterval
+	if pollingInterval == 0 {
+		pollingInterval = defaultPollingInterval
+	}
+	return &backend{
+		done:            ctx.Done(),
+		cancel:          cancel,
+		log:             log.New("sql-resource-server"),
+		tracer:          opts.Tracer,
+		dbProvider:      opts.DBProvider,
+		pollingInterval: pollingInterval,
+	}, nil
+}
+
+type backend struct {
+	// server lifecycle
+	done     <-chan struct{}
+	cancel   context.CancelFunc
+	initOnce sync.Once
+	initErr  error
+
+	// o11y
+	log    log.Logger
+	tracer trace.Tracer
+
+	// database
+	dbProvider db.DBProvider
+	db         db.DB
+	dialect    sqltemplate.Dialect
+
+	// watch streaming
+	//stream chan *resource.WatchEvent
+	pollingInterval time.Duration
+}
+
+func (b *backend) Init(ctx context.Context) error {
+	b.initOnce.Do(func() {
+		b.initErr = b.initLocked(ctx)
+	})
+	return b.initErr
+}
+
+func (b *backend) initLocked(ctx context.Context) error {
+	db, err := b.dbProvider.Init(ctx)
+	if err != nil {
+		return fmt.Errorf("initialize resource DB: %w", err)
+	}
+	b.db = db
+
+	driverName := db.DriverName()
+	b.dialect = sqltemplate.DialectForDriver(driverName)
+	if b.dialect == nil {
+		return fmt.Errorf("no dialect for driver %q", driverName)
+	}
+
+	return b.db.PingContext(ctx)
+}
+
+func (b *backend) IsHealthy(ctx context.Context, r *resource.HealthCheckRequest) (*resource.HealthCheckResponse, error) {
+	// ctxLogger := s.log.FromContext(log.WithContextualAttributes(ctx, []any{"method", "isHealthy"}))
+
+	if err := b.db.PingContext(ctx); err != nil {
+		return nil, err
+	}
+
+	return &resource.HealthCheckResponse{Status: resource.HealthCheckResponse_SERVING}, nil
+}
+
+func (b *backend) Stop(_ context.Context) error {
+	b.cancel()
+	return nil
+}
+
+// GetResourceStats implements Backend.
+func (b *backend) GetResourceStats(ctx context.Context, namespace string, minCount int) ([]resource.ResourceStats, error) {
+	ctx, span := b.tracer.Start(ctx, tracePrefix+".GetResourceStats")
+	defer span.End()
+
+	req := &sqlStatsRequest{
+		SQLTemplate: sqltemplate.New(b.dialect),
+		Namespace:   namespace,
+		MinCount:    minCount, // not used in query... yet?
+	}
+
+	res := make([]resource.ResourceStats, 0, 100)
+	err := b.db.WithTx(ctx, ReadCommittedRO, func(ctx context.Context, tx db.Tx) error {
+		rows, err := dbutil.QueryRows(ctx, tx, sqlResourceStats, req)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			row := resource.ResourceStats{}
+			err = rows.Scan(&row.Namespace, &row.Group, &row.Resource, &row.Count, &row.ResourceVersion)
+			if err != nil {
+				return err
+			}
+			if row.Count > int64(minCount) {
+				res = append(res, row)
+			}
+		}
+		return err
+	})
+
+	return res, err
+}
+
+func (b *backend) WriteEvent(ctx context.Context, event resource.WriteEvent) (int64, error) {
+	_, span := b.tracer.Start(ctx, tracePrefix+"WriteEvent")
+	defer span.End()
+	// TODO: validate key ?
+	switch event.Type {
+	case resource.WatchEvent_ADDED:
+		return b.create(ctx, event)
+	case resource.WatchEvent_MODIFIED:
+		return b.update(ctx, event)
+	case resource.WatchEvent_DELETED:
+		return b.delete(ctx, event)
+	default:
+		return 0, fmt.Errorf("unsupported event type")
+	}
+}
+
+func (b *backend) create(ctx context.Context, event resource.WriteEvent) (int64, error) {
+	ctx, span := b.tracer.Start(ctx, tracePrefix+"Create")
+	defer span.End()
+	var newVersion int64
+	guid := uuid.New().String()
+	err := b.db.WithTx(ctx, ReadCommitted, func(ctx context.Context, tx db.Tx) error {
+		folder := ""
+		if event.Object != nil {
+			folder = event.Object.GetFolder()
+		}
+		// 1. Insert into resource
+		if _, err := dbutil.Exec(ctx, tx, sqlResourceInsert, sqlResourceRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			WriteEvent:  event,
+			Folder:      folder,
+			GUID:        guid,
+		}); err != nil {
+			return fmt.Errorf("insert into resource: %w", err)
+		}
+
+		// 2. Insert into resource history
+		if _, err := dbutil.Exec(ctx, tx, sqlResourceHistoryInsert, sqlResourceRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			WriteEvent:  event,
+			Folder:      folder,
+			GUID:        guid,
+		}); err != nil {
+			return fmt.Errorf("insert into resource history: %w", err)
+		}
+
+		// 3. TODO: Rebuild the whole folder tree structure if we're creating a folder
+
+		// 4. Atomically increment resource version for this kind
+		rv, err := b.resourceVersionAtomicInc(ctx, tx, event.Key)
+		if err != nil {
+			return fmt.Errorf("increment resource version: %w", err)
+		}
+
+		// 5. Update the RV in both resource and resource_history
+		if _, err = dbutil.Exec(ctx, tx, sqlResourceHistoryUpdateRV, sqlResourceUpdateRVRequest{
+			SQLTemplate:     sqltemplate.New(b.dialect),
+			GUID:            guid,
+			ResourceVersion: rv,
+		}); err != nil {
+			return fmt.Errorf("update resource_history rv: %w", err)
+		}
+
+		if _, err = dbutil.Exec(ctx, tx, sqlResourceUpdateRV, sqlResourceUpdateRVRequest{
+			SQLTemplate:     sqltemplate.New(b.dialect),
+			GUID:            guid,
+			ResourceVersion: rv,
+		}); err != nil {
+			return fmt.Errorf("update resource rv: %w", err)
+		}
+		newVersion = rv
+
+		return nil
+	})
+	return newVersion, err
+}
+
+func (b *backend) update(ctx context.Context, event resource.WriteEvent) (int64, error) {
+	ctx, span := b.tracer.Start(ctx, tracePrefix+"Update")
+	defer span.End()
+	var newVersion int64
+	guid := uuid.New().String()
+	err := b.db.WithTx(ctx, ReadCommitted, func(ctx context.Context, tx db.Tx) error {
+		folder := ""
+		if event.Object != nil {
+			folder = event.Object.GetFolder()
+		}
+		// 1. Update resource
+		_, err := dbutil.Exec(ctx, tx, sqlResourceUpdate, sqlResourceRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			WriteEvent:  event,
+			Folder:      folder,
+			GUID:        guid,
+		})
+		if err != nil {
+			return fmt.Errorf("initial resource update: %w", err)
+		}
+
+		// 2. Insert into resource history
+		if _, err := dbutil.Exec(ctx, tx, sqlResourceHistoryInsert, sqlResourceRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			WriteEvent:  event,
+			Folder:      folder,
+			GUID:        guid,
+		}); err != nil {
+			return fmt.Errorf("insert into resource history: %w", err)
+		}
+
+		// 3. TODO: Rebuild the whole folder tree structure if we're creating a folder
+
+		// 4. Atomically increment resource version for this kind
+		rv, err := b.resourceVersionAtomicInc(ctx, tx, event.Key)
+		if err != nil {
+			return fmt.Errorf("increment resource version: %w", err)
+		}
+
+		// 5. Update the RV in both resource and resource_history
+		if _, err = dbutil.Exec(ctx, tx, sqlResourceHistoryUpdateRV, sqlResourceUpdateRVRequest{
+			SQLTemplate:     sqltemplate.New(b.dialect),
+			GUID:            guid,
+			ResourceVersion: rv,
+		}); err != nil {
+			return fmt.Errorf("update history rv: %w", err)
+		}
+
+		if _, err = dbutil.Exec(ctx, tx, sqlResourceUpdateRV, sqlResourceUpdateRVRequest{
+			SQLTemplate:     sqltemplate.New(b.dialect),
+			GUID:            guid,
+			ResourceVersion: rv,
+		}); err != nil {
+			return fmt.Errorf("update resource rv: %w", err)
+		}
+		newVersion = rv
+
+		return nil
+	})
+
+	return newVersion, err
+}
+
+func (b *backend) delete(ctx context.Context, event resource.WriteEvent) (int64, error) {
+	ctx, span := b.tracer.Start(ctx, tracePrefix+"Delete")
+	defer span.End()
+	var newVersion int64
+	guid := uuid.New().String()
+
+	err := b.db.WithTx(ctx, ReadCommitted, func(ctx context.Context, tx db.Tx) error {
+		folder := ""
+		if event.Object != nil {
+			folder = event.Object.GetFolder()
+		}
+		// 1. delete from resource
+		_, err := dbutil.Exec(ctx, tx, sqlResourceDelete, sqlResourceRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			WriteEvent:  event,
+			GUID:        guid,
+		})
+		if err != nil {
+			return fmt.Errorf("delete resource: %w", err)
+		}
+
+		// 2. Add event to resource history
+		if _, err := dbutil.Exec(ctx, tx, sqlResourceHistoryInsert, sqlResourceRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			WriteEvent:  event,
+			Folder:      folder,
+			GUID:        guid,
+		}); err != nil {
+			return fmt.Errorf("insert into resource history: %w", err)
+		}
+
+		// 3. TODO: Rebuild the whole folder tree structure if we're creating a folder
+
+		// 4. Atomically increment resource version for this kind
+		rv, err := b.resourceVersionAtomicInc(ctx, tx, event.Key)
+		if err != nil {
+			return fmt.Errorf("increment resource version: %w", err)
+		}
+
+		// 5. Update the RV in resource_history
+		if _, err = dbutil.Exec(ctx, tx, sqlResourceHistoryUpdateRV, sqlResourceUpdateRVRequest{
+			SQLTemplate:     sqltemplate.New(b.dialect),
+			GUID:            guid,
+			ResourceVersion: rv,
+		}); err != nil {
+			return fmt.Errorf("update history rv: %w", err)
+		}
+		newVersion = rv
+
+		return nil
+	})
+
+	return newVersion, err
+}
+
+func (b *backend) ReadResource(ctx context.Context, req *resource.ReadRequest) *resource.BackendReadResponse {
+	_, span := b.tracer.Start(ctx, tracePrefix+".Read")
+	defer span.End()
+
+	// TODO: validate key ?
+
+	readReq := &sqlResourceReadRequest{
+		SQLTemplate: sqltemplate.New(b.dialect),
+		Request:     req,
+		Response:    NewReadResponse(),
+	}
+
+	sr := sqlResourceRead
+	if req.ResourceVersion > 0 {
+		// read a specific version
+		sr = sqlResourceHistoryRead
+	}
+
+	var res *resource.BackendReadResponse
+	err := b.db.WithTx(ctx, ReadCommittedRO, func(ctx context.Context, tx db.Tx) error {
+		var err error
+		res, err = dbutil.QueryRow(ctx, tx, sr, readReq)
+		return err
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return &resource.BackendReadResponse{
+			Error: resource.NewNotFoundError(req.Key),
+		}
+	} else if err != nil {
+		return &resource.BackendReadResponse{Error: resource.AsErrorResult(err)}
+	}
+
+	return res
+}
+
+func (b *backend) ListIterator(ctx context.Context, req *resource.ListRequest, cb func(resource.ListIterator) error) (int64, error) {
+	_, span := b.tracer.Start(ctx, tracePrefix+"List")
+	defer span.End()
+
+	if req.Options == nil || req.Options.Key.Group == "" || req.Options.Key.Resource == "" {
+		return 0, fmt.Errorf("missing group or resource")
+	}
+
+	// TODO: think about how to handler VersionMatch. We should be able to use latest for the first page (only).
+
+	// TODO: add support for RemainingItemCount
+
+	if req.ResourceVersion > 0 || req.NextPageToken != "" {
+		return b.listAtRevision(ctx, req, cb)
+	}
+	return b.listLatest(ctx, req, cb)
+}
+
+type listIter struct {
+	rows   db.Rows
+	offset int64
+	listRV int64
+
+	// any error
+	err error
+
+	// The row
+	rv        int64
+	value     []byte
+	namespace string
+	name      string
+	folder    string
+}
+
+// ContinueToken implements resource.ListIterator.
+func (l *listIter) ContinueToken() string {
+	return ContinueToken{ResourceVersion: l.listRV, StartOffset: l.offset}.String()
+}
+
+func (l *listIter) Error() error {
+	return l.err
+}
+
+func (l *listIter) Name() string {
+	return l.name
+}
+
+func (l *listIter) Namespace() string {
+	return l.namespace
+}
+
+func (l *listIter) Folder() string {
+	return l.folder
+}
+
+// ResourceVersion implements resource.ListIterator.
+func (l *listIter) ResourceVersion() int64 {
+	return l.rv
+}
+
+// Value implements resource.ListIterator.
+func (l *listIter) Value() []byte {
+	return l.value
+}
+
+// Next implements resource.ListIterator.
+func (l *listIter) Next() bool {
+	if l.rows.Next() {
+		l.offset++
+		l.err = l.rows.Scan(&l.rv, &l.namespace, &l.name, &l.folder, &l.value)
+		return true
+	}
+	return false
+}
+
+var _ resource.ListIterator = (*listIter)(nil)
+
+// listLatest fetches the resources from the resource table.
+func (b *backend) listLatest(ctx context.Context, req *resource.ListRequest, cb func(resource.ListIterator) error) (int64, error) {
+	if req.NextPageToken != "" {
+		return 0, fmt.Errorf("only works for the first page")
+	}
+	if req.ResourceVersion > 0 {
+		return 0, fmt.Errorf("only works for the 'latest' resource version")
+	}
+
+	iter := &listIter{}
+	err := b.db.WithTx(ctx, ReadCommittedRO, func(ctx context.Context, tx db.Tx) error {
+		var err error
+		iter.listRV, err = fetchLatestRV(ctx, tx, b.dialect, req.Options.Key.Group, req.Options.Key.Resource)
+		if err != nil {
+			return err
+		}
+
+		listReq := sqlResourceListRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			Request:     new(resource.ListRequest),
+		}
+		listReq.Request = proto.Clone(req).(*resource.ListRequest)
+
+		rows, err := dbutil.QueryRows(ctx, tx, sqlResourceList, listReq)
+		if rows != nil {
+			defer func() {
+				if err := rows.Close(); err != nil {
+					b.log.Warn("listLatest error closing rows", "error", err)
+				}
+			}()
+		}
+		if err != nil {
+			return err
+		}
+
+		iter.rows = rows
+		return cb(iter)
+	})
+	return iter.listRV, err
+}
+
+// listAtRevision fetches the resources from the resource_history table at a specific revision.
+func (b *backend) listAtRevision(ctx context.Context, req *resource.ListRequest, cb func(resource.ListIterator) error) (int64, error) {
+	// Get the RV
+	iter := &listIter{listRV: req.ResourceVersion}
+	if req.NextPageToken != "" {
+		continueToken, err := GetContinueToken(req.NextPageToken)
+		if err != nil {
+			return 0, fmt.Errorf("get continue token: %w", err)
+		}
+		iter.listRV = continueToken.ResourceVersion
+		iter.offset = continueToken.StartOffset
+
+		if req.ResourceVersion != 0 && req.ResourceVersion != iter.listRV {
+			return 0, apierrors.NewBadRequest("request resource version does not math token")
+		}
+	}
+	if iter.listRV < 1 {
+		return 0, apierrors.NewBadRequest("expecting an explicit resource version query")
+	}
+
+	err := b.db.WithTx(ctx, ReadCommittedRO, func(ctx context.Context, tx db.Tx) error {
+		limit := int64(0) // ignore limit
+		if iter.offset > 0 {
+			limit = math.MaxInt64 // a limit is required for offset
+		}
+		listReq := sqlResourceHistoryListRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			Request: &historyListRequest{
+				ResourceVersion: iter.listRV,
+				Limit:           limit,
+				Offset:          iter.offset,
+				Options:         req.Options,
+			},
+		}
+
+		rows, err := dbutil.QueryRows(ctx, tx, sqlResourceHistoryList, listReq)
+		if rows != nil {
+			defer func() {
+				if err := rows.Close(); err != nil {
+					b.log.Warn("listAtRevision error closing rows", "error", err)
+				}
+			}()
+		}
+		if err != nil {
+			return err
+		}
+
+		iter.rows = rows
+		return cb(iter)
+	})
+	return iter.listRV, err
+}
+
+func (b *backend) WatchWriteEvents(ctx context.Context) (<-chan *resource.WrittenEvent, error) {
+	// Get the latest RV
+	since, err := b.listLatestRVs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get the latest resource version: %w", err)
+	}
+	// Start the poller
+	stream := make(chan *resource.WrittenEvent)
+	go b.poller(ctx, since, stream)
+	return stream, nil
+}
+
+func (b *backend) poller(ctx context.Context, since groupResourceRV, stream chan<- *resource.WrittenEvent) {
+	t := time.NewTicker(b.pollingInterval)
+	defer close(stream)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-b.done:
+			return
+		case <-t.C:
+			ctx, span := b.tracer.Start(ctx, tracePrefix+"poller")
+			// List the latest RVs
+			grv, err := b.listLatestRVs(ctx)
+			if err != nil {
+				b.log.Error("get the latest resource version", "err", err)
+				t.Reset(b.pollingInterval)
+				continue
+			}
+			for group, items := range grv {
+				for resource := range items {
+					// If we haven't seen this resource before, we start from 0
+					if _, ok := since[group]; !ok {
+						since[group] = make(map[string]int64)
+					}
+					if _, ok := since[group][resource]; !ok {
+						since[group][resource] = 0
+					}
+
+					// Poll for new events
+					next, err := b.poll(ctx, group, resource, since[group][resource], stream)
+					if err != nil {
+						b.log.Error("polling for resource", "err", err)
+						t.Reset(b.pollingInterval)
+						continue
+					}
+					if next > since[group][resource] {
+						since[group][resource] = next
+					}
+				}
+			}
+
+			t.Reset(b.pollingInterval)
+			span.End()
+		}
+	}
+}
+
+// listLatestRVs returns the latest resource version for each (Group, Resource) pair.
+func (b *backend) listLatestRVs(ctx context.Context) (groupResourceRV, error) {
+	ctx, span := b.tracer.Start(ctx, tracePrefix+"listLatestRVs")
+	defer span.End()
+	var grvs []*groupResourceVersion
+	err := b.db.WithTx(ctx, ReadCommittedRO, func(ctx context.Context, tx db.Tx) error {
+		var err error
+		grvs, err = dbutil.Query(ctx, tx, sqlResourceVersionList, &sqlResourceVersionListRequest{
+			SQLTemplate:          sqltemplate.New(b.dialect),
+			groupResourceVersion: new(groupResourceVersion),
+		})
+
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	since := groupResourceRV{}
+	for _, grv := range grvs {
+		if since[grv.Group] == nil {
+			since[grv.Group] = map[string]int64{}
+		}
+		since[grv.Group][grv.Resource] = grv.ResourceVersion
+	}
+
+	return since, nil
+}
+
+// fetchLatestRV returns the current maximum RV in the resource table
+func fetchLatestRV(ctx context.Context, x db.ContextExecer, d sqltemplate.Dialect, group, resource string) (int64, error) {
+	res, err := dbutil.QueryRow(ctx, x, sqlResourceVersionGet, sqlResourceVersionGetRequest{
+		SQLTemplate: sqltemplate.New(d),
+		Group:       group,
+		Resource:    resource,
+		ReadOnly:    true,
+		Response:    new(resourceVersionResponse),
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return 1, nil
+	} else if err != nil {
+		return 0, fmt.Errorf("get resource version: %w", err)
+	}
+	return res.ResourceVersion, nil
+}
+
+func (b *backend) poll(ctx context.Context, grp string, res string, since int64, stream chan<- *resource.WrittenEvent) (int64, error) {
+	ctx, span := b.tracer.Start(ctx, tracePrefix+"poll")
+	defer span.End()
+	var records []*historyPollResponse
+	err := b.db.WithTx(ctx, ReadCommittedRO, func(ctx context.Context, tx db.Tx) error {
+		var err error
+		records, err = dbutil.Query(ctx, tx, sqlResourceHistoryPoll, &sqlResourceHistoryPollRequest{
+			SQLTemplate:          sqltemplate.New(b.dialect),
+			Resource:             res,
+			Group:                grp,
+			SinceResourceVersion: since,
+			Response:             &historyPollResponse{},
+		})
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("poll history: %w", err)
+	}
+
+	var nextRV int64
+	for _, rec := range records {
+		if rec.Key.Group == "" || rec.Key.Resource == "" || rec.Key.Name == "" {
+			return nextRV, fmt.Errorf("missing key in response")
+		}
+		nextRV = rec.ResourceVersion
+		prevRV := rec.PreviousRV
+		if prevRV == nil {
+			prevRV = new(int64)
+		}
+		stream <- &resource.WrittenEvent{
+			WriteEvent: resource.WriteEvent{
+				Value: rec.Value,
+				Key: &resource.ResourceKey{
+					Namespace: rec.Key.Namespace,
+					Group:     rec.Key.Group,
+					Resource:  rec.Key.Resource,
+					Name:      rec.Key.Name,
+				},
+				Type:       resource.WatchEvent_Type(rec.Action),
+				PreviousRV: *prevRV,
+			},
+			Folder:          rec.Folder,
+			ResourceVersion: rec.ResourceVersion,
+			// Timestamp:  , // TODO: add timestamp
+		}
+	}
+
+	return nextRV, nil
+}
+
+// resourceVersionAtomicInc atomically increases the version of a kind within a transaction.
+// TODO: Ideally we should attempt to update the RV in the resource and resource_history tables
+// in a single roundtrip. This would reduce the latency of the operation, and also increase the
+// throughput of the system. This is a good candidate for a future optimization.
+func (b *backend) resourceVersionAtomicInc(ctx context.Context, x db.ContextExecer, key *resource.ResourceKey) (newVersion int64, err error) {
+	ctx, span := b.tracer.Start(ctx, tracePrefix+"version_atomic_inc", trace.WithAttributes(
+		semconv.K8SNamespaceName(key.Namespace),
+		// TODO: the following attributes could use some standardization.
+		attribute.String("k8s.resource.group", key.Group),
+		attribute.String("k8s.resource.type", key.Resource),
+	))
+	defer span.End()
+
+	// 1. Lock to row and prevent concurrent updates until the transaction is committed.
+	res, err := dbutil.QueryRow(ctx, x, sqlResourceVersionGet, sqlResourceVersionGetRequest{
+		SQLTemplate: sqltemplate.New(b.dialect),
+		Group:       key.Group,
+		Resource:    key.Resource,
+
+		Response: new(resourceVersionResponse), ReadOnly: false, // This locks the row for update
+	})
+
+	if errors.Is(err, sql.ErrNoRows) {
+		// if there wasn't a row associated with the given resource, then we create it.
+		if _, err = dbutil.Exec(ctx, x, sqlResourceVersionInsert, sqlResourceVersionUpsertRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			Group:       key.Group,
+			Resource:    key.Resource,
+		}); err != nil {
+			return 0, fmt.Errorf("insert into resource_version: %w", err)
+		}
+		res, err = dbutil.QueryRow(ctx, x, sqlResourceVersionGet, sqlResourceVersionGetRequest{
+			SQLTemplate: sqltemplate.New(b.dialect),
+			Group:       key.Group,
+			Resource:    key.Resource,
+			Response:    new(resourceVersionResponse),
+			ReadOnly:    true, // This locks the row for update
+		})
+		if err != nil {
+			return 0, fmt.Errorf("fetching RV after read")
+		}
+		return res.ResourceVersion, nil
+	} else if err != nil {
+		return 0, fmt.Errorf("lock the resource version: %w", err)
+	}
+
+	// 2. Update the RV
+	// Most times, the RV is the current microsecond timestamp generated on the sql server (to avoid clock skew).
+	// In rare occasion, the server clock might go back in time. In those cases, we simply increment the
+	// previous RV until the clock catches up.
+	nextRV := max(res.CurrentEpoch, res.ResourceVersion+1)
+
+	_, err = dbutil.Exec(ctx, x, sqlResourceVersionUpdate, sqlResourceVersionUpsertRequest{
+		SQLTemplate:     sqltemplate.New(b.dialect),
+		Group:           key.Group,
+		Resource:        key.Resource,
+		ResourceVersion: nextRV,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("increase resource version: %w", err)
+	}
+	return nextRV, nil
+}

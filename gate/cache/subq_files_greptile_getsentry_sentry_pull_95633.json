@@ -1,0 +1,1 @@
+{"Race condition: two threads could simultaneously call `setdefault` for the same partition, creating two different lock objects. This breaks the thread-safety guarantee since different threads might acquire different locks.": 0.9288407564163208}

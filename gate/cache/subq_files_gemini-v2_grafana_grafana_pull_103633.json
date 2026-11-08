@@ -1,0 +1,1 @@
+{"The List method returns cached permissions even if they are incomplete (e.g., missing newly created resources), unlike the Check method which falls back to the database for negative results. This creates a potential consistency issue where creators can't see resources they just created in list views until the 30-second cache TTL expires.": 0.6859981417655945}

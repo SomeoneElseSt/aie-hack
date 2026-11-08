@@ -1,0 +1,1 @@
+{"POLICY_SOME_HTML and POLICY_NO_HTML should be declared as 'private static final PolicyFactory' instead of instance fields to ensure they're created once and shared across all instances": 0.49603399634361267}

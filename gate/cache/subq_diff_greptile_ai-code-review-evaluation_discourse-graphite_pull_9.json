@@ -1,0 +1,1 @@
+{"SiteSetting.default_locale may not be available during early initialization phases if FallbackLocaleList#[] is called before the database is ready - needs nil-safety or deferred SiteSetting access": 0.2904908061027527}

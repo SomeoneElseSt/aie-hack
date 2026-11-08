@@ -1,0 +1,531 @@
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index a074fe2..66cec1f 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -328,7 +328,7 @@ The server is split into focused modules under `src/server/`:
+ - `static createSimplePattern()` — Helper to create patterns
+ 
+ **Features:**
+-- Regex pattern matching with configurable flags (g, i, m, s, etc.)
++- Regex pattern matching with configurable flags (allowlist: `gimsuy`; patterns capped at 1 000 characters; inline `code` capped at 500 000 characters; `path` inputs capped at 500 000 bytes before reading)
+ - Language-specific rule filtering
+ - Multiple matches per line support
+ - Cross-platform line ending support (\r\n and \n)
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index b0fb2bb..386d5f1 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ - Eliminated analyzer false positives via `ruleExclusions` config mechanism (#78)
+ - Replaced non-null assertions with destructured variables in `analysisEngine` (#101)
+ - Security: absolute filesystem paths no longer leaked in `scanErrors` returned to MCP clients; `findPackageFiles` now uses `getRelativePath()` for error messages (#129)
++- Security: user-supplied regex patterns in `add_custom_rule` and `validate_custom_pattern` are now validated for length (≤1 000 chars) and flag allowlist (`gimsuy` only); inline `code` for `execute_custom_rules` is capped at 500 000 characters, preventing ReDoS attacks (#127)
+ 
+ ### Added
+ - Direct unit tests for `swiftUiChecks` and `swiftUiChecksPhase2` modules
+diff --git a/README.md b/README.md
+index 7c88807..f21b7d3 100644
+--- a/README.md
++++ b/README.md
+@@ -254,7 +254,9 @@ Add a custom pattern-based tech debt rule.
+ - `category` (required): One of the debt categories
+ - `suggestion` (optional): How to fix the issue
+ - `languages` (optional): Apply only to specific languages
+-- `flags` (optional): Regex flags (g, i, m, s, etc.)
++- `flags` (optional): Regex flags for `add_custom_rule` — only `g`, `i`, `m`, `s`, `u`, and `y` are accepted; any other character causes validation to reject the rule outright
++
++  > **Note:** At execution time, unsupported flag characters are still stripped as a defense-in-depth safeguard if a rule bypasses normal validation, and duplicate characters are de-duplicated to prevent `RegExp` construction errors. If stripping and deduplication leave no valid flags, execution defaults to `g`.
+ 
+ **Example custom rules:**
+ 
+@@ -294,18 +296,18 @@ List all active custom rules with their statistics. No parameters.
+ 
+ Run all custom rules against code or a file.
+ 
+-- `path` (optional): Path to the file to analyze
+-- `code` (optional): Code content to analyze directly
++- `path` (optional): Path to the file to analyze (file size limited to 500,000 bytes before reading)
++- `code` (optional): Code content to analyze directly (limited to 500,000 characters)
+ - `language` (optional): Programming language for filtering rules
+ 
+ _Either `path` or `code` must be provided._
+ 
+ ### `validate_custom_pattern`
+ 
+-Validate a custom pattern before adding it as a rule.
++Validate a custom pattern before adding it as a rule. Enforces the same 1,000-character pattern cap as `add_custom_rule`.
+ 
+ - `id` (required): Unique identifier for the rule
+-- `pattern` (required): Regex pattern to validate
++- `pattern` (required): Regex pattern to validate (limited to 1,000 characters)
+ - `message` (required): Issue title/message
+ - `severity` (required): low, medium, high, or critical
+ - `category` (required): One of the debt categories
+diff --git a/src/core/__tests__/customRulesEngine.test.ts b/src/core/__tests__/customRulesEngine.test.ts
+index bfd79fc..5ffbc5c 100644
+--- a/src/core/__tests__/customRulesEngine.test.ts
++++ b/src/core/__tests__/customRulesEngine.test.ts
+@@ -231,6 +231,82 @@ console.log("test3");`;
+       const validation = CustomRulesEngine.validatePattern(pattern);
+       expect(validation.valid).toBe(false);
+     });
++
++    it('rejects pattern whose length exceeds 1000 characters', () => {
++      const pattern: CustomPattern = {
++        id: 'long-rule',
++        pattern: 'a'.repeat(1001),
++        severity: 'low',
++        category: 'code-quality',
++        message: 'Too long',
++      };
++
++      const validation = CustomRulesEngine.validatePattern(pattern);
++      expect(validation.valid).toBe(false);
++      expect(validation.errors.some(e => e.includes('maximum length'))).toBe(true);
++    });
++
++    it('accepts pattern exactly at the 1000-character limit', () => {
++      const pattern: CustomPattern = {
++        id: 'boundary-rule',
++        pattern: 'a'.repeat(1000),
++        severity: 'low',
++        category: 'code-quality',
++        message: 'At boundary',
++      };
++
++      const validation = CustomRulesEngine.validatePattern(pattern);
++      expect(validation.valid).toBe(true);
++    });
++
++    it('rejects flags containing disallowed characters', () => {
++      const pattern: CustomPattern = {
++        id: 'bad-flags-rule',
++        pattern: 'test',
++        flags: 'gx',  // 'x' is not a valid JS regex flag
++        severity: 'low',
++        category: 'code-quality',
++        message: 'Bad flags',
++      };
++
++      const validation = CustomRulesEngine.validatePattern(pattern);
++      expect(validation.valid).toBe(false);
++      expect(validation.errors.some(e => e.includes('Invalid regex flags'))).toBe(true);
++    });
++
++    it('accepts all valid flag characters', () => {
++      const pattern: CustomPattern = {
++        id: 'good-flags-rule',
++        pattern: 'test',
++        flags: 'gimsuy',
++        severity: 'low',
++        category: 'code-quality',
++        message: 'All valid flags',
++      };
++
++      const validation = CustomRulesEngine.validatePattern(pattern);
++      // This verifies the flags contain only valid JavaScript RegExp flag characters.
++      expect(validation.valid).toBe(true);
++      expect(validation.errors).toHaveLength(0);
++    });
++
++    it('strips disallowed flag characters at execution time for rules bypassing validation', () => {
++      const engine = new CustomRulesEngine();
++      const pattern: CustomPattern = {
++        id: 'bad-flags-exec',
++        pattern: 'hello',
++        flags: 'gX',  // 'X' is disallowed — stripped to 'g' at runtime
++        severity: 'low',
++        category: 'code-quality',
++        message: 'Bad flags at exec',
++      };
++
++      // Add directly (bypassing validatePattern) to simulate a config-loaded rule
++      engine.addRule(pattern);
++      // Should not throw and should still find the match
++      const issues = engine.executeRules('test.ts', 'hello world');
++      expect(issues.length).toBe(1);
++    });
+   });
+ 
+   describe('Helper Methods', () => {
+@@ -338,6 +414,46 @@ console.log("test3");`;
+     });
+   });
+ 
++  describe('MAX_PATTERN_LENGTH defense-in-depth at execution time', () => {
++    it('returns empty array and calls onRuleError for oversized patterns added directly via addRule', () => {
++      const errors: Array<{ id: string; error: Error }> = [];
++      const engineWithErrCb = new CustomRulesEngine(
++        undefined,
++        (id, error) => errors.push({ id, error })
++      );
++
++      const oversizedPattern: CustomPattern = {
++        id: 'oversized-rule',
++        pattern: 'a'.repeat(1_001),
++        severity: 'low',
++        category: 'code-quality',
++        message: 'Oversized',
++      };
++
++      // Bypass validatePattern by calling addRule directly
++      engineWithErrCb.addRule(oversizedPattern);
++      const issues = engineWithErrCb.executeRules('test.ts', 'aaaa');
++      expect(issues).toHaveLength(0);
++      expect(errors).toHaveLength(1);
++      expect(errors[0].id).toBe('oversized-rule');
++      expect(errors[0].error.message).toMatch(/exceeds maximum length/);
++    });
++
++    it('executes a pattern at exactly MAX_PATTERN_LENGTH without error', () => {
++      const exactPattern: CustomPattern = {
++        id: 'exact-length-rule',
++        pattern: 'a'.repeat(1_000),
++        severity: 'low',
++        category: 'code-quality',
++        message: 'Exact length',
++      };
++
++      engine.addRule(exactPattern);
++      // Should not throw and returns results normally (no match in this content)
++      expect(() => engine.executeRules('test.ts', 'hello')).not.toThrow();
++    });
++  });
++
+   describe('Error Handling', () => {
+     it('handles invalid regex gracefully', () => {
+       const pattern: CustomPattern = {
+diff --git a/src/core/customRulesEngine.ts b/src/core/customRulesEngine.ts
+index 41e29dc..ea68977 100644
+--- a/src/core/customRulesEngine.ts
++++ b/src/core/customRulesEngine.ts
+@@ -19,6 +19,31 @@ const VALID_CATEGORIES: DebtCategory[] = [
+   'maintainability',
+ ];
+ 
++/**
++ * Maximum allowed length in UTF-16 code units for a user-supplied regex
++ * pattern string. Patterns longer than this are rejected to prevent DoS via large patterns.
++ */
++const MAX_PATTERN_LENGTH = 1_000;
++
++/**
++ * Allowlisted regex flag characters. Any character outside this set is rejected.
++ * See: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/flags
++ */
++const ALLOWED_FLAGS_RE = /^[gimsuy]*$/;
++
++/**
++ * Maximum allowed string length for the inline `code` parameter passed to
++ * `execute_custom_rules`. This caps the input fed to regex matching per call.
++ * Enforced using JavaScript string length semantics (`string.length`).
++ */
++export const MAX_CODE_LENGTH = 500_000;
++
++/**
++ * Maximum allowed file size in bytes for `path` inputs to `execute_custom_rules`.
++ * Enforced via `fs.Stats.size` before reading the file into memory.
++ */
++export const MAX_FILE_SIZE_BYTES = 500_000;
++
+ /**
+  * Custom Rules Engine
+  * Allows users to define and execute custom pattern-based tech debt checks
+@@ -109,8 +134,23 @@ export class CustomRulesEngine {
+     pattern: CustomPattern
+   ): TechDebtIssue[] {
+     try {
++      // Defense-in-depth: reject oversized patterns even if they bypassed validatePattern().
++      if (pattern.pattern.length > MAX_PATTERN_LENGTH) {
++        if (this.onRuleError) {
++          this.onRuleError(
++            pattern.id,
++            new Error(`Pattern exceeds maximum length of ${MAX_PATTERN_LENGTH} characters`)
++          );
++        }
++        return [];
++      }
+       const lines = content.split(/\r?\n/);
+-      const regex = new RegExp(pattern.pattern, pattern.flags || 'g');
++      const stripped = pattern.flags !== undefined
++        ? pattern.flags.replace(/[^gimsuy]/g, '')
++        : 'g';
++      const deduped = Array.from(new Set(stripped.split(''))).join('');
++      const safeFlags = deduped.length > 0 ? deduped : 'g';
++      const regex = new RegExp(pattern.pattern, safeFlags);
+       return lines.flatMap((line, index) =>
+         this.matchLineIssues(filePath, line, index + 1, regex, pattern)
+       );
+@@ -211,14 +251,28 @@ export class CustomRulesEngine {
+       errors.push('Pattern ID is required');
+     }
+ 
++    // Validate and normalize flags first so the regex compilation uses safe flags.
++    if (pattern.flags !== undefined && !ALLOWED_FLAGS_RE.test(pattern.flags)) {
++      errors.push(`Invalid regex flags: "${pattern.flags}". Only the characters g, i, m, s, u, y are allowed`);
++    }
++
+     if (!pattern.pattern) {
+       errors.push('Pattern regex is required');
+     } else {
+-      try {
+-        // Test if regex is valid
+-        new RegExp(pattern.pattern, pattern.flags || 'g');
+-      } catch (error) {
+-        errors.push(`Invalid regex pattern: ${error instanceof Error ? error.message : 'Unknown error'}`);
++      if (pattern.pattern.length > MAX_PATTERN_LENGTH) {
++        errors.push(`Pattern exceeds maximum length of ${MAX_PATTERN_LENGTH} characters`);
++      } else {
++        // Compile with the same normalized (stripped + deduped) flags used at execution time.
++        const stripped = pattern.flags !== undefined
++          ? pattern.flags.replace(/[^gimsuy]/g, '')
++          : 'g';
++        const deduped = Array.from(new Set(stripped.split(''))).join('');
++        const normalizedFlags = deduped.length > 0 ? deduped : 'g';
++        try {
++          new RegExp(pattern.pattern, normalizedFlags);
++        } catch (error) {
++          errors.push(`Invalid regex pattern: ${error instanceof Error ? error.message : 'Unknown error'}`);
++        }
+       }
+     }
+ 
+diff --git a/src/server/__tests__/handlers.test.ts b/src/server/__tests__/handlers.test.ts
+index ff097b0..0663ef1 100644
+--- a/src/server/__tests__/handlers.test.ts
++++ b/src/server/__tests__/handlers.test.ts
+@@ -1,26 +1,54 @@
+ import { jest } from '@jest/globals';
+ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
++import { McpError } from '@modelcontextprotocol/sdk/types.js';
+ import { attachHandlers } from '../handlers.js';
++import { fileExists, getFileStats } from '../../utils/fileUtils.js';
++import { MAX_FILE_SIZE_BYTES } from '../../core/customRulesEngine.js';
+ 
+ // Mock the dependencies
+ jest.mock('../../core/analysisEngine.js');
+-jest.mock('../../core/customRulesEngine.js');
++jest.mock('../../core/customRulesEngine.js', () => ({
++  CustomRulesEngine: class {
++    addRule = jest.fn();
++    removeRule = jest.fn(() => false);
++    getAllRules = jest.fn(() => []);
++    hasRule = jest.fn(() => false);
++    getRuleStats = jest.fn(() => ({ totalRules: 0, bySeverity: {}, byCategory: {} }));
++    executeRules = jest.fn(() => []);
++  },
++  MAX_CODE_LENGTH: 500_000,
++  MAX_FILE_SIZE_BYTES: 500_000,
++}));
+ jest.mock('../../analyzers/index.js');
+ jest.mock('../../analyzers/dependencies/index.js');
+ jest.mock('../../config/languages.js');
+-jest.mock('../../utils/fileUtils.js');
++jest.mock('../../utils/fileUtils.js', () => ({
++  readFile: jest.fn(),
++  fileExists: jest.fn(),
++  getFileStats: jest.fn(),
++  getRelativePath: jest.fn((_b: string, f: string) => f),
++}));
++
++const mockFileExists = fileExists as jest.MockedFunction<typeof fileExists>;
++const mockGetFileStats = getFileStats as jest.MockedFunction<typeof getFileStats>;
+ 
+ describe('Handlers', () => {
+   let mockServer: McpServer;
++  let callToolHandler: (request: any) => Promise<any>;
+ 
+   beforeEach(() => {
+     // Reset all mocks
+     jest.clearAllMocks();
+ 
+-    // Create mock server
++    // Create mock server that captures the registered handlers
+     mockServer = {
+       server: {
+-        setRequestHandler: jest.fn(),
++        setRequestHandler: jest.fn((schema: any, handler: any) => {
++          // Capture the CallToolRequestSchema handler (second call)
++          if (schema?.method === 'tools/call' || typeof handler === 'function') {
++            callToolHandler = handler;
++          }
++        }),
+       },
+     } as any;
+   });
+@@ -33,6 +61,46 @@ describe('Handlers', () => {
+     });
+   });
+ 
++  describe('execute_custom_rules file size guard', () => {
++    beforeEach(() => {
++      attachHandlers(mockServer);
++      // The second setRequestHandler call receives the CallToolRequestSchema handler
++      const calls = (mockServer.server.setRequestHandler as jest.MockedFunction<any>).mock.calls;
++      callToolHandler = calls[calls.length - 1][1];
++    });
++
++    it('rejects a path input whose file size exceeds MAX_FILE_SIZE_BYTES', async () => {
++      mockFileExists.mockResolvedValue(true);
++      mockGetFileStats.mockResolvedValue({ size: MAX_FILE_SIZE_BYTES + 1 } as any);
++
++      await expect(
++        callToolHandler({
++          params: {
++            name: 'execute_custom_rules',
++            arguments: { path: '/some/large/file.ts' },
++          },
++        })
++      ).rejects.toThrow(McpError);
++    });
++
++    it('accepts a path input whose file size is exactly MAX_FILE_SIZE_BYTES', async () => {
++      mockFileExists.mockResolvedValue(true);
++      mockGetFileStats.mockResolvedValue({ size: MAX_FILE_SIZE_BYTES } as any);
++      // readFile needs to return something — mock it
++      const { readFile } = await import('../../utils/fileUtils.js');
++      (readFile as jest.MockedFunction<typeof readFile>).mockResolvedValue('const x = 1;');
++
++      await expect(
++        callToolHandler({
++          params: {
++            name: 'execute_custom_rules',
++            arguments: { path: '/some/file.ts' },
++          },
++        })
++      ).resolves.toBeDefined();
++    });
++  });
++
+   describe('Tool Definitions', () => {
+     it('should export all required tools', () => {
+       const { TOOL_DEFINITIONS } = require('../tools.js');
+diff --git a/src/server/__tests__/inputParser.test.ts b/src/server/__tests__/inputParser.test.ts
+index 3995e35..d6c9987 100644
+--- a/src/server/__tests__/inputParser.test.ts
++++ b/src/server/__tests__/inputParser.test.ts
+@@ -347,6 +347,17 @@ describe('inputParser', () => {
+     it('throws McpError when code is not a string', () => {
+       expect(() => parseExecuteCustomRulesInput({ code: 123 })).toThrow(McpError);
+     });
++
++    it('throws McpError when code exceeds 500 000 characters', () => {
++      expect(() =>
++        parseExecuteCustomRulesInput({ code: 'a'.repeat(500_001) }),
++      ).toThrow(McpError);
++    });
++
++    it('accepts code exactly at the 500 000-character limit', () => {
++      const result = parseExecuteCustomRulesInput({ code: 'a'.repeat(500_000) });
++      expect(result.code).toHaveLength(500_000);
++    });
+   });
+ 
+   // ---- parseValidateCustomPatternInput ----
+diff --git a/src/server/handlers.ts b/src/server/handlers.ts
+index 44c1fd8..c46a768 100644
+--- a/src/server/handlers.ts
++++ b/src/server/handlers.ts
+@@ -6,10 +6,10 @@ import {
+ } from '@modelcontextprotocol/sdk/types.js';
+ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+ import { AnalysisEngine } from '../core/analysisEngine.js';
+-import { CustomRulesEngine } from '../core/customRulesEngine.js';
++import { CustomRulesEngine, MAX_FILE_SIZE_BYTES } from '../core/customRulesEngine.js';
+ import { analyzeFile } from '../analyzers/index.js';
+ import { getSupportedLanguages, LANGUAGE_CONFIGS } from '../config/languages.js';
+-import { readFile, fileExists } from '../utils/fileUtils.js';
++import { readFile, fileExists, getFileStats } from '../utils/fileUtils.js';
+ import { formatReport, formatMinutes } from './formatters.js';
+ import { TOOL_DEFINITIONS } from './tools.js';
+ import { handleValidateConfig } from './configValidator.js';
+@@ -438,6 +438,19 @@ async function handleExecuteCustomRules(
+     if (!await fileExists(path)) {
+       throw new McpError(ErrorCode.InvalidParams, `File not found: ${path}`);
+     }
++    const stats = await getFileStats(path);
++    if (!stats) {
++      throw new McpError(
++        ErrorCode.InvalidParams,
++        `Could not read file stats for: ${path}`
++      );
++    }
++    if (stats.size > MAX_FILE_SIZE_BYTES) {
++      throw new McpError(
++        ErrorCode.InvalidParams,
++        `File exceeds maximum size of ${MAX_FILE_SIZE_BYTES} bytes for regex matching`
++      );
++    }
+     code = await readFile(path);
+   }
+   if (!code) {
+diff --git a/src/server/inputParser.ts b/src/server/inputParser.ts
+index 290a497..4c97007 100644
+--- a/src/server/inputParser.ts
++++ b/src/server/inputParser.ts
+@@ -6,6 +6,7 @@ import {
+ } from '../types/index.js';
+ import { LANGUAGE_CONFIGS } from '../config/languages.js';
+ import { requireRecord } from './argValidation.js';
++import { MAX_CODE_LENGTH } from '../core/customRulesEngine.js';
+ 
+ /** Typed input for analyze_project tool */
+ export interface AnalyzeProjectInput {
+@@ -395,9 +396,16 @@ export function parseExecuteCustomRulesInput(
+   args: unknown,
+ ): ExecuteCustomRulesInput {
+   const a = requireRecord(args);
++  const code = optionalString(a, 'code');
++  if (code !== undefined && code.length > MAX_CODE_LENGTH) {
++    throw new McpError(
++      ErrorCode.InvalidParams,
++      `Inline code exceeds maximum length of ${MAX_CODE_LENGTH} characters`,
++    );
++  }
+   return {
+     path: optionalString(a, 'path'),
+-    code: optionalString(a, 'code'),
++    code,
+     language: optionalString(a, 'language'),
+   };
+ }
+diff --git a/src/server/tools.ts b/src/server/tools.ts
+index ae8cf88..b65c2b2 100644
+--- a/src/server/tools.ts
++++ b/src/server/tools.ts
+@@ -104,13 +104,13 @@ export const TOOL_DEFINITIONS = [
+       type: 'object',
+       properties: {
+         id: { type: 'string', description: 'Unique identifier for the rule' },
+-        pattern: { type: 'string', description: 'Regex pattern to match' },
++        pattern: { type: 'string', description: 'Regex pattern to match (limited to 1 000 characters)' },
+         message: { type: 'string', description: 'Issue title/message' },
+         severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Issue severity level' },
+         category: { type: 'string', enum: ['dependency', 'code-quality', 'architecture', 'documentation', 'testing', 'security', 'performance', 'maintainability'], description: 'Debt category' },
+         suggestion: { type: 'string', description: 'Optional: how to fix the issue' },
+         languages: { type: 'array', items: { type: 'string' }, description: 'Optional: apply only to specific languages' },
+-        flags: { type: 'string', description: 'Optional: regex flags (g, i, m, s, etc.)' },
++        flags: { type: 'string', description: 'Optional: regex flags — allowed characters: g, i, m, s, u, y' },
+       },
+       required: ['id', 'pattern', 'message', 'severity', 'category'],
+     },
+@@ -140,8 +140,8 @@ export const TOOL_DEFINITIONS = [
+     inputSchema: {
+       type: 'object',
+       properties: {
+-        path: { type: 'string', description: 'Path to the file to analyze' },
+-        code: { type: 'string', description: 'Code content to analyze (alternative to path)' },
++        path: { type: 'string', description: 'Path to the file to analyze (file size limited to 500 000 bytes)' },
++        code: { type: 'string', description: 'Code content to analyze (alternative to path; limited to 500 000 characters)' },
+         language: { type: 'string', description: 'Optional: programming language for filtering rules' },
+       },
+     },
+@@ -153,7 +153,7 @@ export const TOOL_DEFINITIONS = [
+       type: 'object',
+       properties: {
+         id: { type: 'string', description: 'Unique identifier for the rule' },
+-        pattern: { type: 'string', description: 'Regex pattern to validate' },
++        pattern: { type: 'string', description: 'Regex pattern to validate (limited to 1 000 characters)' },
+         message: { type: 'string', description: 'Issue title/message' },
+         severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Issue severity level' },
+         category: { type: 'string', enum: ['dependency', 'code-quality', 'architecture', 'documentation', 'testing', 'security', 'performance', 'maintainability'], description: 'Debt category' },

@@ -1,0 +1,1 @@
+{"The deletion query's second OR branch (retryCount: { gt: 1 }) lacks a method: WorkflowMethods.SMS filter, so it deletes all workflow reminders with retryCount > 1 including EMAIL reminders, not just SMS reminders": 0.9850748777389526}

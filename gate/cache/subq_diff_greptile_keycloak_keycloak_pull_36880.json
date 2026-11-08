@@ -1,0 +1,1 @@
+{"The getResourceName method in AdminPermissionsSchema.java doesn't handle the Clients resource type - when called for a client resource, it falls through to return resource.getDisplayName() instead of properly resolving client names, which could lead to incorrect display names in the admin UI": 0.38767358660697937}

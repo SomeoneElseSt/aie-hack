@@ -1,0 +1,1 @@
+{"desktop/topic-post.scss: .topic-meta-data h5 a light-theme value changed from $primary 30% to 70% lightness, causing visual regression on light themes": 0.5891910791397095, "desktop/user.scss and mobile/user.scss: .group-member-info .name changed from $primary 30% to 50% lightness, altering light-theme appearance": 0.4596116244792938}

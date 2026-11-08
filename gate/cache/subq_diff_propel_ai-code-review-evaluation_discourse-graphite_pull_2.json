@@ -1,0 +1,1 @@
+{"TopicUser.find_by(...) returns nil when a user hits the unsubscribe link before a topic_users row exists (e.g. they were added via group/category notification but never loaded the topic), causing NoMethodError on the next line when calling tu.notification_level, resulting in a 500 error that prevents the user from opting out": 0.9427633285522461}

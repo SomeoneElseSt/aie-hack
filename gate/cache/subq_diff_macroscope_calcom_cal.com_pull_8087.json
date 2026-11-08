@@ -1,0 +1,1 @@
+{"bookingRefsFiltered.forEach(async (bookingRef) => ...) fires async operations but does not await them, causing the try-catch block to be unable to catch errors from async callbacks since forEach returns immediately": 0.9585671424865723}

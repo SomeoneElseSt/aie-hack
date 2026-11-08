@@ -1,0 +1,1 @@
+{"Possible duplicate SimpleCheckIn TypedDict definition in sentry.monitors.types.py - having duplicate type names in the same module can shadow/overwrite definitions and cause confusion for readers and static analyzers": 0.25197505950927734}

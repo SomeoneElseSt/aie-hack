@@ -1,0 +1,1 @@
+{"The return value uses `monitor_environment.monitor.config` instead of the normalized `config` copy, causing the normalized schedule information (including human-readable `schedule_type` display string) to be discarded and not exposed in the evidence context": 0.8474054336547852}

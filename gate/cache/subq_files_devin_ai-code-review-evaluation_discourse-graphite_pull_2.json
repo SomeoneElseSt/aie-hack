@@ -1,0 +1,1 @@
+{"NullPointerException in unsubscribe action when TopicUser record doesn't exist - TopicUser.find_by returns nil if user has never interacted with the topic, and the next line calls tu.notification_level on the potentially-nil result, causing NoMethodError and a 500 Internal Server Error": 0.982399046421051}

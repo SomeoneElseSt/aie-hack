@@ -1,0 +1,727 @@
+===== FILE packages/lib/server/service/__tests__/insightsBooking.integration-test.ts (after PR) =====
+import type { Team, User, Membership } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { describe, expect, it } from "vitest";
+
+import prisma from "@calcom/prisma";
+import { BookingStatus, MembershipRole } from "@calcom/prisma/enums";
+
+import { InsightsBookingService } from "../../service/insightsBooking";
+
+const NOTHING_CONDITION = Prisma.sql`1=0`;
+
+// Helper function to create unique test data
+async function createTestData({
+  teamRole = MembershipRole.MEMBER,
+  orgRole = MembershipRole.MEMBER,
+  moreTeamsAndUsers = [],
+}: {
+  teamRole?: MembershipRole;
+  orgRole?: MembershipRole;
+  moreTeamsAndUsers?: MembershipRole[][]; // Array of teams, each team has array of user roles
+} = {}) {
+  const timestamp = Date.now();
+  const randomSuffix = Math.random().toString(36).substring(7);
+
+  // Create test user
+  const user = await prisma.user.create({
+    data: {
+      email: `test-user-${timestamp}-${randomSuffix}@example.com`,
+      username: `testuser-${timestamp}-${randomSuffix}`,
+      name: "Test User",
+    },
+  });
+
+  // Create test organization
+  const org = await prisma.team.create({
+    data: {
+      name: `Test Org ${timestamp}-${randomSuffix}`,
+      slug: `test-org-${timestamp}-${randomSuffix}`,
+      isOrganization: true,
+    },
+  });
+
+  // Create test team under the organization
+  const team = await prisma.team.create({
+    data: {
+      name: `Test Team ${timestamp}-${randomSuffix}`,
+      slug: `test-team-${timestamp}-${randomSuffix}`,
+      isOrganization: false,
+      parentId: org.id,
+    },
+  });
+
+  // Create test event type
+  const eventType = await prisma.eventType.create({
+    data: {
+      title: "Test Event Type",
+      slug: "test-event-type",
+      length: 60,
+      userId: user.id,
+      teamId: team.id,
+    },
+  });
+
+  // Create test booking
+  const booking = await prisma.booking.create({
+    data: {
+      uid: `test-booking-${timestamp}-${randomSuffix}`,
+      title: "Test Booking",
+      startTime: new Date(),
+      endTime: new Date(Date.now() + 60 * 60 * 1000),
+      userId: user.id,
+      eventTypeId: eventType.id,
+      status: BookingStatus.PENDING,
+    },
+  });
+
+  const membership = await prisma.membership.create({
+    data: {
+      userId: user.id,
+      teamId: team.id,
+      role: teamRole,
+      accepted: true,
+    },
+  });
+
+  const orgMembership = await prisma.membership.create({
+    data: {
+      userId: user.id,
+      teamId: org.id,
+      role: orgRole,
+      accepted: true,
+    },
+  });
+
+  // Create additional teams and users based on moreTeamsAndUsers
+  const additionalTeams: Team[] = [];
+  const additionalUsers: User[] = [];
+  const additionalMemberships: Membership[] = [];
+
+  for (let teamIndex = 0; teamIndex < moreTeamsAndUsers.length; teamIndex++) {
+    const teamUserRoles = moreTeamsAndUsers[teamIndex];
+
+    // Create the team
+    const additionalTeam = await prisma.team.create({
+      data: {
+        name: `Test Team ${teamIndex + 2} ${timestamp}-${randomSuffix}`,
+        slug: `test-team-${teamIndex + 2}-${timestamp}-${randomSuffix}`,
+        isOrganization: false,
+        parentId: org.id,
+      },
+    });
+    additionalTeams.push(additionalTeam);
+
+    // Create users for this team
+    for (let userIndex = 0; userIndex < teamUserRoles.length; userIndex++) {
+      const userRole = teamUserRoles[userIndex];
+
+      // Create the user
+      const additionalUser = await prisma.user.create({
+        data: {
+          email: `test-user-team${teamIndex + 2}-${userIndex + 1}-${timestamp}-${randomSuffix}@example.com`,
+          username: `testuser-team${teamIndex + 2}-${userIndex + 1}-${timestamp}-${randomSuffix}`,
+          name: `Test User Team${teamIndex + 2}-${userIndex + 1}`,
+        },
+      });
+      additionalUsers.push(additionalUser);
+
+      // Create the membership
+      const additionalMembership = await prisma.membership.create({
+        data: {
+          userId: additionalUser.id,
+          teamId: additionalTeam.id,
+          role: userRole,
+          accepted: true,
+        },
+      });
+      additionalMemberships.push(additionalMembership);
+    }
+  }
+
+  // Return test data and cleanup function
+  return {
+    user,
+    org,
+    orgMembership,
+    team,
+    eventType,
+    booking,
+    membership,
+    additionalTeams,
+    additionalUsers,
+    additionalMemberships,
+    cleanup: async () => {
+      // Clean up additional memberships
+      for (const membership of additionalMemberships) {
+        await prisma.membership.delete({
+          where: { id: membership.id },
+        });
+      }
+
+      // Clean up additional users
+      for (const user of additionalUsers) {
+        await prisma.user.delete({
+          where: { id: user.id },
+        });
+      }
+
+      // Clean up additional teams
+      for (const team of additionalTeams) {
+        await prisma.team.delete({
+          where: { id: team.id },
+        });
+      }
+
+      // Clean up main test data
+      await prisma.booking.deleteMany({
+        where: { id: booking.id },
+      });
+      await prisma.eventType.deleteMany({
+        where: { id: eventType.id },
+      });
+      await prisma.membership.deleteMany({
+        where: { id: membership.id },
+      });
+      await prisma.membership.delete({
+        where: { id: orgMembership.id },
+      });
+      await prisma.team.deleteMany({
+        where: { id: team.id },
+      });
+      await prisma.team.deleteMany({
+        where: { id: org.id },
+      });
+      await prisma.user.deleteMany({
+        where: { id: user.id },
+      });
+    },
+  };
+}
+
+describe("InsightsBookingService Integration Tests", () => {
+  describe("Authorization Conditions", () => {
+    it("should return NOTHING for invalid options", async () => {
+      const service = new InsightsBookingService({
+        prisma,
+        options: null as any,
+      });
+
+      const conditions = await service.getAuthorizationConditions();
+      expect(conditions).toEqual(NOTHING_CONDITION);
+    });
+
+    it("should return NOTHING for non-owner/admin user", async () => {
+      const testData = await createTestData();
+
+      // Create a regular user who is not an owner/admin
+      const regularUser = await prisma.user.create({
+        data: {
+          email: `regular-user-${Date.now()}-${Math.random().toString(36).substring(7)}@example.com`,
+          username: `regularuser-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+          name: "Regular User",
+        },
+      });
+
+      // Add the user as a regular member (not owner/admin) to the organization
+      const membership = await prisma.membership.create({
+        data: {
+          userId: regularUser.id,
+          teamId: testData.org.id,
+          role: MembershipRole.MEMBER,
+          accepted: true,
+        },
+      });
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "org",
+          userId: regularUser.id,
+          orgId: testData.org.id,
+        },
+      });
+
+      const conditions = await service.getAuthorizationConditions();
+      expect(conditions).toEqual(NOTHING_CONDITION);
+
+      // Clean up
+      await prisma.membership.delete({
+        where: { id: membership.id },
+      });
+      await prisma.user.delete({
+        where: { id: regularUser.id },
+      });
+      await testData.cleanup();
+    });
+
+    it("should build user scope conditions", async () => {
+      const testData = await createTestData({
+        teamRole: MembershipRole.OWNER,
+        orgRole: MembershipRole.OWNER,
+      });
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "user",
+          userId: testData.user.id,
+          orgId: testData.org.id,
+        },
+      });
+
+      const conditions = await service.getAuthorizationConditions();
+      expect(conditions).toEqual(Prisma.sql`("userId" = ${testData.user.id}) AND ("teamId" IS NULL)`);
+
+      await testData.cleanup();
+    });
+
+    it("should build team scope conditions", async () => {
+      const testData = await createTestData({
+        teamRole: MembershipRole.OWNER,
+        orgRole: MembershipRole.OWNER,
+      });
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "team",
+          userId: testData.user.id,
+          orgId: testData.org.id,
+          teamId: testData.team.id,
+        },
+      });
+
+      const conditions = await service.getAuthorizationConditions();
+      expect(conditions).toEqual(
+        Prisma.sql`(("teamId" = ${testData.team.id}) AND ("isTeamBooking" = true)) OR (("userId" = ANY(${[
+          testData.user.id,
+        ]})) AND ("isTeamBooking" = false))`
+      );
+
+      // Clean up
+      await testData.cleanup();
+    });
+
+    it("should build org scope conditions", async () => {
+      const testData = await createTestData({
+        teamRole: MembershipRole.OWNER,
+        orgRole: MembershipRole.OWNER,
+        moreTeamsAndUsers: [
+          [MembershipRole.MEMBER], // Team 2: 1 user with MEMBER role
+          [MembershipRole.MEMBER], // Team 3: 1 user with MEMBER role
+        ],
+      });
+
+      // Get references to additional data
+      const user2 = testData.additionalUsers[0]; // First user from first team
+      const user3 = testData.additionalUsers[1]; // First user from second team
+      const team2 = testData.additionalTeams[0]; // First additional team
+      const team3 = testData.additionalTeams[1]; // Second additional team
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "org",
+          userId: testData.user.id,
+          orgId: testData.org.id,
+        },
+      });
+
+      const conditions = await service.getAuthorizationConditions();
+
+      expect(conditions).toEqual(
+        Prisma.sql`(("teamId" = ANY(${[
+          testData.org.id,
+          testData.team.id,
+          team2.id,
+          team3.id,
+        ]})) AND ("isTeamBooking" = true)) OR (("userId" = ANY(${[
+          testData.user.id,
+          user2.id,
+          user3.id,
+        ]})) AND ("isTeamBooking" = false))`
+      );
+
+      await testData.cleanup();
+    });
+  });
+
+  describe("Filter Conditions", () => {
+    it("should return null when no filters are provided", async () => {
+      const testData = await createTestData();
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "user",
+          userId: testData.user.id,
+          orgId: testData.org.id,
+        },
+      });
+
+      const conditions = await service.getFilterConditions();
+      expect(conditions).toBeNull();
+
+      await testData.cleanup();
+    });
+
+    it("should build eventTypeId filter conditions", async () => {
+      const testData = await createTestData();
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "user",
+          userId: testData.user.id,
+          orgId: testData.org.id,
+        },
+        filters: {
+          eventTypeId: testData.eventType.id,
+        },
+      });
+
+      const conditions = await service.getFilterConditions();
+      expect(conditions).toEqual(
+        Prisma.sql`("eventTypeId" = ${testData.eventType.id}) OR ("eventParentId" = ${testData.eventType.id})`
+      );
+
+      await testData.cleanup();
+    });
+
+    it("should build memberUserId filter conditions", async () => {
+      const testData = await createTestData();
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "user",
+          userId: testData.user.id,
+          orgId: testData.org.id,
+        },
+        filters: {
+          memberUserId: testData.user.id,
+        },
+      });
+
+      const conditions = await service.getFilterConditions();
+      expect(conditions).toEqual(Prisma.sql`"userId" = ${testData.user.id}`);
+
+      await testData.cleanup();
+    });
+
+    it("should combine multiple filter conditions", async () => {
+      const testData = await createTestData();
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "user",
+          userId: testData.user.id,
+          orgId: testData.org.id,
+        },
+        filters: {
+          eventTypeId: testData.eventType.id,
+          memberUserId: testData.user.id,
+        },
+      });
+
+      const conditions = await service.getFilterConditions();
+      expect(conditions).toEqual(
+        Prisma.sql`(("eventTypeId" = ${testData.eventType.id}) OR ("eventParentId" = ${testData.eventType.id})) AND ("userId" = ${testData.user.id})`
+      );
+
+      await testData.cleanup();
+    });
+  });
+
+  describe("getBaseConditions", () => {
+    it("should combine authorization and filter conditions", async () => {
+      const testData = await createTestData({
+        teamRole: MembershipRole.OWNER,
+        orgRole: MembershipRole.OWNER,
+      });
+
+      // Create a user-scoped event type (not team-scoped)
+      const userEventType = await prisma.eventType.create({
+        data: {
+          title: "User Event Type",
+          slug: "user-event-type",
+          length: 60,
+          userId: testData.user.id,
+          teamId: null, // User-scoped, not team-scoped
+        },
+      });
+
+      // Create a booking for the user-scoped event type
+      const userBooking = await prisma.booking.create({
+        data: {
+          uid: `user-booking-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+          title: "User Booking",
+          startTime: new Date(),
+          endTime: new Date(Date.now() + 60 * 60 * 1000),
+          userId: testData.user.id,
+          eventTypeId: userEventType.id,
+          status: BookingStatus.PENDING,
+        },
+      });
+
+      const service = new InsightsBookingService({
+        prisma,
+        options: {
+          scope: "user",
+          userId: testData.user.id,
+          orgId: testData.org.id,
+        },
+        filters: {
+          eventTypeId: userEventType.id,
+        },
+      });
+
+      const baseConditions = await service.getBaseConditions();
+      const results = await prisma.$queryRaw<{ id: number }[]>`
+        SELECT id FROM "BookingTimeStatusDenormalized"
+        WHERE ${baseConditions}
+      `;
+
+      // Should return the user booking since it matches both conditions
+      expect(results).toEqual([
+        {
+          id: userBooking.id,
+        },
+      ]);
+
+      // Clean up
+      await prisma.booking.delete({
+        where: { id: userBooking.id },
+      });
+      await prisma.eventType.delete({
+        where: { id: userEventType.id },
+      });
+      await testData.cleanup();
+    });
+  });
+});
+
+
+===== FILE packages/lib/server/service/insightsBooking.ts (after PR) =====
+import { Prisma } from "@prisma/client";
+import { z } from "zod";
+
+import type { readonlyPrisma } from "@calcom/prisma";
+import { MembershipRole } from "@calcom/prisma/enums";
+
+import { MembershipRepository } from "../repository/membership";
+import { TeamRepository } from "../repository/team";
+
+export const insightsBookingServiceOptionsSchema = z.discriminatedUnion("scope", [
+  z.object({
+    scope: z.literal("user"),
+    userId: z.number(),
+    orgId: z.number(),
+  }),
+  z.object({
+    scope: z.literal("org"),
+    userId: z.number(),
+    orgId: z.number(),
+  }),
+  z.object({
+    scope: z.literal("team"),
+    userId: z.number(),
+    orgId: z.number(),
+    teamId: z.number(),
+  }),
+]);
+
+export type InsightsBookingServicePublicOptions = {
+  scope: "user" | "org" | "team";
+  userId: number;
+  orgId: number;
+  teamId?: number;
+};
+
+export type InsightsBookingServiceOptions = z.infer<typeof insightsBookingServiceOptionsSchema>;
+
+export type InsightsBookingServiceFilterOptions = {
+  eventTypeId?: number;
+  memberUserId?: number;
+};
+
+const NOTHING_CONDITION = Prisma.sql`1=0`;
+
+export class InsightsBookingService {
+  private prisma: typeof readonlyPrisma;
+  private options: InsightsBookingServiceOptions | null;
+  private filters?: InsightsBookingServiceFilterOptions;
+  private cachedAuthConditions?: Prisma.Sql;
+  private cachedFilterConditions?: Prisma.Sql | null;
+
+  constructor({
+    prisma,
+    options,
+    filters,
+  }: {
+    prisma: typeof readonlyPrisma;
+    options: InsightsBookingServicePublicOptions;
+    filters?: InsightsBookingServiceFilterOptions;
+  }) {
+    this.prisma = prisma;
+    const validation = insightsBookingServiceOptionsSchema.safeParse(options);
+    this.options = validation.success ? validation.data : null;
+
+    this.filters = filters;
+  }
+
+  async getBaseConditions(): Promise<Prisma.Sql> {
+    const authConditions = await this.getAuthorizationConditions();
+    const filterConditions = await this.getFilterConditions();
+
+    if (authConditions && filterConditions) {
+      return Prisma.sql`(${authConditions}) AND (${filterConditions})`;
+    } else if (authConditions) {
+      return authConditions;
+    } else if (filterConditions) {
+      return filterConditions;
+    } else {
+      return NOTHING_CONDITION;
+    }
+  }
+
+  async getAuthorizationConditions(): Promise<Prisma.Sql> {
+    if (this.cachedAuthConditions === undefined) {
+      this.cachedAuthConditions = await this.buildAuthorizationConditions();
+    }
+    return this.cachedAuthConditions;
+  }
+
+  async getFilterConditions(): Promise<Prisma.Sql | null> {
+    if (this.cachedFilterConditions === undefined) {
+      this.cachedFilterConditions = await this.buildFilterConditions();
+    }
+    return this.cachedFilterConditions;
+  }
+
+  async buildFilterConditions(): Promise<Prisma.Sql | null> {
+    const conditions: Prisma.Sql[] = [];
+
+    if (!this.filters) {
+      return null;
+    }
+
+    if (this.filters.eventTypeId) {
+      conditions.push(
+        Prisma.sql`("eventTypeId" = ${this.filters.eventTypeId}) OR ("eventParentId" = ${this.filters.eventTypeId})`
+      );
+    }
+
+    if (this.filters.memberUserId) {
+      conditions.push(Prisma.sql`"userId" = ${this.filters.memberUserId}`);
+    }
+
+    if (conditions.length === 0) {
+      return null;
+    }
+
+    // Join all conditions with AND
+    return conditions.reduce((acc, condition, index) => {
+      if (index === 0) return condition;
+      return Prisma.sql`(${acc}) AND (${condition})`;
+    });
+  }
+
+  async buildAuthorizationConditions(): Promise<Prisma.Sql> {
+    if (!this.options) {
+      return NOTHING_CONDITION;
+    }
+    const isOwnerOrAdmin = await this.isOrgOwnerOrAdmin(this.options.userId, this.options.orgId);
+    if (!isOwnerOrAdmin) {
+      return NOTHING_CONDITION;
+    }
+
+    if (this.options.scope === "user") {
+      return Prisma.sql`("userId" = ${this.options.userId}) AND ("teamId" IS NULL)`;
+    } else if (this.options.scope === "org") {
+      return await this.buildOrgAuthorizationCondition(this.options);
+    } else if (this.options.scope === "team") {
+      return await this.buildTeamAuthorizationCondition(this.options);
+    } else {
+      return NOTHING_CONDITION;
+    }
+  }
+
+  private async buildOrgAuthorizationCondition(
+    options: Extract<InsightsBookingServiceOptions, { scope: "org" }>
+  ): Promise<Prisma.Sql> {
+    // Get all teams from the organization
+    const teamRepo = new TeamRepository(this.prisma);
+    const teamsFromOrg = await teamRepo.findAllByParentId({
+      parentId: options.orgId,
+      select: { id: true },
+    });
+    const teamIds = [options.orgId, ...teamsFromOrg.map((t) => t.id)];
+
+    // Get all users from the organization
+    const userIdsFromOrg =
+      teamsFromOrg.length > 0
+        ? (await MembershipRepository.findAllByTeamIds({ teamIds, select: { userId: true } })).map(
+            (m) => m.userId
+          )
+        : [];
+
+    const conditions: Prisma.Sql[] = [Prisma.sql`("teamId" = ANY(${teamIds})) AND ("isTeamBooking" = true)`];
+
+    if (userIdsFromOrg.length > 0) {
+      const uniqueUserIds = Array.from(new Set(userIdsFromOrg));
+      conditions.push(Prisma.sql`("userId" = ANY(${uniqueUserIds})) AND ("isTeamBooking" = false)`);
+    }
+
+    return conditions.reduce((acc, condition, index) => {
+      if (index === 0) return condition;
+      return Prisma.sql`(${acc}) OR (${condition})`;
+    });
+  }
+
+  private async buildTeamAuthorizationCondition(
+    options: Extract<InsightsBookingServiceOptions, { scope: "team" }>
+  ): Promise<Prisma.Sql> {
+    const teamRepo = new TeamRepository(this.prisma);
+    const childTeamOfOrg = await teamRepo.findByIdAndParentId({
+      id: options.teamId,
+      parentId: options.orgId,
+      select: { id: true },
+    });
+    if (!childTeamOfOrg) {
+      return NOTHING_CONDITION;
+    }
+
+    const usersFromTeam = await MembershipRepository.findAllByTeamIds({
+      teamIds: [options.teamId],
+      select: { userId: true },
+    });
+    const userIdsFromTeam = usersFromTeam.map((u) => u.userId);
+
+    const conditions: Prisma.Sql[] = [
+      Prisma.sql`("teamId" = ${options.teamId}) AND ("isTeamBooking" = true)`,
+    ];
+
+    if (userIdsFromTeam.length > 0) {
+      conditions.push(Prisma.sql`("userId" = ANY(${userIdsFromTeam})) AND ("isTeamBooking" = false)`);
+    }
+
+    return conditions.reduce((acc, condition, index) => {
+      if (index === 0) return condition;
+      return Prisma.sql`(${acc}) OR (${condition})`;
+    });
+  }
+
+  private async isOrgOwnerOrAdmin(userId: number, orgId: number): Promise<boolean> {
+    // Check if the user is an owner or admin of the organization
+    const membership = await MembershipRepository.findUniqueByUserIdAndTeamId({ userId, teamId: orgId });
+    return Boolean(
+      membership &&
+        membership.accepted &&
+        membership.role &&
+        (membership.role === MembershipRole.OWNER || membership.role === MembershipRole.ADMIN)
+    );
+  }
+}

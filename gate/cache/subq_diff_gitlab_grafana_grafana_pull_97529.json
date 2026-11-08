@@ -1,0 +1,1 @@
+{"Lock scope narrowed to only protect cache write introduces a race condition where two concurrent BuildIndex calls for the same key can both run their full build concurrently": 0.814852237701416}

@@ -1,0 +1,1 @@
+{"Inconsistent metric tag key - uses 'shards' (plural) here but 'shard' (singular) on lines 185, 193-196, and 244, which will split the same metric across different tag keys and break metric aggregation and dashboards": 0.8210592269897461}

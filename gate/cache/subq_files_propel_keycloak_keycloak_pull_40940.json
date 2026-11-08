@@ -1,0 +1,1 @@
+{"deletedAll.set(true) only causes the reader loop to exit on its next iteration; the thread may still be running or about to add an exception when asserting. The thread should be joined before asserting so any errors it records are observed, and interruption should be propagated properly": 0.9620134234428406}

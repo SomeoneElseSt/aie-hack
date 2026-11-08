@@ -1,0 +1,1 @@
+{"TopicUser.find_by(...) in topics#unsubscribe method returns nil for users without a TopicUser row, and subsequent access to tu.notification_level causes a 500 error - need to use find_or_initialize_by or TopicUser.change/upsert helper to handle missing records": 0.951443612575531}

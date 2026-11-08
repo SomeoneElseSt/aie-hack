@@ -1,0 +1,1 @@
+{"In get_monitor_environment_context, line 160 creates a local config copy and line 162 modifies it to set schedule_type to its display value, but line 168 returns the original monitor_environment.monitor.config instead of the local config variable, silently discarding the schedule_type display transformation": 0.830804169178009}

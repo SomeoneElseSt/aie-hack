@@ -1,0 +1,1 @@
+{"Missing cache invalidation after delete - The deleteCacheMutation in CredentialActionsDropdown.tsx does not invalidate the connectedCalendars query after successfully deleting the cache, which means the UI will still show stale cache status (the old 'Last updated' timestamp) until manual refresh": 0.9594597220420837}

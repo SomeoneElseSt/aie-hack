@@ -1,0 +1,1 @@
+{"get_monitor_environment_context returns the original monitor_environment.monitor.config instead of the local config variable, so the schedule_type transformation to a human-readable display value is silently discarded and the raw DB value (e.g., an integer) is returned instead": 0.9011048674583435}

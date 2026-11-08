@@ -1,0 +1,1 @@
+{"When the failure threshold is greater than 1, an incident is created even if there have been fewer failed check-ins than the configured threshold, because the code doesn't verify that the number of collected check-ins meets the threshold before triggering an incident": 0.09972412884235382}

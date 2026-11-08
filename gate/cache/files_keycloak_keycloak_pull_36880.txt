@@ -1,0 +1,2299 @@
+===== FILE server-spi-private/src/main/java/org/keycloak/authorization/AdminPermissionsSchema.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.authorization;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.keycloak.authorization.model.Policy;
+import org.keycloak.authorization.model.Resource;
+import org.keycloak.authorization.model.ResourceServer;
+import org.keycloak.authorization.model.Scope;
+import org.keycloak.authorization.store.ResourceStore;
+import org.keycloak.authorization.store.ScopeStore;
+import org.keycloak.authorization.store.StoreFactory;
+import org.keycloak.common.Profile;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.ClientProvider;
+import org.keycloak.models.Constants;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.ModelException;
+import org.keycloak.models.ModelIllegalStateException;
+import org.keycloak.models.ModelValidationException;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.utils.ModelToRepresentation;
+import org.keycloak.models.utils.RepresentationToModel;
+import org.keycloak.representations.idm.authorization.AbstractPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.AuthorizationSchema;
+import org.keycloak.representations.idm.authorization.ResourceRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceType;
+import org.keycloak.representations.idm.authorization.ScopePermissionRepresentation;
+import org.keycloak.representations.idm.authorization.ScopeRepresentation;
+
+public class AdminPermissionsSchema extends AuthorizationSchema {
+    
+    public static final String USERS_RESOURCE_TYPE = "Users";
+    public static final String CLIENTS_RESOURCE_TYPE = "Clients";
+
+    //scopes
+    public static final String MANAGE = "manage";
+    public static final String VIEW = "view";
+    public static final String IMPERSONATE = "impersonate";
+    public static final String MAP_ROLES = "map-roles";
+    public static final String MANAGE_GROUP_MEMBERSHIP = "manage-group-membership";
+    public static final String CONFIGURE = "configure";
+    public static final String MAP_ROLES_CLIENT_SCOPE = "map-roles-client-scope";
+    public static final String MAP_ROLES_COMPOSITE = "map-roles-composite";
+
+    public static final ResourceType USERS = new ResourceType(USERS_RESOURCE_TYPE, Set.of(MANAGE, VIEW, IMPERSONATE, MAP_ROLES, MANAGE_GROUP_MEMBERSHIP));
+    public static final ResourceType CLIENTS = new ResourceType(CLIENTS_RESOURCE_TYPE, Set.of(CONFIGURE, MANAGE, MAP_ROLES, MAP_ROLES_CLIENT_SCOPE, MAP_ROLES_COMPOSITE, VIEW));
+
+    public static final AdminPermissionsSchema SCHEMA = new AdminPermissionsSchema();
+
+    private AdminPermissionsSchema() {
+        super(Map.of(USERS_RESOURCE_TYPE, USERS, CLIENTS_RESOURCE_TYPE, CLIENTS));
+    }
+
+    public Resource getOrCreateResource(KeycloakSession session, ResourceServer resourceServer, String policyType, String resourceType, String id) {
+        if (!supportsAuthorizationSchema(session, resourceServer)) {
+            return null;
+        }
+
+        StoreFactory storeFactory = getStoreFactory(session);
+        ResourceStore resourceStore = storeFactory.getResourceStore();
+        Resource resource = resourceStore.findById(resourceServer, id);
+
+        if (resource != null) {
+            return resource;
+        }
+
+        String name = null;
+
+        if (USERS.getType().equals(resourceType)) {
+            name = resolveUser(session, id);
+        } else if (CLIENTS.getType().equals(resourceType)) {
+            name = resolveClient(session, id);
+        }
+
+        if (name == null) {
+            throw new IllegalStateException("Could not map resource object with type [" + resourceType + "] and id [" + id + "]");
+        }
+
+        resource = resourceStore.findByName(resourceServer, name);
+
+        if (resource == null) {
+            resource = resourceStore.create(resourceServer, name, resourceServer.getClientId());
+            ScopeStore scopeStore = storeFactory.getScopeStore();
+            resource.updateScopes(getResourceTypes().get(resourceType).getScopes().stream().map(scopeName -> {
+                Scope findByName = scopeStore.findByName(resourceServer, scopeName);
+                if (findByName == null) throw new ModelException("No scopes found.");
+                return findByName;
+            }).collect(Collectors.toSet()));
+        }
+
+        return resource;
+    }
+
+    public Resource getResourceTypeResource(KeycloakSession session, ResourceServer resourceServer, String resourceType) {
+        if (!supportsAuthorizationSchema(session, resourceServer)) {
+            return null;
+        }
+
+        if (resourceType == null) {
+            return null;
+        }
+
+        ResourceType type = getResourceTypes().get(resourceType);
+
+        if (type == null) {
+            return null;
+        }
+
+        ResourceStore resourceStore = getStoreFactory(session).getResourceStore();
+
+        return resourceStore.findByName(resourceServer, type.getType());
+    }
+
+    public boolean isSupportedPolicyType(KeycloakSession session, ResourceServer resourceServer, String type) {
+        if (!supportsAuthorizationSchema(session, resourceServer)) {
+            return true;
+        }
+
+        return !type.equals("resource");
+    }
+
+    private boolean supportsAuthorizationSchema(KeycloakSession session, ResourceServer resourceServer) {
+        RealmModel realm = session.getContext().getRealm();
+
+        if (!isAdminPermissionsEnabled(realm)) {
+            return false;
+        }
+
+        return isAdminPermissionClient(realm, resourceServer.getId());
+    }
+
+    private boolean isAdminPermissionClient(RealmModel realm, String id) {
+        return realm.getAdminPermissionsClient() != null && realm.getAdminPermissionsClient().getId().equals(id);
+    }
+
+    public void throwExceptionIfAdminPermissionClient(KeycloakSession session, String id) {
+        if (isAdminPermissionClient(session.getContext().getRealm(), id)) {
+            throw new ModelValidationException("Not supported for this client.");
+        }
+    }
+
+    private String resolveUser(KeycloakSession session, String id) {
+        RealmModel realm = session.getContext().getRealm();
+        UserModel user = session.users().getUserById(realm, id);
+
+        if (user == null) {
+            user = session.users().getUserByUsername(realm, id);
+        }
+
+        return user == null ? null : user.getId();
+    }
+
+    private String resolveClient(KeycloakSession session, String id) {
+        RealmModel realm = session.getContext().getRealm();
+        ClientModel client = session.clients().getClientById(realm, id);
+
+        if (client == null) {
+            client = session.clients().getClientByClientId(realm, id);
+        }
+
+        return client == null ? null : client.getId();
+    }
+
+    private StoreFactory getStoreFactory(KeycloakSession session) {
+        AuthorizationProvider authzProvider = session.getProvider(AuthorizationProvider.class);
+        return authzProvider.getStoreFactory();
+    }
+
+    public void throwExceptionIfResourceTypeOrScopesNotProvided(KeycloakSession session, ResourceServer resourceServer, AbstractPolicyRepresentation rep) {
+        if (!supportsAuthorizationSchema(session, resourceServer)) {
+            return;
+        }
+        if (rep instanceof ScopePermissionRepresentation) {
+            if (rep.getResourceType() == null || SCHEMA.getResourceTypes().get(rep.getResourceType()) == null) {
+                throw new ModelValidationException("Resource type not provided.");
+            }
+            if (rep.getScopes() == null || rep.getScopes().isEmpty()) {
+                throw new ModelValidationException("Scopes not provided.");
+            }
+        }
+    }
+
+    public Scope getScope(KeycloakSession session, ResourceServer resourceServer, String resourceType, String id) {
+        StoreFactory storeFactory = getStoreFactory(session);
+
+        Scope scope = Optional.ofNullable(storeFactory.getScopeStore().findById(resourceServer, id))
+            .or(() -> Optional.ofNullable(storeFactory.getScopeStore().findByName(resourceServer, id)))
+            .orElseThrow(() -> new ModelValidationException(String.format("Scope [%s] does not exist.", id)));
+
+        if (supportsAuthorizationSchema(session, resourceServer)) {
+            //validations for schema
+            if (!SCHEMA.getResourceTypes().get(resourceType).getScopes().contains(scope.getName())) {
+                throw new ModelValidationException(String.format("Scope %s was not found for resource type %s.", scope.getName(), resourceType));
+            }
+        }
+
+        return scope;
+    }
+
+    public void init(KeycloakSession session, RealmModel realm) {
+        ClientProvider clients = session.clients();
+        ClientModel client = realm.getAdminPermissionsClient();
+
+        if (client != null) {
+            return;
+        }
+
+        client = clients.addClient(realm, Constants.ADMIN_PERMISSIONS_CLIENT_ID);
+
+        realm.setAdminPermissionsClient(client);
+
+        ResourceServer resourceServer = RepresentationToModel.createResourceServer(client, session, false);
+        ResourceServerRepresentation resourceServerRep = ModelToRepresentation.toRepresentation(resourceServer, client);
+
+        //create all scopes defined in the schema
+        //there is no way how to map scopes to the resourceType, we need to collect all scopes from all resourceTypes 
+        Set<ScopeRepresentation> scopes = SCHEMA.getResourceTypes().values().stream()
+                .flatMap((resourceType) -> resourceType.getScopes().stream())
+                .map(ScopeRepresentation::new)
+                .collect(Collectors.toSet());//collecting to set to get rid of duplicities
+
+        resourceServerRep.setScopes(List.copyOf(scopes));
+
+        //create 'all-resource' resources defined in the schema
+        resourceServerRep.setResources(SCHEMA.getResourceTypes().keySet().stream()
+                .map(type -> {
+                    ResourceRepresentation resource = new ResourceRepresentation(type, SCHEMA.getResourceTypes().get(type).getScopes().toArray(String[]::new));
+                    resource.setType(type);
+                    return resource;
+                }).collect(Collectors.toList()));
+
+        RepresentationToModel.toModel(resourceServerRep, session.getProvider(AuthorizationProvider.class), client);
+    }
+
+    public boolean isAdminPermissionsEnabled(RealmModel realm) {
+        return Profile.isFeatureEnabled(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ_V2) && realm.isAdminPermissionsEnabled();
+    }
+
+    public AuthorizationSchema getAuthorizationSchema(ClientModel client) {
+        if (isAdminPermissionsEnabled(client.getRealm()) && 
+            isAdminPermissionClient(client.getRealm(), client.getId())) {
+            return SCHEMA;
+        }
+        return null;
+    }
+
+    // for updates
+    public void removeResource(Resource resource, Policy policy, AuthorizationProvider authorization) {
+        ResourceServer resourceServer = resource.getResourceServer();
+
+        if (isAdminPermissionClient(authorization.getRealm(), resourceServer.getId())) {
+            // for admin permissions remove resource in the FGAP context (if resource is becoming on orphan, we remove the resource from DB)
+            if (getResourceTypes().get(resource.getName()) == null) {
+                List<Policy> policies = authorization.getStoreFactory().getPolicyStore().findByResource(resourceServer, resource);
+                // if there is single resource remaining delete it
+                if (policies.size() == 1 && policy.equals(policies.get(0))) {
+                    authorization.getStoreFactory().getResourceStore().delete(resource.getId());
+                }
+            }
+        } else {
+            policy.removeResource(resource);
+        }
+
+    }
+
+    //for deletion
+    public void removeOrphanResources(Policy policy, AuthorizationProvider authorization) {
+        if (isAdminPermissionClient(authorization.getRealm(), policy.getResourceServer().getId())) {
+            Set<Resource> resources = policy.getResources();
+            for (Resource resource : resources) {
+                if (getResourceTypes().get(resource.getName()) == null) {
+                    List<Policy> policies = authorization.getStoreFactory().getPolicyStore().findByResource(policy.getResourceServer(), resource);
+                    // if there is single resource remaining delete it
+                    if (policies.size() == 1 && policy.equals(policies.get(0))) {
+                        authorization.getStoreFactory().getResourceStore().delete(resource.getId());
+                    }
+                }
+            }
+        }
+    }
+
+    public String getResourceName(KeycloakSession session, Policy policy, Resource resource) {
+        ResourceServer resourceServer = policy.getResourceServer();
+
+        if (supportsAuthorizationSchema(session, resourceServer)) {
+            String resourceType = policy.getResourceType();
+
+            if (USERS.getType().equals(resourceType)) {
+                if (resource.getName().equals(USERS_RESOURCE_TYPE)) {
+                    return "All users";
+                }
+
+                UserModel user = session.users().getUserById(session.getContext().getRealm(), resource.getName());
+
+                if (user == null) {
+                    throw new ModelIllegalStateException("User not found for resource [" + resource.getId() + "]");
+                }
+
+                return user.getUsername();
+            }
+        }
+
+        return resource.getDisplayName();
+    }
+}
+
+
+===== FILE services/src/main/java/org/keycloak/services/resources/admin/permissions/AdminPermissions.java (after PR) =====
+/*
+ * Copyright 2016 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.services.resources.admin.permissions;
+
+import org.keycloak.common.Profile;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.GroupModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.RoleContainerModel;
+import org.keycloak.models.RoleModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.provider.ProviderEvent;
+import org.keycloak.provider.ProviderEventListener;
+import org.keycloak.provider.ProviderEventManager;
+import org.keycloak.services.resources.admin.AdminAuth;
+
+/**
+ * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
+ * @version $Revision: 1 $
+ */
+public class AdminPermissions {
+
+
+    public static AdminPermissionEvaluator evaluator(KeycloakSession session, RealmModel realm, AdminAuth auth) {
+        if (Profile.isFeatureEnabled(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ_V2)) {
+            return new MgmtPermissionsV2(session, realm, auth);
+        }
+        return new MgmtPermissions(session, realm, auth);
+    }
+    public static AdminPermissionEvaluator evaluator(KeycloakSession session, RealmModel realm, RealmModel adminsRealm, UserModel admin) {
+        if (Profile.isFeatureEnabled(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ_V2)) {
+            return new MgmtPermissionsV2(session, adminsRealm, admin);
+        }
+        return new MgmtPermissions(session, realm, adminsRealm, admin);
+    }
+
+    public static RealmsPermissionEvaluator realms(KeycloakSession session, AdminAuth auth) {
+        if (Profile.isFeatureEnabled(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ_V2)) {
+            return new MgmtPermissionsV2(session, auth);
+        }
+        return new MgmtPermissions(session, auth);
+    }
+
+    public static RealmsPermissionEvaluator realms(KeycloakSession session, RealmModel adminsRealm, UserModel admin) {
+        if (Profile.isFeatureEnabled(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ_V2)) {
+            return new MgmtPermissionsV2(session, adminsRealm, admin);
+        }
+        return new MgmtPermissions(session, adminsRealm, admin);
+    }
+
+    public static AdminPermissionManagement management(KeycloakSession session, RealmModel realm) {
+        if (Profile.isFeatureEnabled(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ_V2)) {
+             return new MgmtPermissionsV2(session, realm);
+        }
+        return new MgmtPermissions(session, realm);
+    }
+
+    public static void registerListener(ProviderEventManager manager) {
+        manager.register(new ProviderEventListener() {
+            @Override
+            public void onEvent(ProviderEvent event) {
+                if (Profile.isFeatureEnabled(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ)) {
+                    if (event instanceof RoleContainerModel.RoleRemovedEvent) {
+                        RoleContainerModel.RoleRemovedEvent cast = (RoleContainerModel.RoleRemovedEvent) event;
+                        RoleModel role = cast.getRole();
+                        RealmModel realm;
+                        if (role.getContainer() instanceof ClientModel) {
+                            realm = ((ClientModel) role.getContainer()).getRealm();
+
+                        } else {
+                            realm = (RealmModel) role.getContainer();
+                        }
+                        management(cast.getKeycloakSession(), realm).roles().setPermissionsEnabled(role, false);
+                    } else if (event instanceof ClientModel.ClientRemovedEvent) {
+                        ClientModel.ClientRemovedEvent cast = (ClientModel.ClientRemovedEvent) event;
+                        management(cast.getKeycloakSession(), cast.getClient().getRealm()).clients().setPermissionsEnabled(cast.getClient(), false);
+                    } else if (event instanceof GroupModel.GroupRemovedEvent) {
+                        GroupModel.GroupRemovedEvent cast = (GroupModel.GroupRemovedEvent) event;
+                        management(cast.getKeycloakSession(), cast.getRealm()).groups().setPermissionsEnabled(cast.getGroup(), false);
+                    }
+                }
+            }
+        });
+    }
+
+
+}
+
+
+===== FILE services/src/main/java/org/keycloak/services/resources/admin/permissions/ClientPermissionEvaluator.java (after PR) =====
+/*
+ * Copyright 2016 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.services.resources.admin.permissions;
+
+import org.keycloak.models.AdminRoles;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.ClientScopeModel;
+
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
+ * @version $Revision: 1 $
+ */
+public interface ClientPermissionEvaluator {
+    boolean isPermissionsEnabled(ClientModel client);
+
+    void setPermissionsEnabled(ClientModel client, boolean enable);
+
+    /**
+     * Throws ForbiddenException if {@link #canListClientScopes()} returns {@code false}.
+     */
+    void requireListClientScopes();
+
+    /**
+     * Returns {@code true} if the caller has {@link org.keycloak.models.AdminRoles#MANAGE_CLIENTS} role.
+     * <p/>
+     * For V2 only: Also if it has permission to {@link org.keycloak.authorization.AdminPermissionsSchema#MANAGE}.
+     */
+    boolean canManage();
+
+    /**
+     * Throws ForbiddenException if {@link #canManage()} returns {@code false}.
+     */
+    void requireManage();
+
+    /**
+     * Returns {@code true} if the caller has {@link org.keycloak.models.AdminRoles#MANAGE_CLIENTS} role.
+     * <p/>
+     * For V2 only: Also if it has permission to {@link org.keycloak.authorization.AdminPermissionsSchema#MANAGE}.
+     */
+    boolean canManageClientScopes();
+
+    /**
+     * Throws ForbiddenException if {@link #canManageClientScopes()} returns {@code false}.
+     */
+    void requireManageClientScopes();
+
+    /**
+     * Returns {@code true} if the caller has at least one of the {@link org.keycloak.models.AdminRoles#MANAGE_CLIENTS} or {@link org.keycloak.models.AdminRoles#VIEW_CLIENTS} roles.
+     * <p/>
+     * For V2 only: Also if it has permission to {@link org.keycloak.authorization.AdminPermissionsSchema#VIEW}.
+     */
+    boolean canView();
+
+    /**
+     * Returns {@code true} if {@link #canView()} returns {@code true}.
+     * <p/>
+     * Or if the caller has at least one of the {@link AdminRoles#QUERY_CLIENTS} or {@link AdminRoles#QUERY_USERS} roles.
+     */
+    boolean canList();
+
+    /**
+     * Returns {@code true} if {@link #canView()} returns {@code true}.
+     */
+    boolean canViewClientScopes();
+
+    /**
+     * Throws ForbiddenException if {@link #canList()} returns {@code false}.
+     */
+    void requireList();
+
+    /**
+     * Returns {@code true} if {@link #canView()} returns {@code true}.
+     * <p/>
+     * Or if the caller has {@link AdminRoles#QUERY_CLIENTS} role.
+     */
+    boolean canListClientScopes();
+
+    /**
+     * Returns {@code true} if {@link #canView()} returns {@code true}.
+     */
+    void requireView();
+
+    /**
+     * Returns {@code true} if {@link #canViewClientScopes()} returns {@code true}.
+     */
+    void requireViewClientScopes();
+
+    /**
+     * Returns {@code true} if the caller has {@link org.keycloak.models.AdminRoles#MANAGE_CLIENTS} role.
+     * <p/>
+     * Or if the caller has a permission to {@link AdminPermissionManagement#MANAGE_SCOPE} the client.
+     * <p/>
+     * For V2 only: Also if the caller has a permission to {@link org.keycloak.authorization.AdminPermissionsSchema#MANAGE} all clients.
+     */
+    boolean canManage(ClientModel client);
+
+    /**
+     * Returns {@code true} if {@link #canManage(ClientModel)} returns {@code true}.
+     * <p/>
+     * Or if the caller has a permission to {@link ClientPermissionManagement#CONFIGURE_SCOPE} the client.
+     * <p/>
+     * For V2 only: Also if the caller has a permission to {@link org.keycloak.authorization.AdminPermissionsSchema#CONFIGURE} all clients.
+     */
+    boolean canConfigure(ClientModel client);
+
+    /**
+     * Throws ForbiddenException if {@link #canConfigure(ClientModel)} returns {@code false}.
+     */
+    void requireConfigure(ClientModel client);
+
+    /**
+     * Throws ForbiddenException if {@link #canManage(ClientModel)}  returns {@code false}.
+     */
+    void requireManage(ClientModel client);
+
+    /**
+     * Returns {@code true} if {@link #canView()} or {@link #canConfigure(ClientModel)} returns {@code true}.
+     * <p/>
+     * Or if the caller has a permission to {@link AdminPermissionManagement#VIEW_SCOPE} the client.
+     * <p/>
+     * For V2 only: Also if the caller has a permission to {@link org.keycloak.authorization.AdminPermissionsSchema#VIEW} all clients.
+     */
+    boolean canView(ClientModel client);
+
+    /**
+     * Throws ForbiddenException if {@link #canView(ClientModel)}  returns {@code false}.
+     */
+    void requireView(ClientModel client);
+
+    /**
+     * Returns {@code true} if the caller has {@link org.keycloak.models.AdminRoles#MANAGE_CLIENTS} role.
+     * <p/>
+     * For V2 only: Also if it has permission to {@link org.keycloak.authorization.AdminPermissionsSchema#MANAGE}.
+     */
+    boolean canManage(ClientScopeModel clientScope);
+
+    /**
+     * Throws ForbiddenException if {@link #canManage(ClientScopeModel)} returns {@code false}.
+     */
+    void requireManage(ClientScopeModel clientScope);
+
+    /**
+     * Returns {@code true} if the caller has at least one of the {@link org.keycloak.models.AdminRoles#VIEW_CLIENTS} or {@link org.keycloak.models.AdminRoles#MANAGE_CLIENTS} roles.
+     * <p/>
+     * For V2 only: Also if it has permission to {@link org.keycloak.authorization.AdminPermissionsSchema#VIEW} or {@link org.keycloak.authorization.AdminPermissionsSchema#MANAGE}.
+     */
+    boolean canView(ClientScopeModel clientScope);
+
+    /**
+     * Throws ForbiddenException if {@link #canView(ClientScopeModel)} returns {@code false}.
+     */
+    void requireView(ClientScopeModel clientScope);
+
+    /**
+     * Returns {@code true} if the caller has a permission to {@link ClientPermissionManagement#MAP_ROLES_SCOPE} for the client.
+     * <p/>
+     * For V2 only: Also if the caller has a permission to {@link org.keycloak.authorization.AdminPermissionsSchema#MAP_ROLES} for all clients.
+     */
+    boolean canMapRoles(ClientModel client);
+
+    /**
+     * Returns {@code true} if the caller has a permission to {@link ClientPermissionManagement#MAP_ROLES_COMPOSITE_SCOPE} for the client.
+     * <p/>
+     * For V2 only: Also if the caller has a permission to {@link org.keycloak.authorization.AdminPermissionsSchema#MAP_ROLES_COMPOSITE} for all clients.
+     */
+    boolean canMapCompositeRoles(ClientModel client);
+
+    /**
+     * Returns {@code true} if the caller has a permission to {@link ClientPermissionManagement#MAP_ROLES_CLIENT_SCOPE} for the client.
+     * <p/>
+     * For V2 only: Also if the caller has a permission to {@link org.keycloak.authorization.AdminPermissionsSchema#MAP_ROLES_CLIENT_SCOPE} for all clients.
+     */
+    boolean canMapClientScopeRoles(ClientModel client);
+
+    Map<String, Boolean> getAccess(ClientModel client);
+
+    Set<String> getClientsWithPermission(String scope);
+}
+
+
+===== FILE services/src/main/java/org/keycloak/services/resources/admin/permissions/ClientPermissionsV2.java (after PR) =====
+/*
+ * Copyright 2025 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.services.resources.admin.permissions;
+
+import org.jboss.logging.Logger;
+import org.keycloak.authorization.AdminPermissionsSchema;
+import org.keycloak.authorization.AuthorizationProvider;
+import org.keycloak.authorization.common.ClientModelIdentity;
+import org.keycloak.authorization.common.DefaultEvaluationContext;
+import org.keycloak.authorization.model.Policy;
+import org.keycloak.authorization.model.Resource;
+import org.keycloak.authorization.model.ResourceServer;
+import org.keycloak.authorization.model.Scope;
+import org.keycloak.authorization.permission.ResourcePermission;
+import org.keycloak.authorization.policy.evaluation.EvaluationContext;
+import org.keycloak.models.AdminRoles;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.ClientScopeModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.representations.AccessToken;
+import org.keycloak.representations.idm.authorization.Permission;
+
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static org.keycloak.services.resources.admin.permissions.AdminPermissionManagement.TOKEN_EXCHANGE;
+
+
+public class ClientPermissionsV2 extends ClientPermissions {
+
+    private static final Logger logger = Logger.getLogger(ClientPermissionsV2.class);
+
+    public ClientPermissionsV2(KeycloakSession session, RealmModel realm, AuthorizationProvider authz, MgmtPermissionsV2 root) {
+        super(session, realm, authz, root);
+    }
+
+    @Override
+    public boolean canConfigure(ClientModel client) {
+        if (canManage(client)) return true;
+
+        return hasPermission(client, AdminPermissionsSchema.CONFIGURE);
+    }
+
+    @Override
+    public boolean canManage(ClientModel client) {
+        if (root.hasOneAdminRole(AdminRoles.MANAGE_CLIENTS)) return true;
+
+        return hasPermission(client, AdminPermissionsSchema.MANAGE);
+    }
+
+    @Override
+    public boolean canManage() {
+        return super.canManage() || hasPermission(AdminPermissionsSchema.MANAGE);
+    }
+
+    @Override
+    public boolean canView(ClientModel client) {
+        if (canView() || canConfigure(client)) {
+            return true;
+        }
+
+        return hasPermission(client, AdminPermissionsSchema.VIEW);
+    }
+
+    @Override
+    public boolean canView() {
+        return canViewClientDefault() || hasPermission(AdminPermissionsSchema.VIEW);
+    }
+
+    @Override
+    public boolean canMapRoles(ClientModel client) {
+        return hasPermission(client, AdminPermissionsSchema.MAP_ROLES);
+    }
+
+    @Override
+    public boolean canMapCompositeRoles(ClientModel client) {
+        return hasPermission(client, AdminPermissionsSchema.MAP_ROLES_COMPOSITE);
+    }
+
+    @Override
+    public boolean canMapClientScopeRoles(ClientModel client) {
+        return hasPermission(client, AdminPermissionsSchema.MAP_ROLES_CLIENT_SCOPE);
+    }
+
+    @Override
+    public boolean canManageClientScopes() {
+        if (root.hasOneAdminRole(AdminRoles.MANAGE_CLIENTS)) return true;
+
+        return hasPermission(AdminPermissionsSchema.MANAGE);
+    }
+
+    @Override
+    public boolean canManage(ClientScopeModel clientScope) {
+        return canManageClientScopes();
+    }
+
+    @Override
+    public boolean canView(ClientScopeModel clientScope) {
+        if (root.hasOneAdminRole(AdminRoles.VIEW_CLIENTS, AdminRoles.MANAGE_CLIENTS)) return true;
+
+        return hasPermission(AdminPermissionsSchema.VIEW) || hasPermission(AdminPermissionsSchema.MANAGE);
+    }
+
+    @Override
+    public Set<String> getClientsWithPermission(String scope) {
+        if (!root.isAdminSameRealm()) {
+            return Collections.emptySet();
+        }
+
+        ResourceServer server = root.realmResourceServer();
+
+        if (server == null) {
+            return Collections.emptySet();
+        }
+
+        Set<String> granted = new HashSet<>();
+
+        resourceStore.findByType(server, AdminPermissionsSchema.CLIENTS_RESOURCE_TYPE, resource -> {
+            if (hasGrantedPermission(resource, scope)) {
+                granted.add(resource.getName());
+            }
+        });
+
+        return granted;
+    }
+
+    @Override
+    public boolean canExchangeTo(ClientModel authorizedClient, ClientModel to, AccessToken token) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Policy exchangeToPermission(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Policy mapRolesPermission(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Policy mapRolesClientScopePermission(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Policy mapRolesCompositePermission(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Policy managePermission(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Policy configurePermission(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Policy viewPermission(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public boolean isPermissionsEnabled(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public void setPermissionsEnabled(ClientModel client, boolean enable) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Resource resource(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    @Override
+    public Map<String, String> getPermissions(ClientModel client) {
+        throw new UnsupportedOperationException("Not supported in V2");
+    }
+
+    private boolean hasPermission(ClientModel client, String scope) {
+        if (!root.isAdminSameRealm()) {
+            return false;
+        }
+        ResourceServer server = root.realmResourceServer();
+        if (server == null) return false;
+
+        Resource resource =  resourceStore.findByName(server, client.getId(), server.getId());
+        if (resource == null) {
+            // check if there is permission for "all-clients". If so, load its resource and proceed with evaluation
+            resource = AdminPermissionsSchema.SCHEMA.getResourceTypeResource(session, server, AdminPermissionsSchema.CLIENTS_RESOURCE_TYPE);
+
+            if (authz.getStoreFactory().getPolicyStore().findByResource(server, resource).isEmpty()) {
+                return false;
+            }
+        }
+
+        Collection<Permission> permissions = root.evaluatePermission(new ResourcePermission(resource, resource.getScopes(), server), server);
+        List<String> expectedScopes = Arrays.asList(scope);
+        for (Permission permission : permissions) {
+            for (String s : permission.getScopes()) {
+                if (expectedScopes.contains(s)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private boolean hasPermission(String scope) {
+        if (!root.isAdminSameRealm()) {
+            return false;
+        }
+        ResourceServer server = root.realmResourceServer();
+        if (server == null) return false;
+
+        Resource resource = resourceStore.findByName(server, AdminPermissionsSchema.CLIENTS_RESOURCE_TYPE, server.getId());
+        if (resource == null) {
+            return false;
+        }
+
+        Collection<Permission> permissions = root.evaluatePermission(new ResourcePermission(resource, resource.getScopes(), server), server);
+        List<String> expectedScopes = Arrays.asList(scope);
+        for (Permission permission : permissions) {
+            for (String s : permission.getScopes()) {
+                if (expectedScopes.contains(s)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private EvaluationContext getEvaluationContext(ClientModel authorizedClient, AccessToken token) {
+        ClientModelIdentity identity = new ClientModelIdentity(session, authorizedClient, token);
+        return new DefaultEvaluationContext(identity, session) {
+            @Override
+            public Map<String, Collection<String>> getBaseAttributes() {
+                Map<String, Collection<String>> attributes = super.getBaseAttributes();
+                attributes.put("kc.client.id", List.of(authorizedClient.getClientId()));
+                return attributes;
+            }
+        };
+    }
+
+    private boolean hasGrantedPermission(Resource resource, String scope) {
+        ResourceServer server = root.realmResourceServer();
+        Collection<Permission> permissions = root.evaluatePermission(new ResourcePermission(resource, resource.getScopes(), server), server);
+        for (Permission permission : permissions) {
+            for (String s : permission.getScopes()) {
+                if (scope.equals(s)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+}
+
+
+===== FILE services/src/main/java/org/keycloak/services/resources/admin/permissions/MgmtPermissionsV2.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.services.resources.admin.permissions;
+
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.services.resources.admin.AdminAuth;
+
+class MgmtPermissionsV2 extends MgmtPermissions {
+
+    private UserPermissionsV2 userPermissions;
+
+    private ClientPermissionsV2 clientPermissions;
+
+    public MgmtPermissionsV2(KeycloakSession session, RealmModel realm) {
+        super(session, realm);
+    }
+
+    public MgmtPermissionsV2(KeycloakSession session, RealmModel realm, AdminAuth auth) {
+        super(session, realm, auth);
+    }
+
+    public MgmtPermissionsV2(KeycloakSession session, AdminAuth auth) {
+        super(session, auth);
+    }
+
+    public MgmtPermissionsV2(KeycloakSession session, RealmModel adminsRealm, UserModel admin) {
+        super(session, adminsRealm, admin);
+    }
+
+    public MgmtPermissionsV2(KeycloakSession session, RealmModel realm, RealmModel adminsRealm, UserModel admin) {
+        super(session, realm, adminsRealm, admin);
+    }
+
+    @Override
+    public ClientModel getRealmPermissionsClient() {
+        return realm.getAdminPermissionsClient();
+    }
+
+    @Override
+    public UserPermissions users() {
+        if (userPermissions != null) return userPermissions;
+        userPermissions = new UserPermissionsV2(session, authz, this);
+        return userPermissions;
+    }
+
+    @Override
+    public ClientPermissions clients() {
+        if (clientPermissions != null) return clientPermissions;
+        clientPermissions = new ClientPermissionsV2(session, realm, authz, this);
+        return clientPermissions;
+    }
+}
+
+
+===== FILE tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/AbstractPermissionTest.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.tests.admin.authz.fgap;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import jakarta.ws.rs.core.Response;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.keycloak.admin.client.resource.PermissionsResource;
+import org.keycloak.admin.client.resource.PoliciesResource;
+import org.keycloak.admin.client.resource.ScopePermissionsResource;
+import org.keycloak.models.Constants;
+import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.representations.idm.authorization.AbstractPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.ClientPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.Logic;
+import org.keycloak.representations.idm.authorization.ScopePermissionRepresentation;
+import org.keycloak.representations.idm.authorization.UserPolicyRepresentation;
+import org.keycloak.testframework.annotations.InjectClient;
+import org.keycloak.testframework.annotations.InjectRealm;
+import org.keycloak.testframework.realm.ManagedClient;
+import org.keycloak.testframework.realm.ManagedRealm;
+
+public abstract class AbstractPermissionTest {
+
+    @InjectRealm(config = RealmAdminPermissionsConfig.class)
+    ManagedRealm realm;
+
+    @InjectClient(attachTo = Constants.ADMIN_PERMISSIONS_CLIENT_ID)
+    ManagedClient client;
+
+    protected static PermissionsResource getPermissionsResource(ManagedClient client) {
+        return client.admin().authorization().permissions();
+    }
+
+    protected PoliciesResource getPolicies() {
+        return client.admin().authorization().policies();
+    }
+
+    protected static ScopePermissionsResource getScopePermissionsResource(ManagedClient client) {
+        return getPermissionsResource(client).scope();
+    }
+
+    protected static void createPermission(ManagedClient client, ScopePermissionRepresentation permission) {
+        createPermission(client, permission, Response.Status.CREATED);
+    }
+
+    protected static void createPermission(ManagedClient client, ScopePermissionRepresentation permission, Response.Status expected) {
+        try (Response response = getScopePermissionsResource(client).create(permission)) {
+            assertEquals(expected.getStatusCode(), response.getStatus());
+        }
+    }
+
+    protected static class PermissionBuilder {
+        private final ScopePermissionRepresentation permission;
+
+        static PermissionBuilder create() {
+            ScopePermissionRepresentation rep = new ScopePermissionRepresentation();
+            rep.setName(KeycloakModelUtils.generateId());
+            return new PermissionBuilder(rep);
+        }
+
+        private PermissionBuilder(ScopePermissionRepresentation rep) {
+            this.permission = rep;
+        }
+        ScopePermissionRepresentation build() {
+            return permission;
+        }
+        PermissionBuilder logic(Logic logic) {
+            permission.setLogic(logic);
+            return this;
+        }
+        PermissionBuilder name(String name) {
+            permission.setName(name);
+            return this;
+        }
+        PermissionBuilder resourceType(String resourceType) {
+            permission.setResourceType(resourceType);
+            return this;
+        }
+        PermissionBuilder scopes(Set<String> scopes) {
+            permission.setScopes(scopes);
+            return this;
+        }
+        PermissionBuilder resources(Set<String> resources) {
+            permission.setResources(resources);
+            return this;
+        }
+        PermissionBuilder addPolicies(List<String> policies) {
+            policies.forEach(policy -> permission.addPolicy(policy));
+            return this;
+        }
+    }
+
+    protected static UserPolicyRepresentation createUserPolicy(ManagedRealm realm, ManagedClient client, String name, String userId) {
+        return createUserPolicy(realm, client, name, userId, Logic.POSITIVE);
+    }
+
+    protected static UserPolicyRepresentation createUserPolicy(ManagedRealm realm, ManagedClient client, String name, String userId, Logic logic) {
+        UserPolicyRepresentation policy = new UserPolicyRepresentation();
+        policy.setName(name);
+        policy.addUser(userId);
+        policy.setLogic(logic);
+        try (Response response = client.admin().authorization().policies().user().create(policy)) {
+            assertThat(response.getStatus(), equalTo(Response.Status.CREATED.getStatusCode()));
+            realm.cleanup().add(r -> {
+                String policyId = r.clients().get(client.getId()).authorization().policies().user().findByName(name).getId();
+                r.clients().get(client.getId()).authorization().policies().user().findById(policyId).remove();
+            });
+        }
+        return policy;
+    }
+
+    protected static ClientPolicyRepresentation createClientPolicy(ManagedRealm realm, ManagedClient client, String name, String clientId) {
+        ClientPolicyRepresentation policy = new ClientPolicyRepresentation();
+        policy.setName(name);
+        policy.addClient(clientId);
+        policy.setLogic(Logic.POSITIVE);
+        try (Response response = client.admin().authorization().policies().client().create(policy)) {
+            assertThat(response.getStatus(), equalTo(Response.Status.CREATED.getStatusCode()));
+            realm.cleanup().add(r -> {
+                String policyId = r.clients().get(client.getId()).authorization().policies().client().findByName(name).getId();
+                r.clients().get(client.getId()).authorization().policies().client().findById(policyId).remove();
+            });
+        }
+        return policy;
+    }
+
+    protected static ScopePermissionRepresentation createAllPermission(ManagedClient client, String resourceType, AbstractPolicyRepresentation policy, Set<String> scopes) {
+        ScopePermissionRepresentation permission = PermissionBuilder.create()
+                .resourceType(resourceType)
+                .scopes(scopes)
+                .addPolicies(List.of(policy.getName()))
+                .build();
+
+        createPermission(client, permission);
+
+        return permission;
+    }
+
+    protected ScopePermissionRepresentation createPermission(ManagedClient client, String resourceId, String resourceType, Set<String> scopes, AbstractPolicyRepresentation... policies) {
+        return createPermission(client, Logic.POSITIVE, resourceId, resourceType, scopes, policies);
+    }
+
+    protected ScopePermissionRepresentation createPermission(ManagedClient client, Logic logic, String resourceId, String resourceType, Set<String> scopes, AbstractPolicyRepresentation... policies) {
+        ScopePermissionRepresentation permission = PermissionBuilder.create()
+                .logic(logic)
+                .resourceType(resourceType)
+                .scopes(scopes)
+                .resources(Set.of(resourceId))
+                .addPolicies(Arrays.stream(policies).map(AbstractPolicyRepresentation::getName).collect(Collectors.toList()))
+                .build();
+
+        createPermission(client, permission);
+
+        return permission;
+    }
+}
+
+
+===== FILE tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/PermissionClientTest.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.tests.admin.authz.fgap;
+
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.junit.Assert.fail;
+import static org.keycloak.authorization.AdminPermissionsSchema.CONFIGURE;
+import static org.keycloak.authorization.AdminPermissionsSchema.MANAGE;
+import static org.keycloak.authorization.AdminPermissionsSchema.MAP_ROLES;
+import static org.keycloak.authorization.AdminPermissionsSchema.MAP_ROLES_COMPOSITE;
+import static org.keycloak.authorization.AdminPermissionsSchema.VIEW;
+
+import java.util.List;
+import java.util.Set;
+import java.util.function.Supplier;
+
+import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.keycloak.admin.client.Keycloak;
+import org.keycloak.admin.client.resource.ClientResource;
+import org.keycloak.admin.client.resource.ScopePermissionsResource;
+import org.keycloak.authorization.AdminPermissionsSchema;
+import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
+import org.keycloak.representations.idm.ProtocolMapperRepresentation;
+import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.representations.idm.authorization.AggregatePolicyRepresentation;
+import org.keycloak.representations.idm.authorization.ClientPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.ClientScopePolicyRepresentation;
+import org.keycloak.representations.idm.authorization.GroupPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.JSPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.PolicyRepresentation;
+import org.keycloak.representations.idm.authorization.RegexPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.ResourcePermissionRepresentation;
+import org.keycloak.representations.idm.authorization.RolePolicyRepresentation;
+import org.keycloak.representations.idm.authorization.TimePolicyRepresentation;
+import org.keycloak.representations.idm.authorization.UserPolicyRepresentation;
+import org.keycloak.testframework.annotations.InjectAdminClient;
+import org.keycloak.testframework.annotations.InjectClient;
+import org.keycloak.testframework.annotations.KeycloakIntegrationTest;
+import org.keycloak.testframework.realm.ManagedClient;
+
+@KeycloakIntegrationTest(config = KeycloakAdminPermissionsServerConfig.class)
+public class PermissionClientTest extends AbstractPermissionTest {
+
+    @InjectAdminClient(mode = InjectAdminClient.Mode.MANAGED_REALM, client = "myclient", user = "myadmin")
+    Keycloak realmAdminClient;
+
+    @InjectClient(ref = "realmClient")
+    ManagedClient realmClient;
+
+    private final String clientsType = AdminPermissionsSchema.CLIENTS.getType();
+
+    @AfterEach
+    public void onAfter() {
+        ScopePermissionsResource permissions = getScopePermissionsResource(client);
+
+        permissions.findAll(null, null, null, -1, -1).forEach(p -> permissions.findById(p.getId()).remove());
+    }
+
+    @Test
+    public void testUnsupportedPolicyTypes() {
+        assertSupportForPolicyType("resource", () -> getPermissionsResource(client).resource().create(new ResourcePermissionRepresentation()), false);
+    }
+
+    @Test
+    public void testSupportedPolicyTypes() {
+        assertSupportForPolicyType("scope", () -> getPermissionsResource(client).scope().create(PermissionBuilder.create()
+                .resourceType(AdminPermissionsSchema.USERS.getType())
+                .scopes(AdminPermissionsSchema.USERS.getScopes())
+                .build()), true);
+        assertSupportForPolicyType("user", () -> getPolicies().user().create(new UserPolicyRepresentation()), true);
+        assertSupportForPolicyType("client", () -> getPolicies().client().create(new ClientPolicyRepresentation()), true);
+        assertSupportForPolicyType("group", () -> getPolicies().group().create(new GroupPolicyRepresentation()), true);
+        assertSupportForPolicyType("role", () -> getPolicies().role().create(new RolePolicyRepresentation()), true);
+        assertSupportForPolicyType("aggregate", () -> getPolicies().aggregate().create(new AggregatePolicyRepresentation()), true);
+        assertSupportForPolicyType("client-scope", () -> getPolicies().clientScope().create(new ClientScopePolicyRepresentation()), true);
+        assertSupportForPolicyType("js", () -> getPolicies().js().create(new JSPolicyRepresentation()), true);
+        assertSupportForPolicyType("regex", () -> getPolicies().regex().create(new RegexPolicyRepresentation()), true);
+        assertSupportForPolicyType("time", () -> getPolicies().time().create(new TimePolicyRepresentation()), true);
+    }
+
+    private void assertSupportForPolicyType(String type, Supplier<Response> operation, boolean supported) {
+        try (Response response = operation.get()) {
+            assertPolicyEndpointResponse(type, supported, response);
+        }
+
+        PolicyRepresentation representation = new PolicyRepresentation();
+
+        representation.setType(type);
+
+        try (Response response = getPolicies().create(representation)) {
+            assertPolicyEndpointResponse(type, supported, response);
+        }
+    }
+
+    private void assertPolicyEndpointResponse(String type, boolean supported, Response response) {
+        assertThat("Policy type [" + type + "] should be " + (supported ? "supported" : "unsupported"), Status.BAD_REQUEST.equals(Status.fromStatusCode(response.getStatus())), not(supported));
+        assertThat("Policy type [" + type + "] should be " + (supported ? "supported" : "unsupported"), response.readEntity(String.class).contains("Policy type not supported by feature"), not(supported));
+    }
+
+    @Test
+    public void testManageOnlyOneClient() {
+        ClientRepresentation myclient = realm.admin().clients().findByClientId("myclient").get(0);
+        UserRepresentation myadmin = realm.admin().users().search("myadmin").get(0);
+
+        ClientResource clientResource = realmAdminClient.realm(realm.getName()).clients().get(myclient.getId());
+
+        // the following operations should fail as the permission wasn't granted yet
+        try {
+            clientResource.toRepresentation();
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+        try {
+            myclient.setName("somethingNew");
+            clientResource.update(myclient);
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+        try {
+            ClientScopeRepresentation clientScopeRep = clientResource.getDefaultClientScopes().get(1);
+            clientResource.removeDefaultClientScope(clientScopeRep.getId());
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        UserPolicyRepresentation onlyMyAdminUserPolicy = createUserPolicy(realm, client, "Only My Admin User Policy", myadmin.getId());
+        createPermission(client, myclient.getId(), clientsType, Set.of(MANAGE), onlyMyAdminUserPolicy);
+
+        // the caller can view myclient
+        clientResource.toRepresentation();
+
+        // the caller can list myclient
+        List<ClientRepresentation> allClients = realmAdminClient.realm(realm.getName()).clients().findAll();
+        assertThat(allClients, hasSize(1));
+
+        // can update myclient
+        myclient.setName("somethingNew");
+        clientResource.update(myclient);
+
+        // can view client scopes
+        List<ClientScopeRepresentation> defaultClientScopes = clientResource.getDefaultClientScopes();
+        assertThat(defaultClientScopes, not(empty()));
+
+        // can remove a default client scope
+        ClientScopeRepresentation clientScopeRep = defaultClientScopes.get(1);
+        clientResource.removeDefaultClientScope(clientScopeRep.getId());
+
+        // can add an optional client scope
+        clientResource.addOptionalClientScope(clientScopeRep.getId());
+
+        // can't update a different client
+        ClientRepresentation realmClientRep = realm.admin().clients().get(realmClient.getId()).toRepresentation();
+        realmClientRep.setName("somethingNew");
+        try {
+            realmAdminClient.realm(realm.getName()).clients().get(realmClient.getId()).update(realmClientRep);
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+    }
+
+    @Test
+    public void testConfigureOnlyOneClient() {
+        ClientRepresentation myclient = realm.admin().clients().findByClientId("myclient").get(0);
+        UserRepresentation myadmin = realm.admin().users().search("myadmin").get(0);
+
+        ClientResource clientResource = realmAdminClient.realm(realm.getName()).clients().get(myclient.getId());
+
+        // the following operations should fail as the permission wasn't granted yet
+        try {
+            clientResource.toRepresentation();
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+        try {
+            clientResource.generateNewSecret();
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+        try {
+            clientResource.getDefaultClientScopes();
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        UserPolicyRepresentation onlyMyAdminUserPolicy = createUserPolicy(realm, client, "Only My Admin User Policy", myadmin.getId());
+        createPermission(client, myclient.getId(), clientsType, Set.of(CONFIGURE), onlyMyAdminUserPolicy);
+
+        // the caller can view myclient
+        clientResource.toRepresentation();
+
+        // can do operations with client secrets
+        clientResource.getSecret();
+        clientResource.generateNewSecret();
+        clientResource.invalidateRotatedSecret();
+
+        // can get default client scopes
+        List<ClientScopeRepresentation> defaultClientScopes = clientResource.getDefaultClientScopes();
+
+        // can't delete default client scopes
+        try {
+            clientResource.removeDefaultClientScope(defaultClientScopes.get(0).getId());
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        // can't add default client scopes
+        try {
+            clientResource.addDefaultClientScope(defaultClientScopes.get(0).getId());
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+    }
+
+    @Test
+    public void testManageAllClients() {
+        UserRepresentation myadmin = realm.admin().users().search("myadmin").get(0);
+
+        ClientRepresentation newClient = new ClientRepresentation();
+        newClient.setClientId("newClient");
+        newClient.setProtocol("openid-connect");
+
+        // the following operations should fail as the permission wasn't granted yet
+        try (Response response = realmAdminClient.realm(realm.getName()).clients().create(newClient)) {
+            Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
+        }
+
+        List<ClientRepresentation> found = realmAdminClient.realm(realm.getName()).clients().findAll();
+        assertThat(found, empty());
+
+        UserPolicyRepresentation onlyMyAdminUserPolicy = createUserPolicy(realm, client, "Only My Admin User Policy", myadmin.getId());
+        createAllPermission(client, clientsType, onlyMyAdminUserPolicy, Set.of(MANAGE));
+
+        // can create a new client
+        realmAdminClient.realm(realm.getName()).clients().create(newClient).close();
+        found = realmAdminClient.realm(realm.getName()).clients().findByClientId("newClient");
+        assertThat(found, hasSize(1));
+
+        // can delete
+        realmAdminClient.realm(realm.getName()).clients().get(found.get(0).getId()).remove();
+        found = realmAdminClient.realm(realm.getName()).clients().findByClientId("newClient");
+        assertThat(found, empty());
+
+        // can list & view all clients
+        found = realmAdminClient.realm(realm.getName()).clients().findAll();
+        assertThat(found, not(empty()));
+    }
+
+    @Test
+    public void testViewAllClients() {
+        ClientRepresentation myclient = realm.admin().clients().findByClientId("myclient").get(0);
+        UserRepresentation myadmin = realm.admin().users().search("myadmin").get(0);
+
+        // the following operations should fail as the permission wasn't granted yet
+        try {
+            realmAdminClient.realm(realm.getName()).clients().get(myclient.getId()).getProtocolMappers().getMappers();
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        List<ClientRepresentation> found = realmAdminClient.realm(realm.getName()).clients().findAll(true);
+        assertThat(found, empty());
+
+
+        UserPolicyRepresentation onlyMyAdminUserPolicy = createUserPolicy(realm, client, "Only My Admin User Policy", myadmin.getId());
+        createAllPermission(client, clientsType, onlyMyAdminUserPolicy, Set.of(VIEW));
+
+        // can list and view all clients
+        found = realmAdminClient.realm(realm.getName()).clients().findAll(true);
+        assertThat(found, not(empty()));
+
+        // can't create a protocol mapper
+        ProtocolMapperRepresentation protocolMapperRep = new ProtocolMapperRepresentation();
+        protocolMapperRep.setName("my-protocol-mapper");
+        protocolMapperRep.setProtocol("openid-connect");
+        protocolMapperRep.setProtocolMapper("oidc-hardcoded-claim-mapper");
+        try (Response response = realmAdminClient.realm(realm.getName()).clients().get(myclient.getId()).getProtocolMappers().createMapper(protocolMapperRep)) {
+            Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
+        }
+
+        // can get protocol mappers
+        assertThat(realmAdminClient.realm(realm.getName()).clients().get(myclient.getId()).getProtocolMappers().getMappers(), empty());
+
+        // can't create a new client
+        try (Response response = realmAdminClient.realm(realm.getName()).clients().create(null)) {
+            Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
+        }
+    }
+
+    @Test
+    public void testMapRolesAndCompositesOnlyOneClient() {
+        UserRepresentation myadmin = realm.admin().users().search("myadmin").get(0);
+        ClientRepresentation myclient = realm.admin().clients().findByClientId("myclient").get(0);
+
+        // create a role and sub-role
+        RoleRepresentation role = new RoleRepresentation();
+        role.setName("myclient-role");
+        role.setClientRole(true);
+        realm.admin().clients().get(myclient.getId()).roles().create(role);
+        role = realm.admin().clients().get(myclient.getId()).roles().get("myclient-role").toRepresentation();
+
+        RoleRepresentation subRole = new RoleRepresentation();
+        subRole.setName("myclient-subRole");
+        subRole.setClientRole(true);
+        realm.admin().clients().get(myclient.getId()).roles().create(subRole);
+        subRole = realm.admin().clients().get(myclient.getId()).roles().get("myclient-subRole").toRepresentation();
+
+        // the following operations should fail as the permission wasn't granted yet
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(myadmin.getId()).roles().clientLevel(myclient.getId()).add(List.of(role));
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+        try {
+            realmAdminClient.realm(realm.getName()).clients().get(myclient.getId()).roles().get("myclient-role").addComposites(List.of(subRole));
+            fail("Expected exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        UserPolicyRepresentation onlyMyAdminUserPolicy = createUserPolicy(realm, client, "Only My Admin User Policy", myadmin.getId());
+        createPermission(client, myadmin.getId(), AdminPermissionsSchema.USERS_RESOURCE_TYPE, Set.of(MAP_ROLES), onlyMyAdminUserPolicy);
+        createPermission(client, myclient.getId(), clientsType, Set.of(MAP_ROLES, MAP_ROLES_COMPOSITE, CONFIGURE), onlyMyAdminUserPolicy);
+
+        // now those should pass
+        realmAdminClient.realm(realm.getName()).users().get(myadmin.getId()).roles().clientLevel(myclient.getId()).add(List.of(role));
+
+        realmAdminClient.realm(realm.getName()).clients().get(myclient.getId()).roles().get("myclient-role").addComposites(List.of(subRole));
+    }
+}
+
+
+===== FILE tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/PermissionRESTTest.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.tests.admin.authz.fgap;
+
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.Response;
+import java.util.Set;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.Test;
+import org.keycloak.authorization.AdminPermissionsSchema;
+import org.keycloak.representations.idm.authorization.DecisionStrategy;
+import org.keycloak.representations.idm.authorization.PolicyEnforcementMode;
+import org.keycloak.representations.idm.authorization.ResourceRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
+import org.keycloak.representations.idm.authorization.ScopeRepresentation;
+import org.keycloak.testframework.annotations.InjectUser;
+import org.keycloak.testframework.annotations.KeycloakIntegrationTest;
+import org.keycloak.testframework.realm.ManagedUser;
+
+@KeycloakIntegrationTest(config = KeycloakAdminPermissionsServerConfig.class)
+public class PermissionRESTTest extends AbstractPermissionTest {
+
+    @InjectUser(ref = "alice")
+    private ManagedUser userAlice;
+
+    @Test
+    public void resourceServerTest() {
+        ResourceServerRepresentation rep = new ResourceServerRepresentation();
+        rep.setPolicyEnforcementMode(PolicyEnforcementMode.DISABLED);
+        rep.setDecisionStrategy(DecisionStrategy.CONSENSUS);
+
+        try {
+            client.admin().authorization().update(rep);
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+
+        try {
+            client.admin().authorization().exportSettings();
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+
+        try {
+            client.admin().authorization().importSettings(rep);
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+    }
+
+    @Test
+    public void scopesTest() {
+        ScopeRepresentation manage = client.admin().authorization().scopes().findByName("manage");
+        assertThat(manage, notNullValue());
+
+        ScopeRepresentation customScope = new ScopeRepresentation();
+        customScope.setName("custom");
+
+        try (Response response = client.admin().authorization().scopes().create(customScope)) {
+            assertThat(response.getStatus(), equalTo(Response.Status.BAD_REQUEST.getStatusCode()));
+        }
+
+        try {
+            client.admin().authorization().scopes().scope(manage.getId()).update(manage);
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+
+        try {
+            client.admin().authorization().scopes().scope(manage.getId()).remove();
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+    }
+
+    @Test
+    public void resourcesTest() {
+        ResourceRepresentation resourceRep = new ResourceRepresentation("resource-1", "manage");
+        resourceRep.setType(AdminPermissionsSchema.USERS.getType());
+        //it is not expected to create resources directly
+        try (Response response = client.admin().authorization().resources().create(resourceRep)) {
+            assertThat(response.getStatus(), equalTo(Response.Status.BAD_REQUEST.getStatusCode()));
+        }
+        
+        ResourceRepresentation usersResource = client.admin().authorization().resources().searchByName(AdminPermissionsSchema.USERS.getType());
+        assertThat(usersResource, notNullValue());
+
+        // updates to 'all resource type' resources not expected
+        try {
+            client.admin().authorization().resources().resource(usersResource.getId()).update(resourceRep);
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+
+        // deletes to 'all resource type' resources not expected
+        try {
+            client.admin().authorization().resources().resource(usersResource.getId()).remove();
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+
+        // this should create a resource for userAlice
+        createPermission(client, PermissionBuilder.create()
+                .resourceType(AdminPermissionsSchema.USERS.getType())
+                .resources(Set.of(userAlice.getUsername()))
+                .scopes(AdminPermissionsSchema.USERS.getScopes())
+                .build());
+
+        // resourceName should equal to userAlice.getId() by design
+        ResourceRepresentation userAliceResourceRep = client.admin().authorization().resources().searchByName(userAlice.getId());
+        assertThat(userAliceResourceRep, notNullValue());
+        String aliceResourceId = userAliceResourceRep.getId();
+
+        // updates not expected 
+        try {
+            client.admin().authorization().resources().resource(aliceResourceId).update(userAliceResourceRep);
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+
+        // delete not expected 
+        try {
+            client.admin().authorization().resources().resource(aliceResourceId).remove();
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(BadRequestException.class));
+        }
+    }
+
+    @Test
+    public void permissionsTest() {
+        // no resourceType, valid scopes
+        createPermission(client, PermissionBuilder.create()
+                .scopes(AdminPermissionsSchema.USERS.getScopes())
+                .build(), Response.Status.BAD_REQUEST);
+
+        // valid resourceType, no scopes
+        createPermission(client, PermissionBuilder.create()
+                .resourceType(AdminPermissionsSchema.USERS.getType())
+                .build(), Response.Status.BAD_REQUEST);
+
+        // valid resourceType, non-existent scopes
+        createPermission(client, PermissionBuilder.create()
+                .resourceType(AdminPermissionsSchema.USERS.getType())
+                .scopes(Set.of("edit", "write", "token-exchange"))
+                .build(), Response.Status.BAD_REQUEST);
+    }    
+}
+
+
+===== FILE tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/UserResourceTypeEvaluationTest.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.tests.admin.authz.fgap;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.keycloak.authorization.AdminPermissionsSchema.IMPERSONATE;
+import static org.keycloak.authorization.AdminPermissionsSchema.MANAGE;
+import static org.keycloak.authorization.AdminPermissionsSchema.MANAGE_GROUP_MEMBERSHIP;
+import static org.keycloak.authorization.AdminPermissionsSchema.MAP_ROLES;
+import static org.keycloak.authorization.AdminPermissionsSchema.VIEW;
+
+import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.core.Response;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.keycloak.admin.client.Keycloak;
+import org.keycloak.admin.client.KeycloakBuilder;
+import org.keycloak.admin.client.resource.ScopePermissionsResource;
+import org.keycloak.authorization.AdminPermissionsSchema;
+import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.representations.idm.authorization.Logic;
+import org.keycloak.representations.idm.authorization.ScopePermissionRepresentation;
+import org.keycloak.representations.idm.authorization.UserPolicyRepresentation;
+import org.keycloak.testframework.annotations.InjectAdminClient;
+import org.keycloak.testframework.annotations.InjectUser;
+import org.keycloak.testframework.annotations.KeycloakIntegrationTest;
+import org.keycloak.testframework.realm.ManagedUser;
+import org.keycloak.testframework.realm.UserConfigBuilder;
+import org.keycloak.testframework.util.ApiUtil;
+
+@KeycloakIntegrationTest(config = KeycloakAdminPermissionsServerConfig.class)
+public class UserResourceTypeEvaluationTest extends AbstractPermissionTest {
+
+    @InjectUser(ref = "alice")
+    ManagedUser userAlice;
+
+    @InjectAdminClient(mode = InjectAdminClient.Mode.MANAGED_REALM, client = "myclient", user = "myadmin")
+    Keycloak realmAdminClient;
+
+    private final String usersType = AdminPermissionsSchema.USERS.getType();
+
+    private final String newUserUsername = "new_user";
+
+    @AfterEach
+    public void onAfter() {
+        ScopePermissionsResource permissions = getScopePermissionsResource(client);
+
+        for (ScopePermissionRepresentation permission : permissions.findAll(null, null, null, -1, -1)) {
+            permissions.findById(permission.getId()).remove();
+        }
+
+        realm.admin().users().search(newUserUsername).forEach(user -> realm.admin().users().get(user.getId()).remove());
+    }
+
+    @Test
+    public void testSingleUserPermission() {
+        UserRepresentation myadmin = realm.admin().users().search("myadmin").get(0);
+        UserPolicyRepresentation allowMyAdminPermission = createUserPolicy(realm, client, "Only My Admin User Policy", myadmin.getId());
+        // allow my admin to see alice only
+        createPermission(client, userAlice.admin().toRepresentation().getId(), usersType, Set.of(VIEW), allowMyAdminPermission);
+        List<UserRepresentation> search = realmAdminClient.realm(realm.getName()).users().search(null, -1, -1);
+        assertEquals(1, search.size());
+        assertEquals(userAlice.getUsername(), search.get(0).getUsername());
+    }
+
+    @Test
+    public void testImpersonatePermission() {
+        // myadmin shouldn't be able to impersonate user just yet
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).impersonate();
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        //create all-users permission for "myadmin" (so that myadmin can impersonate all users in the realm)
+        UserPolicyRepresentation policy = createUserPolicy(realm, client,"Only My Admin User Policy", realm.admin().users().search("myadmin").get(0).getId());
+        createAllPermission(client, usersType, policy, Set.of(IMPERSONATE));
+
+        // create user permission forbidding the impersonation for userAlice
+        String cannotImpersonateAlice = createPermission(client, Logic.NEGATIVE, userAlice.getId(), usersType, Set.of(IMPERSONATE)).getName();
+
+        // even though "myadmin" has permission to impersonate all users in realm it should be denied to impersonate userAlice
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).impersonate();
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        // remove the negative permission
+        String cannotImpersonateAliceId = getScopePermissionsResource(client).findByName(cannotImpersonateAlice).getId();
+        getScopePermissionsResource(client).findById(cannotImpersonateAliceId).remove();
+        
+        // need to create a separate client for the impersonation call, otherwise next usage of the 'realmAdminClient' would throw 401
+        try (Keycloak adminClient = KeycloakBuilder.builder()
+                .serverUrl("http://localhost:8080")
+                .realm(realm.getName())
+                .clientId("myclient")
+                .clientSecret("mysecret")
+                .username("myadmin")
+                .password("password")
+                .build()) {
+            // now it should be possible to impersonate the user due to fallback to all-users permission
+            adminClient.realm(realm.getName()).users().get(userAlice.getId()).impersonate();
+        }
+    }
+
+    @Test
+    public void testManageAllPermission() {
+        // myadmin shouldn't be able to create user just yet
+        try (Response response = realmAdminClient.realm(realm.getName()).users().create(UserConfigBuilder.create().username(newUserUsername).build())) {
+            assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
+        }
+
+        //create all-users permission for "myadmin" (so that myadmin can manage all users in the realm)
+        UserPolicyRepresentation policy = createUserPolicy(realm, client,"Only My Admin User Policy", realm.admin().users().search("myadmin").get(0).getId());
+        createAllPermission(client, usersType, policy, Set.of(MANAGE));
+
+        // creating user requires manage scope
+        String newUserId = ApiUtil.handleCreatedResponse(realmAdminClient.realm(realm.getName()).users().create(UserConfigBuilder.create().username(newUserUsername).build()));
+
+        // it should be possible to update the user due to fallback to all-users permission
+        realmAdminClient.realm(realm.getName()).users().get(newUserId).update(UserConfigBuilder.create().email("new@test.com").build());
+        assertEquals("new@test.com", realmAdminClient.realm(realm.getName()).users().get(newUserId).toRepresentation().getEmail());
+    }
+
+    @Test
+    public void testManageUserPermission() {
+        String myadminId = realm.admin().users().search("myadmin").get(0).getId();
+        UserPolicyRepresentation policy = createUserPolicy(realm, client,"Only My Admin User Policy", myadminId);
+        ScopePermissionRepresentation allUsersPermission = createAllPermission(client, usersType, policy, Set.of(MANAGE));
+
+        // creating user requires manage scope
+        String newUserId = ApiUtil.handleCreatedResponse(realmAdminClient.realm(realm.getName()).users().create(UserConfigBuilder.create().username(newUserUsername).build()));
+
+        // remove all-users permissions to test user-permission
+        allUsersPermission = getScopePermissionsResource(client).findByName(allUsersPermission.getName());
+        getScopePermissionsResource(client).findById(allUsersPermission.getId()).remove();
+
+        // create user-permissions
+        createPermission(client, UserConfigBuilder.create().id(newUserId).build().getId(), usersType, Set.of(MANAGE), policy);
+
+        // it should be possible to update the user due to single user-permission
+        realmAdminClient.realm(realm.getName()).users().get(newUserId).update(UserConfigBuilder.create().email("email@test.com").build());
+        assertEquals("email@test.com", realmAdminClient.realm(realm.getName()).users().get(newUserId).toRepresentation().getEmail());
+
+        // remove the user permission
+        getScopePermissionsResource(client).findAll(null, null, null, null, null).forEach(permission -> {
+            getScopePermissionsResource(client).findById(permission.getId()).remove();
+        });
+
+        // updating the user should be denied
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(newUserId).update(UserConfigBuilder.create().email("email@test.com").build());
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+    }
+
+    @Test
+    public void testViewAllPermission() {
+        UserPolicyRepresentation policy = createUserPolicy(realm, client,"Only My Admin User Policy", realm.admin().users().search("myadmin").get(0).getId());
+        ScopePermissionRepresentation permission = createAllPermission(client, usersType, policy, Set.of(VIEW));
+        List<UserRepresentation> search = realmAdminClient.realm(realm.getName()).users().search(null, -1, -1);
+        assertFalse(search.isEmpty());
+
+        permission = client.admin().authorization().permissions().scope().findByName(permission.getName());
+        permission.setPolicies(Set.of());
+        client.admin().authorization().permissions().scope().findById(permission.getId()).update(permission);
+        search = realmAdminClient.realm(realm.getName()).users().search(null, -1, -1);
+        assertTrue(search.isEmpty());
+    }
+
+    @Test
+    public void testViewUserPermission() {
+        UserRepresentation myadmin = realm.admin().users().search("myadmin").get(0);
+        UserPolicyRepresentation allowMyAdminPermission = createUserPolicy(realm, client,"Only My Admin User Policy", myadmin.getId());
+        createAllPermission(client, usersType, allowMyAdminPermission, Set.of(VIEW));
+
+        UserPolicyRepresentation denyMyAdminAccessingHisAccountPermission = createUserPolicy(realm, client,"Not My Admin User Policy", myadmin.getId(), Logic.NEGATIVE);
+        createPermission(client, myadmin.getId(), usersType, Set.of(VIEW), denyMyAdminAccessingHisAccountPermission);
+        List<UserRepresentation> search = realmAdminClient.realm(realm.getName()).users().search(null, -1, -1);
+        assertEquals(1, search.size());
+        assertEquals(userAlice.getUsername(), search.get(0).getUsername());
+    }
+
+    @Test
+    public void testViewUserPermissionDenyByDefault() {
+        String myadminId = realm.admin().users().search("myadmin").get(0).getId();
+        UserPolicyRepresentation disallowMyAdmin = createUserPolicy(realm, client,"Not My Admin User Policy", myadminId, Logic.NEGATIVE);
+        createAllPermission(client, usersType, disallowMyAdmin, Set.of(VIEW));
+
+        UserPolicyRepresentation allowAliceOnlyForMyAdmin = createUserPolicy(realm, client,"My Admin User Policy", myadminId);
+        createPermission(client, userAlice.getId(), usersType, Set.of(VIEW), allowAliceOnlyForMyAdmin);
+
+        List<UserRepresentation> search = realmAdminClient.realm(realm.getName()).users().search(null, -1, -1);
+        assertEquals(1, search.size());
+        assertEquals(userAlice.getUsername(), search.get(0).getUsername());
+    }
+
+    @Test
+    public void testMapRoles() {
+        RoleRepresentation testRole = new RoleRepresentation();
+        testRole.setName("testRole");
+        realm.admin().roles().create(testRole);
+        realm.cleanup().add(r -> r.roles().get("testRole").remove());
+
+        // myadmin shouldn't be able to map roles to the user just yet
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).roles().realmLevel().add(List.of(testRole));
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        //create all-users permission for "myadmin" (so that myadmin can map roles to users in the realm)
+        UserPolicyRepresentation policy = createUserPolicy(realm, client,"Only My Admin User Policy", realm.admin().users().search("myadmin").get(0).getId());
+        ScopePermissionRepresentation allUsersPermission = createAllPermission(client, usersType, policy, Set.of(MAP_ROLES));
+
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).roles().realmLevel().add(List.of(testRole));
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            // succsessfully checked the requireMapRoles https://github.com/keycloak/keycloak/blob/792b673f49d5faeed8b3bb2c61fb4a3b404df695/services/src/main/java/org/keycloak/services/resources/admin/RoleMapperResource.java#L235
+            // expecting here NotFoundException: https://github.com/keycloak/keycloak/blob/792b673f49d5faeed8b3bb2c61fb4a3b404df695/services/src/main/java/org/keycloak/services/resources/admin/RoleMapperResource.java#L243
+            assertThat(ex, instanceOf(NotFoundException.class));
+            // successful role mapping would require permission to map individual role https://github.com/keycloak/keycloak/blob/792b673f49d5faeed8b3bb2c61fb4a3b404df695/services/src/main/java/org/keycloak/services/resources/admin/RoleMapperResource.java#L245
+            // and it's not implemented yet for V2
+        }
+
+        // remove all-users permissions to test user-permission
+        allUsersPermission = getScopePermissionsResource(client).findByName(allUsersPermission.getName());
+        getScopePermissionsResource(client).findById(allUsersPermission.getId()).remove();
+
+        // now myadmin cannot map roles
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).roles().realmLevel().add(List.of(testRole));
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        // create userPermission
+        createPermission(client, userAlice.getId(), usersType, Set.of(MAP_ROLES), policy);
+
+        //check myadmin can map roles
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).roles().realmLevel().add(List.of(testRole));
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            // expecting here NotFoundException: https://github.com/keycloak/keycloak/blob/792b673f49d5faeed8b3bb2c61fb4a3b404df695/services/src/main/java/org/keycloak/services/resources/admin/RoleMapperResource.java#L243
+            assertThat(ex, instanceOf(NotFoundException.class));
+        }
+    }
+
+    @Test
+    public void testManageGroupMembership() {
+        // myadmin shouldn't be able to manage group membership of the user just yet
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).joinGroup("no-such");
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        //create all-users permission for "myadmin" (so that myadmin can add users into a group)
+        UserPolicyRepresentation policy = createUserPolicy(realm, client,"Only My Admin User Policy", realm.admin().users().search("myadmin").get(0).getId());
+        ScopePermissionRepresentation allUsersPermission = createAllPermission(client, usersType, policy, Set.of(MANAGE_GROUP_MEMBERSHIP));
+
+        //check myadmin can manage membership using all-users permission
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).joinGroup("no-such");
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            // expecting here NotFoundException: https://github.com/keycloak/keycloak/blob/b5c95e9f1c58bc500316dd5c0f2d3bb5e197ca99/services/src/main/java/org/keycloak/services/resources/admin/UserResource.java#L1060
+            assertThat(ex, instanceOf(NotFoundException.class));
+        }
+
+        // remove all-users permissions to test user-permission
+        allUsersPermission = getScopePermissionsResource(client).findByName(allUsersPermission.getName());
+        getScopePermissionsResource(client).findById(allUsersPermission.getId()).remove();
+
+        // now myadmin cannot manage membership
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).joinGroup("no-such");
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+
+        // create userPermission
+        createPermission(client, userAlice.getId(), usersType, Set.of(MANAGE_GROUP_MEMBERSHIP), policy);
+
+        //check myadmin can manage membership using individual permission
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).joinGroup("no-such");
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            // expecting here NotFoundException: https://github.com/keycloak/keycloak/blob/b5c95e9f1c58bc500316dd5c0f2d3bb5e197ca99/services/src/main/java/org/keycloak/services/resources/admin/UserResource.java#L1060
+            assertThat(ex, instanceOf(NotFoundException.class));
+        }
+    }
+
+    @Test
+    public void testTransitiveUserPermissions() {
+        //create all-users manage permission for "myadmin"
+        UserPolicyRepresentation policy = createUserPolicy(realm, client,"Only My Admin User Policy", realm.admin().users().search("myadmin").get(0).getId());
+        createAllPermission(client, usersType, policy, Set.of(MANAGE));
+
+        // with manage permission it is possible also view
+        List<UserRepresentation> search = realmAdminClient.realm(realm.getName()).users().search(null, -1, -1);
+        assertFalse(search.isEmpty());
+
+        // with manage permission it is possible also map roles
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).roles().realmLevel().add(List.of(new RoleRepresentation()));
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            // expecting here NotFoundException: https://github.com/keycloak/keycloak/blob/792b673f49d5faeed8b3bb2c61fb4a3b404df695/services/src/main/java/org/keycloak/services/resources/admin/RoleMapperResource.java#L243
+            assertThat(ex, instanceOf(NotFoundException.class));
+        }
+
+        // with manage permission it is possible also manage group membership
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).joinGroup("no-such");
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            // expecting here NotFoundException: https://github.com/keycloak/keycloak/blob/b5c95e9f1c58bc500316dd5c0f2d3bb5e197ca99/services/src/main/java/org/keycloak/services/resources/admin/UserResource.java#L1060
+            assertThat(ex, instanceOf(NotFoundException.class));
+        }
+
+        // with manage permission it is NOT possible to impersonate
+        try {
+            realmAdminClient.realm(realm.getName()).users().get(userAlice.getId()).impersonate();
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(ForbiddenException.class));
+        }
+    }
+}
+
+
+===== FILE tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/UserResourceTypePermissionTest.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.tests.admin.authz.fgap;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
+
+import jakarta.ws.rs.NotFoundException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.keycloak.admin.client.resource.ScopePermissionResource;
+import org.keycloak.admin.client.resource.ScopePermissionsResource;
+import org.keycloak.authorization.AdminPermissionsSchema;
+import org.keycloak.representations.idm.authorization.ResourceRepresentation;
+import org.keycloak.representations.idm.authorization.ScopePermissionRepresentation;
+import org.keycloak.representations.idm.authorization.UserPolicyRepresentation;
+import org.keycloak.testframework.annotations.InjectUser;
+import org.keycloak.testframework.annotations.KeycloakIntegrationTest;
+import org.keycloak.testframework.realm.ManagedUser;
+
+@KeycloakIntegrationTest(config = KeycloakAdminPermissionsServerConfig.class)
+public class UserResourceTypePermissionTest extends AbstractPermissionTest {
+
+    @InjectUser(ref = "alice")
+    ManagedUser userAlice;
+
+    @InjectUser(ref = "bob")
+    ManagedUser userBob;
+
+    @BeforeEach
+    public void onBefore() {
+        for (int i = 0; i < 3; i++) {
+            UserPolicyRepresentation policy = new UserPolicyRepresentation();
+
+            policy.setName("User Policy " + i);
+
+            client.admin().authorization().policies().user().create(policy).close();
+        }
+    }
+
+    @AfterEach
+    public void onAfter() {
+        ScopePermissionsResource permissions = getScopePermissionsResource(client);
+
+        for (ScopePermissionRepresentation permission : permissions.findAll(null, null, null, -1, -1)) {
+            permissions.findById(permission.getId()).remove();
+        }
+    }
+
+    @Test
+    public void testCreateResourceTypePermission() {
+        ScopePermissionRepresentation expected = createAllUserPermission();
+        List<ScopePermissionRepresentation> result = getScopePermissionsResource(client).findAll(null, null, null, -1, -1);
+        assertEquals(1, result.size());
+        ScopePermissionRepresentation permissionRep = result.get(0);
+        ScopePermissionResource permission = getScopePermissionsResource(client).findById(permissionRep.getId());
+        assertEquals(expected.getName(), permissionRep.getName());
+        assertEquals(AdminPermissionsSchema.USERS.getScopes().size(), permission.scopes().size());
+        assertEquals(3, permission.associatedPolicies().size());
+    }
+
+    @Test
+    public void testCreateResourceObjectPermission() {
+        ScopePermissionRepresentation expected = createUserPermission(userAlice);
+        List<ScopePermissionRepresentation> result = getScopePermissionsResource(client).findAll(null, null, null, -1, -1);
+        assertEquals(1, result.size());
+        ScopePermissionRepresentation permissionRep = result.get(0);
+        ScopePermissionResource permission = getScopePermissionsResource(client).findById(permissionRep.getId());
+        assertEquals(expected.getName(), permissionRep.getName());
+        assertEquals(AdminPermissionsSchema.USERS.getScopes().size(), permission.scopes().size());
+        assertEquals(1, permission.resources().size());
+        assertEquals(3, permission.associatedPolicies().size());
+    }
+
+    @Test
+    public void testFindByResourceObject() {
+        createUserPermission(userAlice, userBob);
+
+        List<ScopePermissionRepresentation> existing = getScopePermissionsResource(client).findAll(null, null, userAlice.getId(), -1, -1);
+        assertEquals(1, existing.size());
+        existing = getScopePermissionsResource(client).findAll(null, null, userBob.getId(), -1, -1);
+        assertEquals(1, existing.size());
+    }
+
+    @Test
+    public void testDelete() {
+        // only "all-resource" resources should be present
+        List<ResourceRepresentation> resources = client.admin().authorization().resources().find(null, null, null, null, null, null, null);
+        assertEquals(AdminPermissionsSchema.SCHEMA.getResourceTypes().entrySet().size(), resources.size());
+
+        createUserPermission(userAlice);
+        // resource for Alice should be created
+        resources = client.admin().authorization().resources().find(null, null, null, null, null, null, null);
+        assertEquals(1 + AdminPermissionsSchema.SCHEMA.getResourceTypes().entrySet().size(), resources.size());
+
+        createUserPermission(userBob);
+        // resource for Bob should be created
+        resources = client.admin().authorization().resources().find(null, null, null, null, null, null, null);
+        assertEquals(2 + AdminPermissionsSchema.SCHEMA.getResourceTypes().entrySet().size(), resources.size());
+
+        List<ScopePermissionRepresentation> existing = getScopePermissionsResource(client).findAll(null, null, userAlice.getId(), -1, -1);
+        assertEquals(1, existing.size());
+        // remove permission for Alice
+        getScopePermissionsResource(client).findById(existing.get(0).getId()).remove();
+        existing = getScopePermissionsResource(client).findAll(null, null, userAlice.getId(), -1, -1);
+        assertThat(existing, nullValue());
+
+        existing = getScopePermissionsResource(client).findAll(null, null, userBob.getId(), -1, -1);
+        assertEquals(1, existing.size());
+
+        // remove permission for Bob
+        getScopePermissionsResource(client).findById(existing.get(0).getId()).remove();
+
+        //resources for both Alice and Bob should be deleted, there should be only "all-resource" resources
+        resources = client.admin().authorization().resources().find(null, null, null, null, null, null, null);
+        assertEquals(AdminPermissionsSchema.SCHEMA.getResourceTypes().entrySet().size(), resources.size());
+    }
+
+    @Test
+    public void testUpdate() {
+        createUserPermission(userAlice, userBob);
+
+        List<ScopePermissionRepresentation> searchByResourceAlice = getScopePermissionsResource(client).findAll(null, null, userAlice.getId(), -1, -1);
+        assertThat(searchByResourceAlice, hasSize(1));
+        List<ScopePermissionRepresentation> searchByResourceBob = getScopePermissionsResource(client).findAll(null, null, userBob.getId(), -1, -1);
+        assertThat(searchByResourceBob, hasSize(1));
+
+        ScopePermissionRepresentation permission = searchByResourceAlice.get(0);
+
+        // verify it's the same permission
+        assertThat(permission.getId(), equalTo(searchByResourceBob.get(0).getId()));
+
+        // get resources assiciated with the permission
+        List<ResourceRepresentation> resources = getPolicies().policy(permission.getId()).resources();
+        assertThat(resources, hasSize(2));
+
+        // update permission so that contains single resource
+        ResourceRepresentation toRemove = resources.get(1);
+        resources.remove(toRemove);
+        permission.setResources(resources.stream().map(ResourceRepresentation::getId).collect(Collectors.toSet()));
+        getScopePermissionsResource(client).findById(permission.getId()).update(permission);
+
+        //permission should have only single resource
+        assertThat(getPolicies().policy(permission.getId()).resources(), hasSize(1));
+        try {
+            // resource removed from permission should be removed from server as it is not assigned to any permission
+            client.admin().authorization().resources().resource(toRemove.getId()).toRepresentation();
+            fail("Expected Exception wasn't thrown.");
+        } catch (Exception ex) {
+            assertThat(ex, instanceOf(NotFoundException.class));
+        }
+    }
+
+    private ScopePermissionRepresentation createUserPermission(ManagedUser... users) {
+        ScopePermissionRepresentation permission = PermissionBuilder.create()
+                .resourceType(AdminPermissionsSchema.USERS.getType())
+                .resources(Arrays.stream(users).map(ManagedUser::getUsername).collect(Collectors.toSet()))
+                .scopes(AdminPermissionsSchema.USERS.getScopes())
+                .addPolicies(List.of("User Policy 0", "User Policy 1", "User Policy 2"))
+                .build();
+
+        createPermission(client, permission);
+
+        return permission;
+    }
+
+    private ScopePermissionRepresentation createAllUserPermission() {
+        ScopePermissionRepresentation permission = PermissionBuilder.create()
+                .resourceType(AdminPermissionsSchema.USERS.getType())
+                .scopes(AdminPermissionsSchema.USERS.getScopes())
+                .addPolicies(List.of("User Policy 0", "User Policy 1", "User Policy 2"))
+                .build();
+
+        createPermission(client, permission);
+
+        return permission;
+    }
+}

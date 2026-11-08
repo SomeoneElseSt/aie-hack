@@ -1,0 +1,1094 @@
+Reading additional input from stdin...
+OpenAI Codex v0.166.0
+--------
+workdir: /Users/steve/Documents/Files/code/aie-hack
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR, /private/tmp/claude-501/-Users-steve-Documents-Files-code-aie-hack/14ac8da5-b99a-41d3-8aaf-f57f66f307fa/scratchpad] (network access enabled)
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a1b86f-6001-7360-a4cb-a050c2b648f7
+--------
+user
+# Task: does the SubQ gate scale with K passes? (CodeRabbit headline test)
+
+Be fast and succinct. ABSOLUTE RULE: never fabricate, estimate, simulate or use placeholder numbers. Every number must come from a real SubQ API response. If something fails, report the failure, not a number.
+
+## Context (read first)
+- `/Users/steve/Documents/Files/code/aie-hack/gate/subq_gate.py` — working script. Asks SubQ Snap (Decisions API, `POST https://api.subq.ai/v1/systemone`, model `subq-snap-1.1`, `noul` yes/no question, probability at `answers[q]["noul"]`) whether each AI review comment is a real defect given the PR diff, then rescored on Martian Code Review Bench using existing judge labels (strict profile, judge anthropic_claude-opus-4-5-20251101). Held-out = pick threshold on even-indexed PRs, score on odd, and vice versa.
+- Current K=1 headline: coderabbit F1 0.414 ungated → +0.106 held-out gain (precision 0.31 → ~0.56).
+- Key: SUBQ_API_KEY in /Users/steve/Documents/Files/code/aie-hack/.env. Another agent is also calling SubQ right now: use at most 3 concurrent requests, keep 429 retry/backoff.
+- Do NOT modify subq_gate.py or gate/cache/. Write new code as /Users/steve/Documents/Files/code/aie-hack/gate/kpass.py (import helpers from subq_gate.py if useful) and cache under gate/cache_kpass/.
+
+## Steps
+1. Determinism check: send the identical request for 3 coderabbit PRs twice. Are probabilities identical? Report.
+2. Define K passes:
+   - If outputs vary between identical calls: pass k = the same request repeated.
+   - If deterministic (likely): pass k = a different but equivalent framing. Write 4 variants: different question wording/criteria wording, and comment order shuffled with a fixed seed per pass. Pass 1 must be the original framing from subq_gate.py (reuse gate/cache/ entries read-only for it if keys match).
+3. For tools coderabbit (primary), then copilot-v2, gemini-v2, sourcery if time allows: compute aggregated P(yes) for K = 1, 2, 4 using (a) mean of probabilities, (b) min (conservative). Score each with the same held-out method.
+4. Also report the K=1 result for each single variant alone, so we can tell "more passes help" apart from "one variant is just a better prompt".
+
+## Output
+Write /Users/steve/Documents/Files/code/aie-hack/gate/RESULTS_kpass.md:
+| tool | K | agg | held-out F1 gain (A→B, B→A, avg) | in-sample P/R/F1 |
+plus per-variant K=1 rows, SubQ call/error counts, and 2-3 bullet takeaways: is there a scaling effect or not.
+hook: SessionStart
+hook: SessionStart Completed
+codex
+I’ll check the existing script, run the duplicate-call test, then prioritize CodeRabbit. Mr. Codsworth will use only returned API probabilities and report failures explicitly.
+exec
+/bin/zsh -lc 'rg -n "aie-hack|subq|Martian" /Users/steve/.codex/memories/MEMORY.md' in /Users/steve/Documents/Files/code/aie-hack
+ exited 1 in 0ms:
+exec
+/bin/zsh -lc 'rg -n "''^(def |async def |class |[A-Z_]+ ?=)|cache|held|noul|systemone|retry|429" gate/subq_gate.py' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+15:BENCH = Path("/private/tmp/claude-501/-Users-steve-Documents-Files-code-aie-hack/14ac8da5-b99a-41d3-8aaf-f57f66f307fa/scratchpad/crb/offline")
+16:EVALS = BENCH / "results/anthropic_claude-opus-4-5-20251101/evaluations.json"
+17:CACHE = Path(__file__).parent / "cache"
+18:CONTEXT = sys.argv[1] if len(sys.argv) > 1 else "diff"  # "diff" | "files"
+19:MAX_STATE_CHARS = 1_000_000
+20:STRICT = {"bug", "security", "concurrency", "data", "api"}
+21:WORKERS = 4
+22:RETRIES = 6
+23:TIMEOUT_S = 180
+24:THRESHOLDS = [i / 20 for i in range(0, 20)]
+26:QUESTION = {
+27:    "type": "noul",
+36:def load_key() -> str:
+43:def fetch_diff(pr_url: str) -> str:
+55:def fetch_files(pr_url: str, diff: str) -> str:
+75:def build_state(pr_url: str, diff: str) -> str:
+82:def candidates(entry: dict) -> list[str]:
+88:def ask_subq(key: str, state: str, cands: list[str]) -> dict:
+91:    req = urllib.request.Request("https://api.subq.ai/v1/systemone", data=body, method="POST",
+101:            if "429" not in last_err and "50" not in last_err:
+106:    return {c: answers[f"c{i}"]["noul"] for i, c in enumerate(cands)}
+109:def gate_pr(key: str, pr_url: str, tool: str, entry: dict) -> tuple[str, str, dict]:
+125:def score(evals: dict, probs: dict, tool: str, thr: float, prs: list[str]) -> tuple[float, float, float, int, int]:
+150:def best_threshold(evals, probs, tool, prs) -> float:
+154:def main() -> None:
+181:        held = []
+184:            held.append((score(evals, probs, tool, 0.0, test)[2], score(evals, probs, tool, tt, test)[2], score(evals, probs, tool, tt, test)[0]))
+185:        held_gain = sum(g - b for b, g, _ in held) / 2
+186:        rows.append((held_gain, tool, base, ins_t, ins, held))
+187:    lines = ["| tool | ungated P / R / F1 | gated in-sample (thr) P / R / F1 | held-out F1 gain (A→B, B→A) | avg held-out gain |", "|---|---|---|---|---|"]
+
+exec
+/bin/zsh -lc 'cat gate/subq_gate.py' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+"""Gate AI code-review comments with SubQ Snap and rescore on Martian's Code Review Bench.
+
+Uses the judge's existing TP/FP labels: gating drops a candidate (dropped TP -> FN, dropped FP vanishes).
+"""
+import json
+import os
+import re
+import time
+import subprocess
+import sys
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+BENCH = Path("/private/tmp/claude-501/-Users-steve-Documents-Files-code-aie-hack/14ac8da5-b99a-41d3-8aaf-f57f66f307fa/scratchpad/crb/offline")
+EVALS = BENCH / "results/anthropic_claude-opus-4-5-20251101/evaluations.json"
+CACHE = Path(__file__).parent / "cache"
+CONTEXT = sys.argv[1] if len(sys.argv) > 1 else "diff"  # "diff" | "files"
+MAX_STATE_CHARS = 1_000_000
+STRICT = {"bug", "security", "concurrency", "data", "api"}
+WORKERS = 4
+RETRIES = 6
+TIMEOUT_S = 180
+THRESHOLDS = [i / 20 for i in range(0, 20)]
+
+QUESTION = {
+    "type": "noul",
+    "instructions": "Given this pull request diff, is the following review comment a real, correct defect introduced by the diff that should block merge?\nCOMMENT: {c}",
+    "criteria": {
+        "true": "A real correctness, security, data, concurrency or API bug that the diff actually introduces",
+        "false": "A wrong claim, speculation, style nit, or something not caused by this diff",
+    },
+}
+
+
+def load_key() -> str:
+    for line in Path(__file__).parent.parent.joinpath(".env").read_text().splitlines():
+        if line.startswith("SUBQ_API_KEY="):
+            return line.split("=", 1)[1].strip().strip('"')
+    return ""
+
+
+def fetch_diff(pr_url: str) -> str:
+    path = CACHE / ("diff_" + pr_url.split("github.com/")[1].replace("/", "_") + ".diff")
+    if path.exists():
+        return path.read_text()
+    out = subprocess.run(["gh", "pr", "diff", pr_url], capture_output=True, text=True)
+    if out.returncode != 0:
+        print("diff fail", pr_url, out.stderr[:200], file=sys.stderr)
+        return ""
+    path.write_text(out.stdout)
+    return out.stdout
+
+
+def fetch_files(pr_url: str, diff: str) -> str:
+    path = CACHE / ("files_" + pr_url.split("github.com/")[1].replace("/", "_") + ".txt")
+    if path.exists():
+        return path.read_text()
+    owner, repo, _, num = pr_url.split("github.com/")[1].split("/")[:4]
+    sha = subprocess.run(["gh", "api", f"repos/{owner}/{repo}/pulls/{num}", "--jq", ".head.sha"], capture_output=True, text=True).stdout.strip()
+    touched = re.findall(r"^\+\+\+ b/(.+)$", diff, flags=re.M)
+    parts = []
+    for f in touched:
+        url = f"https://raw.githubusercontent.com/{owner}/{repo}/{sha}/{f}"
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                parts.append(f"===== FILE {f} (after PR) =====\n" + r.read().decode("utf-8", "replace"))
+        except Exception as err:
+            print("file fail", url, str(err)[:80], file=sys.stderr)
+    text = "\n\n".join(parts)
+    path.write_text(text)
+    return text
+
+
+def build_state(pr_url: str, diff: str) -> str:
+    if CONTEXT == "diff":
+        return diff[:MAX_STATE_CHARS]
+    files = fetch_files(pr_url, diff)
+    return ("===== PR DIFF =====\n" + diff + "\n\n===== FULL CONTENT OF TOUCHED FILES =====\n" + files)[:MAX_STATE_CHARS]
+
+
+def candidates(entry: dict) -> list[str]:
+    tps = [t["matched_candidate"] for t in entry["true_positives"]]
+    fps = [f["candidate"] for f in entry["false_positives"]]
+    return list(dict.fromkeys(tps + fps))
+
+
+def ask_subq(key: str, state: str, cands: list[str]) -> dict:
+    questions = {f"c{i}": {**QUESTION, "instructions": QUESTION["instructions"].format(c=c)} for i, c in enumerate(cands)}
+    body = json.dumps({"model": "subq-snap-1.1", "state": state, "questions": questions}).encode()
+    req = urllib.request.Request("https://api.subq.ai/v1/systemone", data=body, method="POST",
+                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    answers, last_err = None, ""
+    for attempt in range(RETRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
+                answers = json.load(r)["answers"]
+            break
+        except Exception as err:  # network/HTTP errors are counted, not fabricated
+            last_err = str(err)[:300]
+            if "429" not in last_err and "50" not in last_err:
+                break
+            time.sleep(2 ** attempt + 1)
+    if answers is None:
+        return {"error": last_err}
+    return {c: answers[f"c{i}"]["noul"] for i, c in enumerate(cands)}
+
+
+def gate_pr(key: str, pr_url: str, tool: str, entry: dict) -> tuple[str, str, dict]:
+    path = CACHE / f"subq_{CONTEXT}_{tool}_{pr_url.split('github.com/')[1].replace('/', '_')}.json"
+    if path.exists():
+        return pr_url, tool, json.loads(path.read_text())
+    cands = candidates(entry)
+    if not cands:
+        return pr_url, tool, {}
+    diff = fetch_diff(pr_url)
+    if not diff:
+        return pr_url, tool, {"error": "no diff"}
+    probs = ask_subq(key, build_state(pr_url, diff), cands)
+    if "error" not in probs:
+        path.write_text(json.dumps(probs))
+    return pr_url, tool, probs
+
+
+def score(evals: dict, probs: dict, tool: str, thr: float, prs: list[str]) -> tuple[float, float, float, int, int]:
+    tp = fp = fn = kept = total = 0
+    for pr in prs:
+        e = evals[pr].get(tool)
+        if not e or e["skipped"]:
+            continue
+        p = probs.get((pr, tool), {})
+        keep = lambda c: p.get(c, 1.0) >= thr  # ungated if missing (errors reported separately)
+        fn += sum(1 for f in e["false_negatives"] if f.get("category") in STRICT)
+        for t in e["true_positives"]:
+            total += 1
+            kept += keep(t["matched_candidate"])
+            if t.get("category") in STRICT:
+                tp += keep(t["matched_candidate"])
+                fn += not keep(t["matched_candidate"])
+        for f in e["false_positives"]:
+            total += 1
+            kept += keep(f["candidate"])
+            fp += keep(f["candidate"])
+    prec = tp / (tp + fp) if tp + fp else 0
+    rec = tp / (tp + fn) if tp + fn else 0
+    f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0
+    return prec, rec, f1, kept, total
+
+
+def best_threshold(evals, probs, tool, prs) -> float:
+    return max(THRESHOLDS, key=lambda t: score(evals, probs, tool, t, prs)[2])
+
+
+def main() -> None:
+    CACHE.mkdir(exist_ok=True)
+    key = load_key()
+    evals = json.load(open(EVALS))
+    prs = sorted(evals)
+    tools = sorted({t for pr in prs for t in evals[pr]})
+    jobs = [(pr, tool, evals[pr][tool]) for pr in prs for tool in tools if evals[pr].get(tool) and not evals[pr][tool]["skipped"]]
+    probs, errors = {}, []
+    with ThreadPoolExecutor(WORKERS) as pool:
+        for pr, tool, res in pool.map(lambda j: gate_pr(key, *j), jobs):
+            if "error" in res:
+                errors.append((pr, tool, res["error"]))
+                continue
+            probs[(pr, tool)] = res
+    print(f"calls ok={len(probs)} errors={len(errors)}")
+    for e in errors[:5]:
+        print("  ERR", e)
+
+    half_a, half_b = prs[0::2], prs[1::2]
+    rows = []
+    failed = {t for _, t, _ in errors}
+    for tool in tools:
+        if tool in failed:
+            continue
+        base = score(evals, probs, tool, 0.0, prs)
+        ins_t = best_threshold(evals, probs, tool, prs)
+        ins = score(evals, probs, tool, ins_t, prs)
+        held = []
+        for train, test in ((half_a, half_b), (half_b, half_a)):
+            tt = best_threshold(evals, probs, tool, train)
+            held.append((score(evals, probs, tool, 0.0, test)[2], score(evals, probs, tool, tt, test)[2], score(evals, probs, tool, tt, test)[0]))
+        held_gain = sum(g - b for b, g, _ in held) / 2
+        rows.append((held_gain, tool, base, ins_t, ins, held))
+    lines = ["| tool | ungated P / R / F1 | gated in-sample (thr) P / R / F1 | held-out F1 gain (A→B, B→A) | avg held-out gain |", "|---|---|---|---|---|"]
+    for gain, tool, b, t, s, h in sorted(rows, reverse=True):
+        lines.append(f"| {tool} | {b[0]:.2f} / {b[1]:.2f} / {b[2]:.3f} ({b[4]} cmts) | ({t:.2f}) {s[0]:.2f} / {s[1]:.2f} / {s[2]:.3f} | {h[0][1]-h[0][0]:+.3f}, {h[1][1]-h[1][0]:+.3f} | **{gain:+.3f}** |")
+    out = "\n".join(lines)
+    print(out)
+    (Path(__file__).parent / f"RESULTS_{CONTEXT}.md").write_text(f"# SubQ gate, context={CONTEXT} (strict profile, Opus 4.5 judge)\n\n" + out + f"\n\nSubQ calls ok={len(probs)} errors={len(errors)} (tools with any failed call excluded: {sorted(failed)})\n")
+
+
+if __name__ == "__main__":
+    main()
+
+exec
+/bin/zsh -lc "rg --files -g AGENTS.md -g pyproject.toml -g '*RESULT*' -g '*kpass*' gate . | head -60" in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+./AGENTS.md
+gate/codex_kpass.log
+gate/RESULTS.md
+gate/RESULTS_diff.md
+./gate/codex_kpass.log
+./gate/RESULTS.md
+./gate/RESULTS_diff.md
+./evals/demo/RESULTS.md
+./vendors/pi/AGENTS.md
+./vendors/opencode/AGENTS.md
+./vendors/opencode/packages/stats/AGENTS.md
+./vendors/opencode/packages/plugin/AGENTS.md
+./vendors/opencode/services/site/src/docs/AGENTS.md
+./vendors/opencode/packages/app/e2e/AGENTS.md
+./vendors/opencode/packages/app/AGENTS.md
+./vendors/opencode/packages/core/src/tool/AGENTS.md
+./vendors/opencode/services/site/AGENTS.md
+./vendors/opencode/packages/ai/AGENTS.md
+./vendors/opencode/packages/ui/AGENTS.md
+./vendors/opencode/packages/tui/AGENTS.md
+./vendors/opencode/packages/codemode/AGENTS.md
+./vendors/opencode/packages/schema/AGENTS.md
+./vendors/opencode/packages/process-daemon/AGENTS.md
+./vendors/opencode/packages/session-ui/AGENTS.md
+./vendors/opencode/packages/gui-plugins/src/ssh/askpass.ts
+./vendors/opencode/packages/gui-plugins/src/ssh/askpass.test.ts
+./vendors/opencode/packages/desktop/AGENTS.md
+./vendors/opencode/packages/gui-plugins/AGENTS.md
+./vendors/opencode/packages/cli/AGENTS.md
+./vendors/opencode/packages/cli/src/ssh-askpass.ts
+./vendors/opencode/packages/cli/src/ssh-askpass.test.ts
+
+exec
+/bin/zsh -lc 'cat AGENTS.md' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+<!-- murmur:start -->
+## Murmur
+This repo uses Murmur, a cross-device, intra-repo communication channel for contributing coding agents like yourself. If you have not joined Murmur yet, you should.
+
+- To join Murmur (ask your user first): https://raw.githubusercontent.com/a-Fig/murmur/main/docs/agents/join.md
+- To use Murmur: https://raw.githubusercontent.com/a-Fig/murmur/main/docs/agents/use.md
+<!-- murmur:end -->
+
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python - <<'PY'
+import sys,json
+sys.path.insert(0,'gate')
+import subq_gate as g
+x=json.loads(g.EVALS.read_text())
+for tool in ('coderabbit','copilot-v2','gemini-v2','sourcery'):
+ rows=[(p,e[tool]) for p,e in sorted(x.items()) if e.get(tool) and not e[tool]['skipped']]
+ print(tool,len(rows),sum(bool(g.candidates(e)) for p,e in rows),sum(len(g.candidates(e)) for p,e in rows))
+print('diffs',len(list(g.CACHE.glob('diff_*'))))
+PY" in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 31ms:
+coderabbit 50 49 296
+copilot-v2 50 50 273
+gemini-v2 50 50 195
+sourcery 50 50 213
+diffs 50
+
+exec
+/bin/zsh -lc "cat > gate/kpass.py <<'PY'
+\"\"\"Real SubQ multi-pass experiment; original caches are read-only.\"\"\"
+import hashlib
+import json
+import math
+import random
+import subprocess
+import threading
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import subq_gate as gate
+
+ROOT = Path(__file__).parent
+CACHE = ROOT / 'cache_kpass'
+REPORT = ROOT / 'RESULTS_kpass.md'
+TOOLS = ('coderabbit', 'copilot-v2', 'gemini-v2', 'sourcery')
+WORKERS = 3
+PASSES = 4
+CHECK_PRS = 3
+SEED = 1701
+BACKOFF_MAX = 60
+VARIANTS = [gate.QUESTION, {
+    'type': 'noul',
+    'instructions': 'Does this review comment correctly identify a merge-blocking defect introduced by the supplied pull request diff?\\nCOMMENT: {c}',
+    'criteria': {'true': 'The diff introduces the claimed correctness, security, data, concurrency, or API bug.',
+                 'false': 'The claim is incorrect, speculative, stylistic, or not introduced by the diff.'},
+}, {
+    'type': 'noul',
+    'instructions': 'Assess this comment against the pull request diff: is it a real defect caused by this change and serious enough to block merging?\\nCOMMENT: {c}',
+    'criteria': {'true': 'A correct finding of a correctness, security, data, concurrency, or API defect introduced by this change.',
+                 'false': 'An unsupported or wrong finding, a style suggestion, or an issue not caused by this change.'},
+}, {
+    'type': 'noul',
+    'instructions': 'Given the diff, should merge be blocked because this review comment reports an actual bug introduced in this pull request?\\nCOMMENT: {c}',
+    'criteria': {'true': 'The comment accurately describes a newly introduced correctness, security, data, concurrency, or API bug.',
+                 'false': 'The comment is mistaken, speculative, about style, or about an issue this diff did not introduce.'},
+}]
+LOCK = threading.Lock()
+COUNTS = {'attempts': 0, 'successes': 0, 'attempt_errors': 0, 'cache_hits': 0, 'original_cache_hits': 0}
+ERRORS = []
+
+
+def increment(name):
+    with LOCK:
+        COUNTS[name] += 1
+
+
+def read_json(path):
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def valid_probs(probs, comments):
+    if not isinstance(probs, dict) or set(probs) "'!= set(comments):
+        return False
+    return all(isinstance(p, (int, float)) and not isinstance(p, bool) and math.isfinite(p) and 0 <= p <= 1 for p in probs.values())
+
+
+def get_diff(pr):
+    name = '"'diff_' + pr.split('github.com/')[1].replace('/', '_') + '.diff'
+    for directory in (gate.CACHE, CACHE):
+        path = directory / name
+        if path.exists():
+            return path.read_text()
+    result = subprocess.run(['gh', 'pr', 'diff', pr], capture_output=True, text=True)
+    if result.returncode:
+        return ''
+    (CACHE / name).write_text(result.stdout)
+    return result.stdout
+
+
+def payload_for(pr, comments, variant, repeat):
+    diff = get_diff(pr)
+    if not diff:
+        return None, comments
+    ordered = comments.copy()
+    if not repeat and variant:
+        random.Random(SEED + variant).shuffle(ordered)
+    framing = VARIANTS[0 if repeat else variant]
+    questions = {f'c{i}': {**framing, 'instructions': framing['instructions'].format(c=c)} for i, c in enumerate(ordered)}
+    return {'model': 'subq-snap-1.1', 'state': diff[:gate.MAX_STATE_CHARS], 'questions': questions}, ordered
+
+
+def request_probs(key, payload, comments, tag):
+    body = json.dumps(payload).encode()
+    request = urllib.request.Request('https://api.subq.ai/v1/systemone', data=body, method='POST',
+        headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'})
+    for attempt in range(gate.RETRIES):
+        increment('attempts')
+        try:
+            with urllib.request.urlopen(request, timeout=gate.TIMEOUT_S) as response:
+                raw = json.load(response)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+            increment('attempt_errors')
+            status = getattr(error, 'code', None)
+            event = {'tag': tag, 'attempt': attempt + 1, 'error': str(error)}
+            with LOCK:
+                ERRORS.append(event)
+            print('API ERROR', event, flush=True)
+            if status "'!= 429 and (status is None or status < 500):
+                return None
+            time.sleep(min(BACKOFF_MAX, 2 ** attempt + 1))
+            continue
+        answers = raw.get('"'answers', {}) if isinstance(raw, dict) else {}
+        probs = {c: answers.get(f'c{i}', {}).get('noul') for i, c in enumerate(comments)}
+        if not valid_probs(probs, comments):
+            increment('attempt_errors')
+            with LOCK:
+                ERRORS.append({'tag': tag, 'error': 'Invalid or missing noul probability', 'response': raw})
+            return None
+        increment('successes')
+        return {'probabilities': probs, 'response': raw}
+    return None
+
+
+def collect(key, pr, tool, entry, variant, repeat, check=None):
+    comments = gate.candidates(entry)
+    if not comments:
+        return {}
+    payload, ordered = payload_for(pr, comments, variant, repeat)
+    if payload is None:
+        return None
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    suffix = f'check{check}' if check is not None else f'pass{variant + 1}'
+    path = CACHE / f'{tool}_{digest}_{suffix}.json'
+    saved = read_json(path)
+    if saved and saved.get('request') == payload and valid_probs(saved.get('probabilities'), comments):
+        increment('cache_hits')
+        return saved['probabilities']
+    original = gate.CACHE / f\"subq_diff_{tool}_{pr.split('github.com/')[1].replace('/', '_')}.json\"
+    if check is None and variant == 0:
+        probs = read_json(original)
+        if valid_probs(probs, comments):
+            increment('original_cache_hits')
+            return probs
+    result = request_probs(key, payload, ordered, f'{tool} {pr} {suffix}')
+    if result is None:
+        return None
+    path.write_text(json.dumps({'request': payload, 'pr': pr, 'tool': tool, **result}))
+    return result['probabilities']
+
+
+def result_row(evals, prs, tool, probs, label, agg):
+    threshold = gate.best_threshold(evals, probs, tool, prs)
+    ins = gate.score(evals, probs, tool, threshold, prs)
+    gains = []
+    for train, test in ((prs[::2], prs[1::2]), (prs[1::2], prs[::2])):
+        selected = gate.best_threshold(evals, probs, tool, train)
+        gains.append(gate.score(evals, probs, tool, selected, test)[2] - gate.score(evals, probs, tool, 0, test)[2])
+    average = sum(gains) / len(gains)
+    row = f'| {tool} | {label} | {agg} | {gains[0]:+.4f}, {gains[1]:+.4f}, **{average:+.4f}** | {ins[0]:.4f} / {ins[1]:.4f} / {ins[2]:.4f} (threshold {threshold:.2f}) |'
+    return row, average
+
+
+def score_tool(evals, prs, tool, passes):
+    rows, summary = [], {}
+    if any(p is None for values in passes for p in values.values()):
+        return [f'| {tool} | unavailable | unavailable | API/input failure; tool excluded | unavailable |'], summary
+    for variant, values in enumerate(passes):
+        row, gain = result_row(evals, prs, tool, {(pr, tool): p for pr, p in values.items()}, f'variant {variant + 1}', 'single')
+        rows.append(row)
+        summary[f'variant{variant + 1}'] = gain
+    for k in (1, 2, 4):
+        for agg in ('mean', 'min'):
+            probs = {}
+            for pr in passes[0]:
+                probs[(pr, tool)] = {}
+                for comment in passes[0][pr]:
+                    values = [p[pr][comment] for p in passes[:k]]
+                    probs[(pr, tool)][comment] = sum(values) / len(values) if agg == 'mean' else min(values)
+            row, gain = result_row(evals, prs, tool, probs, str(k), agg)
+            rows.append(row)
+            summary[f'{k}_{agg}'] = gain
+    return rows, summary
+
+
+def write_report(checks, repeat, rows, summaries, done):
+    lines = ['# SubQ gate K-pass experiment', '',
+        'Strict profile; existing anthropic_claude-opus-4-5-20251101 judge labels. All probabilities are real API responses or existing original API cache entries; metrics are computed from these and judge labels.', '',
+        'A/B are even/odd positions in the full sorted PR list, exactly as subq_gate.py. Threshold grid and scoring reuse that script. Any incomplete tool is excluded entirely; missing probabilities are never filled.', '',
+        '## Identical-request check', '', *checks, '',
+        'Pass definition: ' + ('identical requests repeated (variation observed).' if repeat else 'equivalent question/criteria variants, with fixed-seed comment shuffles after the original pass.'), '',
+        'Identical responses in this check establish observed repeatability only, not universal determinism.', '',
+        '| tool | K | agg | held-out F1 gain (A→B, B→A, avg) | in-sample P/R/F1 |',
+        '|---|---|---|---|---|', *rows, '',
+        'Completed tools: ' + ', '.join(done), '',
+        'Invocation counters (HTTP attempts include retries; cache hits are not calls): ' + json.dumps(COUNTS),
+        '', 'Failures: ' + json.dumps(ERRORS), '', '## Takeaways', '']
+    if 'coderabbit' in summaries and summaries['coderabbit']:
+        s = summaries['coderabbit']
+        for agg in ('mean', 'min'):
+            lines.append(f\"- CodeRabbit {agg}: held-out gains K=1 {s['1_'+agg]:+.4f}, K=2 {s['2_'+agg]:+.4f}, K=4 {s['4_'+agg]:+.4f}; K=4 versus K=1 {s['4_'+agg]-s['1_'+agg]:+.4f}.\")
+        best = max(range(PASSES), key=lambda v: s[f'variant{v+1}']) + 1
+        lines.append(f\"- Best CodeRabbit single variant is {best} ({s[f'variant{best}']:+.4f}); K=4 mean versus that single variant is {s['4_mean']-s[f'variant{best}']:+.4f}. This is a fixed-fold comparison, not a significance test; use the single-variant control to assess prompt gains versus aggregation.\")
+    lines.extend(['', 'Framings and shuffle seeds are recorded in kpass.py; full fresh API responses and exact request bodies are preserved in cache_kpass/. Original pass cache reuse matches diff context and exact candidate keys; legacy cache files do not contain request bodies.', ''])
+    REPORT.write_text('\\n'.join(lines))
+    (CACHE / 'run_summary.json').write_text(json.dumps({'counts': COUNTS, 'errors': ERRORS, 'checks': checks, 'repeat': repeat, 'summaries': summaries, 'completed': done}, indent=2))
+
+
+def main():
+    CACHE.mkdir(exist_ok=True)
+    key = gate.load_key()
+    if not key:
+        REPORT.write_text('Experiment failed: SUBQ_API_KEY is missing. No results.\\n')
+        return
+    evals = json.loads(gate.EVALS.read_text())
+    prs = sorted(evals)
+    selected = [pr for pr in prs if evals[pr].get('coderabbit') and not evals[pr]['coderabbit']['skipped'] and gate.candidates(evals[pr]['coderabbit'])][:CHECK_PRS]
+    checks, repeat = [], False
+    for pr in selected:
+        a = collect(key, pr, 'coderabbit', evals[pr]['coderabbit'], 0, True, 'a')
+        b = collect(key, pr, 'coderabbit', evals[pr]['coderabbit'], 0, True, 'b')
+        if a is None or b is None:
+            REPORT.write_text('Determinism check failed; no scaling results.\\n' + json.dumps(ERRORS))
+            return
+        identical = a == b
+        repeat = repeat or not identical
+        changes = sum(a[c] "'!= b[c] for c in a)
+        checks.append(f'"'- {pr}: identical={identical}; changed probabilities={changes}/{len(a)}; max absolute difference={max(abs(a[c]-b[c]) for c in a):.12g}.')
+        print(checks[-1], flush=True)
+    rows, summaries, done = [], {}, []
+    for tool in TOOLS:
+        jobs = [(pr, evals[pr][tool]) for pr in prs if evals[pr].get(tool) and not evals[pr][tool]['skipped']]
+        passes = []
+        for variant in range(PASSES):
+            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+                values = list(pool.map(lambda job: collect(key, job[0], tool, job[1], variant, repeat), jobs))
+            passes.append(dict(zip((pr for pr, _ in jobs), values)))
+            print(tool, 'pass', variant + 1, COUNTS, flush=True)
+        tool_rows, summary = score_tool(evals, prs, tool, passes)
+        rows.extend(tool_rows)
+        summaries[tool] = summary
+        done.append(tool)
+        write_report(checks, repeat, rows, summaries, done)
+        print('SCORED', tool, summary, flush=True)
+
+
+if __name__ == '__main__':
+    main()
+PY
+UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python gate/kpass.py > gate/kpass_run.log 2>&1" in /Users/steve/Documents/Files/code/aie-hack
+exec
+/bin/zsh -lc 'tail -8 gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1: identical=True; changed probabilities=0/6; max absolute difference=0.
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10: identical=True; changed probabilities=0/11; max absolute difference=0.
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/2: identical=True; changed probabilities=0/7; max absolute difference=0.
+coderabbit pass 1 {'attempts': 6, 'successes': 6, 'attempt_errors': 0, 'cache_hits': 0, 'original_cache_hits': 49}
+
+exec
+/bin/zsh -lc 'git status --short -- gate; UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python -m py_compile gate/kpass.py' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+?? gate/
+
+codex
+All three duplicate pairs returned identical probabilities. I’m using equivalent prompt variants with fixed-seed comment shuffles; the original pass was available in the read-only cache. Mr. Codsworth is running the remaining CodeRabbit passes.
+exec
+/bin/zsh -lc 'tail -6 gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1: identical=True; changed probabilities=0/6; max absolute difference=0.
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10: identical=True; changed probabilities=0/11; max absolute difference=0.
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/2: identical=True; changed probabilities=0/7; max absolute difference=0.
+coderabbit pass 1 {'attempts': 6, 'successes': 6, 'attempt_errors': 0, 'cache_hits': 0, 'original_cache_hits': 49}
+coderabbit pass 2 {'attempts': 55, 'successes': 55, 'attempt_errors': 0, 'cache_hits': 0, 'original_cache_hits': 49}
+
+exec
+/bin/zsh -lc "tail -5 gate/kpass_run.log; rg -n 'UV|python' pyproject.toml gate/README*" in /Users/steve/Documents/Files/code/aie-hack
+ exited 1 in 0ms:
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1: identical=True; changed probabilities=0/6; max absolute difference=0.
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10: identical=True; changed probabilities=0/11; max absolute difference=0.
+- https://github.com/ai-code-review-evaluation/discourse-graphite/pull/2: identical=True; changed probabilities=0/7; max absolute difference=0.
+coderabbit pass 1 {'attempts': 6, 'successes': 6, 'attempt_errors': 0, 'cache_hits': 0, 'original_cache_hits': 49}
+coderabbit pass 2 {'attempts': 55, 'successes': 55, 'attempt_errors': 0, 'cache_hits': 0, 'original_cache_hits': 49}
+zsh:1: no matches found: gate/README*
+
+exec
+/bin/zsh -lc 'tail -7 gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+SCORED coderabbit {'variant1': 0.10605043185238502, 'variant2': 0.09906280346769783, 'variant3': 0.10994364406684828, 'variant4': 0.10462502888393779, '1_mean': 0.10605043185238502, '1_min': 0.10605043185238502, '2_mean': 0.12254039228879812, '2_min': 0.11286278492827698, '4_mean': 0.12881358185152783, '4_min': 0.09624104631473043}
+copilot-v2 pass 1 {'attempts': 165, 'successes': 153, 'attempt_errors': 12, 'cache_hits': 0, 'original_cache_hits': 99}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2', 'attempt': 1, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2', 'attempt': 1, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2', 'attempt': 1, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2', 'attempt': 2, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2', 'attempt': 2, 'error': 'HTTP Error 429: Too Many Requests'}
+
+codex
+CodeRabbit shows a gain from averaging: held-out F1 gain rises from +0.1061 at K=1 to +0.1225 at K=2 and +0.1288 at K=4, above the best single variant’s +0.1099. Minimum aggregation worsens at K=4. SubQ is now returning rate limits; retries are backing off as Mr. Codsworth continues with Copilot.
+exec
+/bin/zsh -lc 'tail -8 gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2', 'attempt': 3, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2', 'attempt': 3, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2', 'attempt': 4, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2', 'attempt': 4, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2', 'attempt': 4, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+
+exec
+/bin/zsh -lc 'tail -6 gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/7232 pass2', 'attempt': 6, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/8087 pass2', 'attempt': 6, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/calcom/cal.com/pull/22532 pass2', 'attempt': 6, 'error': 'HTTP Error 429: Too Many Requests'}
+copilot-v2 pass 2 {'attempts': 230, 'successes': 200, 'attempt_errors': 30, 'cache_hits': 0, 'original_cache_hits': 99}
+
+exec
+/bin/zsh -lc 'tail -5 gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+API ERROR {'tag': 'copilot-v2 https://github.com/getsentry/sentry/pull/80168 pass3', 'attempt': 4, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/getsentry/sentry/pull/80528 pass3', 'attempt': 4, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/getsentry/sentry/pull/77754 pass3', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/getsentry/sentry/pull/80528 pass3', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/getsentry/sentry/pull/80168 pass3', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+
+codex
+Repeated rate limits have exhausted retries for some Copilot PRs. The CodeRabbit comparison is complete and saved. To keep this quick, Mr. Codsworth will stop the optional sweep, retain the returned responses, and mark incomplete comparisons unavailable.
+exec
+/bin/zsh -lc "pgrep -f '"'^.*python gate/kpass.py$'"'" in /Users/steve/Documents/Files/code/aie-hack
+ exited 3 in 0ms:
+sysmon request failed with error: sysmond service not found
+pgrep: Cannot get process list
+
+exec
+/bin/zsh -lc 'tail -4 gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+API ERROR {'tag': 'copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4', 'attempt': 4, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/grafana/grafana/pull/107534 pass4', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/getsentry/sentry/pull/95633 pass4', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+
+exec
+/bin/zsh -lc 'lsof -t gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 296ms:
+68873
+68875
+
+ exited 130 in 230287ms:
+apply patch
+patch: completed
+/Users/steve/Documents/Files/code/aie-hack/gate/kpass.py
+diff --git a/gate/kpass.py b/gate/kpass.py
+index be29d6609b7fb92dba871c8326b70503acb960fb..f5916c264f3fce7afc7c3ef3ab3ae4ed74a65403
+--- a/gate/kpass.py
++++ b/gate/kpass.py
+@@ -158,14 +158,18 @@
+ 
+ def score_tool(evals, prs, tool, passes):
+     rows, summary = [], {}
+-    if any(p is None for values in passes for p in values.values()):
+-        return [f'| {tool} | unavailable | unavailable | API/input failure; tool excluded | unavailable |'], summary
+     for variant, values in enumerate(passes):
++        if any(p is None for p in values.values()):
++            rows.append(f'| {tool} | variant {variant + 1} | single | unavailable: API/input failure | unavailable |')
++            continue
+         row, gain = result_row(evals, prs, tool, {(pr, tool): p for pr, p in values.items()}, f'variant {variant + 1}', 'single')
+         rows.append(row)
+         summary[f'variant{variant + 1}'] = gain
+     for k in (1, 2, 4):
+         for agg in ('mean', 'min'):
++            if any(p is None for values in passes[:k] for p in values.values()):
++                rows.append(f'| {tool} | {k} | {agg} | unavailable: API/input failure | unavailable |')
++                continue
+             probs = {}
+             for pr in passes[0]:
+                 probs[(pr, tool)] = {}
+@@ -181,7 +185,7 @@
+ def write_report(checks, repeat, rows, summaries, done):
+     lines = ['# SubQ gate K-pass experiment', '',
+         'Strict profile; existing anthropic_claude-opus-4-5-20251101 judge labels. All probabilities are real API responses or existing original API cache entries; metrics are computed from these and judge labels.', '',
+-        'A/B are even/odd positions in the full sorted PR list, exactly as subq_gate.py. Threshold grid and scoring reuse that script. Any incomplete tool is excluded entirely; missing probabilities are never filled.', '',
++        'A/B are even/odd positions in the full sorted PR list, exactly as subq_gate.py. Threshold grid and scoring reuse that script. Each incomplete variant/aggregation is excluded entirely; missing probabilities are never filled.', '',
+         '## Identical-request check', '', *checks, '',
+         'Pass definition: ' + ('identical requests repeated (variation observed).' if repeat else 'equivalent question/criteria variants, with fixed-seed comment shuffles after the original pass.'), '',
+         'Identical responses in this check establish observed repeatability only, not universal determinism.', '',
+
+exec
+/bin/zsh -lc 'tail -4 gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 0ms:
+API ERROR {'tag': 'copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4', 'attempt': 4, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/grafana/grafana/pull/107534 pass4', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/getsentry/sentry/pull/95633 pass4', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+API ERROR {'tag': 'copilot-v2 https://github.com/grafana/grafana/pull/106778 pass4', 'attempt': 5, 'error': 'HTTP Error 429: Too Many Requests'}
+
+exec
+/bin/zsh -lc 'lsof -t gate/kpass_run.log' in /Users/steve/Documents/Files/code/aie-hack
+ exited 1 in 347ms:
+apply patch
+patch: completed
+/Users/steve/Documents/Files/code/aie-hack/gate/kpass.py
+diff --git a/gate/kpass.py b/gate/kpass.py
+index be29d6609b7fb92dba871c8326b70503acb960fb..c1784a07e4bcc3fa374f817db614adbdc3144b7d
+--- a/gate/kpass.py
++++ b/gate/kpass.py
+@@ -1,8 +1,10 @@
+ """Real SubQ multi-pass experiment; original caches are read-only."""
+ import hashlib
++import ast
+ import json
+ import math
+ import random
++import sys
+ import subprocess
+ import threading
+ import time
+@@ -158,14 +160,18 @@
+ 
+ def score_tool(evals, prs, tool, passes):
+     rows, summary = [], {}
+-    if any(p is None for values in passes for p in values.values()):
+-        return [f'| {tool} | unavailable | unavailable | API/input failure; tool excluded | unavailable |'], summary
+     for variant, values in enumerate(passes):
++        if any(p is None for p in values.values()):
++            rows.append(f'| {tool} | variant {variant + 1} | single | unavailable: API/input failure | unavailable |')
++            continue
+         row, gain = result_row(evals, prs, tool, {(pr, tool): p for pr, p in values.items()}, f'variant {variant + 1}', 'single')
+         rows.append(row)
+         summary[f'variant{variant + 1}'] = gain
+     for k in (1, 2, 4):
+         for agg in ('mean', 'min'):
++            if any(p is None for values in passes[:k] for p in values.values()):
++                rows.append(f'| {tool} | {k} | {agg} | unavailable: API/input failure | unavailable |')
++                continue
+             probs = {}
+             for pr in passes[0]:
+                 probs[(pr, tool)] = {}
+@@ -181,13 +187,13 @@
+ def write_report(checks, repeat, rows, summaries, done):
+     lines = ['# SubQ gate K-pass experiment', '',
+         'Strict profile; existing anthropic_claude-opus-4-5-20251101 judge labels. All probabilities are real API responses or existing original API cache entries; metrics are computed from these and judge labels.', '',
+-        'A/B are even/odd positions in the full sorted PR list, exactly as subq_gate.py. Threshold grid and scoring reuse that script. Any incomplete tool is excluded entirely; missing probabilities are never filled.', '',
++        'A/B are even/odd positions in the full sorted PR list, exactly as subq_gate.py. Threshold grid and scoring reuse that script. Each incomplete variant/aggregation is excluded entirely; missing probabilities are never filled.', '',
+         '## Identical-request check', '', *checks, '',
+         'Pass definition: ' + ('identical requests repeated (variation observed).' if repeat else 'equivalent question/criteria variants, with fixed-seed comment shuffles after the original pass.'), '',
+         'Identical responses in this check establish observed repeatability only, not universal determinism.', '',
+         '| tool | K | agg | held-out F1 gain (A→B, B→A, avg) | in-sample P/R/F1 |',
+         '|---|---|---|---|---|', *rows, '',
+-        'Completed tools: ' + ', '.join(done), '',
++        'Evaluated tools (unavailable configurations are marked above): ' + ', '.join(done), '',
+         'Invocation counters (HTTP attempts include retries; cache hits are not calls): ' + json.dumps(COUNTS),
+         '', 'Failures: ' + json.dumps(ERRORS), '', '## Takeaways', '']
+     if 'coderabbit' in summaries and summaries['coderabbit']:
+@@ -201,6 +207,53 @@
+     (CACHE / 'run_summary.json').write_text(json.dumps({'counts': COUNTS, 'errors': ERRORS, 'checks': checks, 'repeat': repeat, 'summaries': summaries, 'completed': done}, indent=2))
+ 
+ 
++def report_only():
++    """Rebuild strictly from returned responses, with no API calls or imputation."""
++    prior = read_json(CACHE / 'run_summary.json')
++    if not prior:
++        print('No completed determinism check; cannot rebuild report.')
++        return
++    evals = json.loads(gate.EVALS.read_text())
++    prs = sorted(evals)
++    responses = [read_json(path) for path in CACHE.glob('*.json')]
++    success_count = sum(isinstance(r, dict) and 'response' in r and 'probabilities' in r for r in responses)
++    log = ROOT / 'kpass_run.log'
++    errors = [ast.literal_eval(line.removeprefix('API ERROR ')) for line in log.read_text().splitlines() if line.startswith('API ERROR ')]
++    ERRORS.clear()
++    ERRORS.extend(errors)
++    COUNTS.clear()
++    COUNTS.update({'successful_fresh_responses': success_count, 'observed_error_responses': len(errors),
++                   'confirmed_completed_HTTP_attempts': success_count + len(errors)})
++    rows, summaries = [], {}
++    for tool in TOOLS:
++        passes = []
++        for variant in range(PASSES):
++            values = {}
++            for pr in prs:
++                entry = evals[pr].get(tool)
++                if not entry or entry['skipped']:
++                    continue
++                comments = gate.candidates(entry)
++                if not comments:
++                    values[pr] = {}
++                    continue
++                payload, _ = payload_for(pr, comments, variant, prior['repeat'])
++                digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
++                saved = read_json(CACHE / f'{tool}_{digest}_pass{variant + 1}.json')
++                probs = saved.get('probabilities') if saved and saved.get('request') == payload else None
++                if variant == 0:
++                    probs = read_json(gate.CACHE / f"subq_diff_{tool}_{pr.split('github.com/')[1].replace('/', '_')}.json")
++                values[pr] = probs if valid_probs(probs, comments) else None
++            passes.append(values)
++        tool_rows, summary = score_tool(evals, prs, tool, passes)
++        rows.extend(tool_rows)
++        summaries[tool] = summary
++    write_report(prior['checks'], prior['repeat'], rows, summaries, list(TOOLS))
++    with REPORT.open('a') as report:
++        report.write('\nOptional sweep interrupted after persistent HTTP 429 responses. Counters above are confirmed completed requests from saved API responses and logged errors. Any interrupted request without a response is uncounted; total initiated attempts is unknown. No further API calls were made to rebuild this report. Secondary-tool original K=1 results use existing original caches.\n')
++    print(json.dumps({'counts': COUNTS, 'summaries': summaries}, indent=2))
++
++
+ def main():
+     CACHE.mkdir(exist_ok=True)
+     key = gate.load_key()
+@@ -240,4 +293,7 @@
+ 
+ 
+ if __name__ == '__main__':
+-    main()
++    if '--report-only' in sys.argv:
++        report_only()
++    else:
++        main()
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python gate/kpass.py --report-only' in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 289ms:
+{
+  "counts": {
+    "successful_fresh_responses": 284,
+    "observed_error_responses": 60,
+    "confirmed_completed_HTTP_attempts": 344
+  },
+  "summaries": {
+    "coderabbit": {
+      "variant1": 0.10605043185238502,
+      "variant2": 0.09906280346769783,
+      "variant3": 0.10994364406684828,
+      "variant4": 0.10462502888393779,
+      "1_mean": 0.10605043185238502,
+      "1_min": 0.10605043185238502,
+      "2_mean": 0.12254039228879812,
+      "2_min": 0.11286278492827698,
+      "4_mean": 0.12881358185152783,
+      "4_min": 0.09624104631473043
+    },
+    "copilot-v2": {
+      "variant1": 0.06527740289083109,
+      "variant3": 0.07439243924392436,
+      "1_mean": 0.06527740289083109,
+      "1_min": 0.06527740289083109
+    },
+    "gemini-v2": {
+      "variant1": 0.05410226524581635,
+      "1_mean": 0.05410226524581635,
+      "1_min": 0.05410226524581635
+    },
+    "sourcery": {
+      "variant1": 0.05560711958464057,
+      "1_mean": 0.05560711958464057,
+      "1_min": 0.05560711958464057
+    }
+  }
+}
+
+apply patch
+patch: completed
+/Users/steve/Documents/Files/code/aie-hack/gate/kpass.py
+diff --git a/gate/kpass.py b/gate/kpass.py
+index be29d6609b7fb92dba871c8326b70503acb960fb..904cc0af60300f8e8048a717483b6107c2c63482
+--- a/gate/kpass.py
++++ b/gate/kpass.py
+@@ -1,8 +1,10 @@
+ """Real SubQ multi-pass experiment; original caches are read-only."""
+ import hashlib
++import ast
+ import json
+ import math
+ import random
++import sys
+ import subprocess
+ import threading
+ import time
+@@ -158,14 +160,18 @@
+ 
+ def score_tool(evals, prs, tool, passes):
+     rows, summary = [], {}
+-    if any(p is None for values in passes for p in values.values()):
+-        return [f'| {tool} | unavailable | unavailable | API/input failure; tool excluded | unavailable |'], summary
+     for variant, values in enumerate(passes):
++        if any(p is None for p in values.values()):
++            rows.append(f'| {tool} | variant {variant + 1} | single | unavailable: API/input failure | unavailable |')
++            continue
+         row, gain = result_row(evals, prs, tool, {(pr, tool): p for pr, p in values.items()}, f'variant {variant + 1}', 'single')
+         rows.append(row)
+         summary[f'variant{variant + 1}'] = gain
+     for k in (1, 2, 4):
+         for agg in ('mean', 'min'):
++            if any(p is None for values in passes[:k] for p in values.values()):
++                rows.append(f'| {tool} | {k} | {agg} | unavailable: API/input failure | unavailable |')
++                continue
+             probs = {}
+             for pr in passes[0]:
+                 probs[(pr, tool)] = {}
+@@ -181,26 +187,73 @@
+ def write_report(checks, repeat, rows, summaries, done):
+     lines = ['# SubQ gate K-pass experiment', '',
+         'Strict profile; existing anthropic_claude-opus-4-5-20251101 judge labels. All probabilities are real API responses or existing original API cache entries; metrics are computed from these and judge labels.', '',
+-        'A/B are even/odd positions in the full sorted PR list, exactly as subq_gate.py. Threshold grid and scoring reuse that script. Any incomplete tool is excluded entirely; missing probabilities are never filled.', '',
++        'A/B are even/odd positions in the full sorted PR list, exactly as subq_gate.py. Threshold grid and scoring reuse that script. Each incomplete variant/aggregation is excluded entirely; missing probabilities are never filled.', '',
+         '## Identical-request check', '', *checks, '',
+         'Pass definition: ' + ('identical requests repeated (variation observed).' if repeat else 'equivalent question/criteria variants, with fixed-seed comment shuffles after the original pass.'), '',
+         'Identical responses in this check establish observed repeatability only, not universal determinism.', '',
+         '| tool | K | agg | held-out F1 gain (A→B, B→A, avg) | in-sample P/R/F1 |',
+         '|---|---|---|---|---|', *rows, '',
+-        'Completed tools: ' + ', '.join(done), '',
++        'Evaluated tools (unavailable configurations are marked above): ' + ', '.join(done), '',
+         'Invocation counters (HTTP attempts include retries; cache hits are not calls): ' + json.dumps(COUNTS),
+-        '', 'Failures: ' + json.dumps(ERRORS), '', '## Takeaways', '']
++        '', 'Failure details: [cache_kpass/run_summary.json](cache_kpass/run_summary.json), `errors` field; request-level events are also in kpass_run.log.', '', '## Takeaways', '']
+     if 'coderabbit' in summaries and summaries['coderabbit']:
+         s = summaries['coderabbit']
+         for agg in ('mean', 'min'):
+             lines.append(f"- CodeRabbit {agg}: held-out gains K=1 {s['1_'+agg]:+.4f}, K=2 {s['2_'+agg]:+.4f}, K=4 {s['4_'+agg]:+.4f}; K=4 versus K=1 {s['4_'+agg]-s['1_'+agg]:+.4f}.")
+         best = max(range(PASSES), key=lambda v: s[f'variant{v+1}']) + 1
+-        lines.append(f"- Best CodeRabbit single variant is {best} ({s[f'variant{best}']:+.4f}); K=4 mean versus that single variant is {s['4_mean']-s[f'variant{best}']:+.4f}. This is a fixed-fold comparison, not a significance test; use the single-variant control to assess prompt gains versus aggregation.")
++        lines.append(f"- Best CodeRabbit single variant is {best} ({s[f'variant{best}']:+.4f}); K=4 mean versus that single variant is {s['4_mean']-s[f'variant{best}']:+.4f}. Averaging shows an empirical scaling effect on these folds beyond the best individual prompt; minimum aggregation does not show consistent scaling. This is a fixed-fold comparison, not a significance test.")
+     lines.extend(['', 'Framings and shuffle seeds are recorded in kpass.py; full fresh API responses and exact request bodies are preserved in cache_kpass/. Original pass cache reuse matches diff context and exact candidate keys; legacy cache files do not contain request bodies.', ''])
+     REPORT.write_text('\n'.join(lines))
+     (CACHE / 'run_summary.json').write_text(json.dumps({'counts': COUNTS, 'errors': ERRORS, 'checks': checks, 'repeat': repeat, 'summaries': summaries, 'completed': done}, indent=2))
+ 
+ 
++def report_only():
++    """Rebuild strictly from returned responses, with no API calls or imputation."""
++    prior = read_json(CACHE / 'run_summary.json')
++    if not prior:
++        print('No completed determinism check; cannot rebuild report.')
++        return
++    evals = json.loads(gate.EVALS.read_text())
++    prs = sorted(evals)
++    responses = [read_json(path) for path in CACHE.glob('*.json')]
++    success_count = sum(isinstance(r, dict) and 'response' in r and 'probabilities' in r for r in responses)
++    log = ROOT / 'kpass_run.log'
++    errors = [ast.literal_eval(line.removeprefix('API ERROR ')) for line in log.read_text().splitlines() if line.startswith('API ERROR ')]
++    ERRORS.clear()
++    ERRORS.extend(errors)
++    COUNTS.clear()
++    COUNTS.update({'successful_fresh_responses': success_count, 'observed_error_responses': len(errors),
++                   'confirmed_completed_HTTP_attempts': success_count + len(errors)})
++    rows, summaries = [], {}
++    for tool in TOOLS:
++        passes = []
++        for variant in range(PASSES):
++            values = {}
++            for pr in prs:
++                entry = evals[pr].get(tool)
++                if not entry or entry['skipped']:
++                    continue
++                comments = gate.candidates(entry)
++                if not comments:
++                    values[pr] = {}
++                    continue
++                payload, _ = payload_for(pr, comments, variant, prior['repeat'])
++                digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
++                saved = read_json(CACHE / f'{tool}_{digest}_pass{variant + 1}.json')
++                probs = saved.get('probabilities') if saved and saved.get('request') == payload else None
++                if variant == 0:
++                    probs = read_json(gate.CACHE / f"subq_diff_{tool}_{pr.split('github.com/')[1].replace('/', '_')}.json")
++                values[pr] = probs if valid_probs(probs, comments) else None
++            passes.append(values)
++        tool_rows, summary = score_tool(evals, prs, tool, passes)
++        rows.extend(tool_rows)
++        summaries[tool] = summary
++    write_report(prior['checks'], prior['repeat'], rows, summaries, list(TOOLS))
++    with REPORT.open('a') as report:
++        report.write('\nOptional sweep interrupted after persistent HTTP 429 responses. Counters above are confirmed completed requests from saved API responses and logged errors. Any interrupted request without a response is uncounted; total initiated attempts is unknown. No further API calls were made to rebuild this report. Secondary-tool original K=1 results use existing original caches.\n')
++    print(json.dumps({'counts': COUNTS, 'summaries': summaries}, indent=2))
++
++
+ def main():
+     CACHE.mkdir(exist_ok=True)
+     key = gate.load_key()
+@@ -240,4 +293,7 @@
+ 
+ 
+ if __name__ == '__main__':
+-    main()
++    if '--report-only' in sys.argv:
++        report_only()
++    else:
++        main()
+
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python gate/kpass.py --report-only > /private/tmp/kpass_report_check.json
+UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python -m py_compile gate/kpass.py
+rg -n 'coderabbit|counters|Optional|Takeaways|Copilot|copilot' gate/RESULTS_kpass.md" in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 322ms:
+19:| coderabbit | variant 1 | single | +0.0959, +0.1162, **+0.1061** | 0.5620 / 0.5540 / 0.5580 (threshold 0.75) |
+20:| coderabbit | variant 2 | single | +0.0744, +0.1237, **+0.0991** | 0.5032 / 0.5612 / 0.5306 (threshold 0.55) |
+21:| coderabbit | variant 3 | single | +0.0876, +0.1323, **+0.1099** | 0.5407 / 0.5252 / 0.5328 (threshold 0.75) |
+22:| coderabbit | variant 4 | single | +0.0800, +0.1292, **+0.1046** | 0.5132 / 0.5612 / 0.5361 (threshold 0.65) |
+23:| coderabbit | 1 | mean | +0.0959, +0.1162, **+0.1061** | 0.5620 / 0.5540 / 0.5580 (threshold 0.75) |
+24:| coderabbit | 1 | min | +0.0959, +0.1162, **+0.1061** | 0.5620 / 0.5540 / 0.5580 (threshold 0.75) |
+25:| coderabbit | 2 | mean | +0.1070, +0.1380, **+0.1225** | 0.5159 / 0.5827 / 0.5473 (threshold 0.60) |
+26:| coderabbit | 2 | min | +0.0868, +0.1389, **+0.1129** | 0.5310 / 0.5540 / 0.5423 (threshold 0.55) |
+27:| coderabbit | 4 | mean | +0.1007, +0.1569, **+0.1288** | 0.5270 / 0.5612 / 0.5436 (threshold 0.65) |
+28:| coderabbit | 4 | min | +0.0665, +0.1260, **+0.0962** | 0.5481 / 0.5324 / 0.5401 (threshold 0.55) |
+29:| copilot-v2 | variant 1 | single | +0.0667, +0.0638, **+0.0653** | 0.4656 / 0.6331 / 0.5366 (threshold 0.65) |
+30:| copilot-v2 | variant 2 | single | unavailable: API/input failure | unavailable |
+31:| copilot-v2 | variant 3 | single | +0.0629, +0.0859, **+0.0744** | 0.5283 / 0.6043 / 0.5638 (threshold 0.75) |
+32:| copilot-v2 | variant 4 | single | unavailable: API/input failure | unavailable |
+33:| copilot-v2 | 1 | mean | +0.0667, +0.0638, **+0.0653** | 0.4656 / 0.6331 / 0.5366 (threshold 0.65) |
+34:| copilot-v2 | 1 | min | +0.0667, +0.0638, **+0.0653** | 0.4656 / 0.6331 / 0.5366 (threshold 0.65) |
+35:| copilot-v2 | 2 | mean | unavailable: API/input failure | unavailable |
+36:| copilot-v2 | 2 | min | unavailable: API/input failure | unavailable |
+37:| copilot-v2 | 4 | mean | unavailable: API/input failure | unavailable |
+38:| copilot-v2 | 4 | min | unavailable: API/input failure | unavailable |
+60:Evaluated tools (unavailable configurations are marked above): coderabbit, copilot-v2, gemini-v2, sourcery
+62:Invocation counters (HTTP attempts include retries; cache hits are not calls): {"successful_fresh_responses": 284, "observed_error_responses": 60, "confirmed_completed_HTTP_attempts": 344}
+66:## Takeaways
+74:Optional sweep interrupted after persistent HTTP 429 responses. Counters above are confirmed completed requests from saved API responses and logged errors. Any interrupted request without a response is uncounted; total initiated attempts is unknown. No further API calls were made to rebuild this report. Secondary-tool original K=1 results use existing original caches.
+
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python - <<'PY'
+from pathlib import Path
+p=Path('gate/kpass.py')
+s=p.read_text().replace('unavailable: API/input failure','unavailable: incomplete API responses')
+s=s.replace('Secondary-tool original K=1 results use existing original caches.', 'Secondary-tool original K=1 results use existing original caches. Gemini and Sourcery additional passes were not attempted.')
+p.write_text(s)
+PY
+UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python gate/kpass.py --report-only > /private/tmp/kpass_report_check.json
+UV_CACHE_DIR=/private/tmp/uv-kpass uv run --no-project python - <<'PY'
+import json
+from pathlib import Path
+x=json.loads(Path('gate/cache_kpass/run_summary.json').read_text())
+assert all('429' in e['error'] for e in x['errors'])
+s=x['summaries']['coderabbit']
+assert s['1_mean'] < s['2_mean'] < s['4_mean']
+assert s['4_mean'] > max(s[f'variant{i}'] for i in (1,2,3,4))
+assert s['4_min'] < s['1_min']
+print('Saved report and real-response scaling comparisons verified.')
+PY" in /Users/steve/Documents/Files/code/aie-hack
+ succeeded in 466ms:
+Saved report and real-response scaling comparisons verified.
+
+codex
+Saved [RESULTS_kpass.md](/Users/steve/Documents/Files/code/aie-hack/gate/RESULTS_kpass.md).
+
+CodeRabbit shows scaling with **mean aggregation**: held-out F1 gain **+0.1061 → +0.1225 → +0.1288** for K=1,2,4. Best single variant: **+0.1099**. Minimum aggregation does not scale consistently.
+
+Duplicate requests were identical. Recorded **284 successful responses and 60 HTTP 429 errors**; incomplete secondary comparisons are marked unavailable.
+
+—Mr. Codsworth
+tokens used
+40,962
+Saved [RESULTS_kpass.md](/Users/steve/Documents/Files/code/aie-hack/gate/RESULTS_kpass.md).
+
+CodeRabbit shows scaling with **mean aggregation**: held-out F1 gain **+0.1061 → +0.1225 → +0.1288** for K=1,2,4. Best single variant: **+0.1099**. Minimum aggregation does not scale consistently.
+
+Duplicate requests were identical. Recorded **284 successful responses and 60 HTTP 429 errors**; incomplete secondary comparisons are marked unavailable.
+
+—Mr. Codsworth

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubQ Merge Gate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+/* Layout: single reading column, results table as the centerpiece, diff-style +/- coloring for gains */
+:root {
+  --bg: #f6f7f5; --fg: #1c211e; --muted: #5d6862; --line: #d6dbd7; --card: #ffffff;
+  --gain: #1f7a4a; --loss: #b23b2e; --accent: #2f5d8a;
+  --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #131715; --fg: #e4e9e5; --muted: #98a39c; --line: #2c3430; --card: #1a1f1c;
+    --gain: #5fcf8e; --loss: #f08a7c; --accent: #8db7e0; color-scheme: dark; }
+}
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 var(--sans); }
+main { max-width: 860px; margin: 0 auto; padding: 48px 16px 80px; display: grid; gap: 36px; }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; text-wrap: balance; }
+h2 { font-size: 1.15rem; margin: 0 0 10px; }
+p, li { max-width: 68ch; }
+.eyebrow { font: 600 .75rem var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lede { color: var(--muted); font-size: 1.05rem; margin: 0; }
+.headline { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--gain); padding: 18px 20px; border-radius: 6px; }
+.headline strong { font-family: var(--mono); }
+.wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+table { border-collapse: collapse; width: 100%; font: .9rem var(--mono); font-variant-numeric: tabular-nums; }
+th, td { padding: 8px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+tr:last-child td { border-bottom: 0; }
+.pos { color: var(--gain); font-weight: 600; } .neg { color: var(--loss); } .zero { color: var(--muted); }
+code { font-family: var(--mono); font-size: .9em; }
+a { color: var(--accent); }
+ul { padding-left: 20px; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">AIE Code Summit · Trust but Verify · SubQ track</div>
+    <h1>SubQ as an independent merge gate for AI code reviewers</h1>
+    <p class="lede">AI reviewers flag real bugs, but most of their comments are noise. We used SubQ Snap to check each review comment and block the false alarms, then measured the result on a public benchmark.</p>
+  </header>
+
+  <section class="headline">
+    <strong>CodeRabbit + SubQ gate:</strong> precision 0.31 → 0.56, F1 <strong>+0.106</strong> on held-out PRs. SubQ improved 12 of 21 reviewers and never cost more than 0.014 F1.
+  </section>
+
+  <section>
+    <h2>Setup</h2>
+    <ul>
+      <li><strong>Benchmark:</strong> <a href="https://github.com/withmartian/code-review-benchmark">Martian Code Review Bench</a>. 50 real PRs from Sentry, Grafana, Cal.com, Discourse and Keycloak with human-verified bugs, plus the stored comments of ~20 AI reviewers and judge labels (Claude Opus 4.5) for each comment.</li>
+      <li><strong>Gate:</strong> for every comment, SubQ Snap (Decisions API, <code>subq-snap-1.1</code>) reads the PR diff and answers “is this a real defect introduced by this diff?” with a probability. Comments below a cutoff are blocked.</li>
+      <li><strong>Scoring:</strong> a blocked real bug becomes a miss; a blocked false alarm disappears. Bug/security/data/concurrency/API issues only (strict profile).</li>
+      <li><strong>No cherry-picking:</strong> the cutoff is chosen on 25 PRs and scored on the other 25, then the halves swap. The gain column averages both.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Results: SubQ sees the diff only</h2>
+    <div class="wrap">
+      <table>
+        <thead><tr><th>Reviewer</th><th>Comments</th><th>Precision before</th><th>F1 before</th><th>Held-out F1 gain</th></tr></thead>
+        <tbody>
+          <tr><td>coderabbit</td><td>297</td><td>0.31</td><td>0.414</td><td class="pos">+0.106</td></tr>
+          <tr><td>copilot-v2</td><td>283</td><td>0.36</td><td>0.465</td><td class="pos">+0.065</td></tr>
+          <tr><td>sourcery</td><td>220</td><td>0.38</td><td>0.456</td><td class="pos">+0.056</td></tr>
+          <tr><td>gemini-v2</td><td>200</td><td>0.43</td><td>0.494</td><td class="pos">+0.054</td></tr>
+          <tr><td>claude</td><td>145</td><td>0.41</td><td>0.403</td><td class="pos">+0.035</td></tr>
+          <tr><td>baz</td><td>99</td><td>0.61</td><td>0.489</td><td class="pos">+0.022</td></tr>
+          <tr><td>kodus-v2</td><td>104</td><td>0.57</td><td>0.473</td><td class="pos">+0.017</td></tr>
+          <tr><td>bugbot</td><td>134</td><td>0.55</td><td>0.517</td><td class="pos">+0.010</td></tr>
+          <tr><td>qodo-v2</td><td>181</td><td>0.53</td><td>0.580</td><td class="pos">+0.008</td></tr>
+          <tr><td>kg</td><td>47</td><td>0.53</td><td>0.261</td><td class="pos">+0.004</td></tr>
+          <tr><td>augment</td><td>178</td><td>0.57</td><td>0.607</td><td class="pos">+0.002</td></tr>
+          <tr><td>claude-code</td><td>172</td><td>0.44</td><td>0.471</td><td class="pos">+0.001</td></tr>
+          <tr><td>cubic-v2</td><td>173</td><td>0.58</td><td>0.617</td><td class="pos">+0.001</td></tr>
+          <tr><td>graphite</td><td>12</td><td>1.00</td><td>0.147</td><td class="zero">0.000</td></tr>
+          <tr><td>devin</td><td>97</td><td>0.67</td><td>0.526</td><td class="zero">0.000</td></tr>
+          <tr><td>codeant-v2</td><td>165</td><td>0.39</td><td>0.416</td><td class="neg">−0.001</td></tr>
+          <tr><td>gitlab</td><td>163</td><td>0.51</td><td>0.524</td><td class="neg">−0.002</td></tr>
+          <tr><td>greptile-v5</td><td>194</td><td>0.38</td><td>0.436</td><td class="neg">−0.005</td></tr>
+          <tr><td>greptile-v4-1</td><td>167</td><td>0.49</td><td>0.514</td><td class="neg">−0.006</td></tr>
+          <tr><td>qodo-extended-v2</td><td>156</td><td>0.65</td><td>0.655</td><td class="neg">−0.007</td></tr>
+          <tr><td>macroscope</td><td>130</td><td>0.60</td><td>0.565</td><td class="neg">−0.014</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede" style="margin-top:10px">2,449 SubQ calls, 0 errors. Ungated Greptile reproduces the public leaderboard exactly (F1 0.514).</p>
+  </section>
+
+  <section>
+    <h2>What it means</h2>
+    <ul>
+      <li>The noisier the reviewer, the bigger the gain. Every reviewer with precision under 0.45 improved, by up to +0.106 F1.</li>
+      <li>Reviewers that already filter their own comments (Greptile, Macroscope, Qodo-extended) gain nothing, which tells a team which reviewers need a gate.</li>
+      <li>The gate trades a little recall for a lot of precision. For Claude, precision rose 0.41 → 0.70 while recall fell 0.40 → 0.34; F1 is the net effect.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Limits</h2>
+    <ul>
+      <li>Our key only has SubQ Snap (decisions). The text-generating model <code>subq-preview</code> is early access and was not available, so SubQ gates comments rather than writing its own.</li>
+      <li>20 older tool versions in the benchmark lack bug-category labels and were excluded; their current versions are in the table.</li>
+      <li>A run giving SubQ the full changed files (long-context) is in progress.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

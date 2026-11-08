@@ -1,0 +1,24 @@
+Martian reused candidate probabilities 1113 new request groups 2154
+Traceback (most recent call last):
+  File "/Users/steve/Documents/Files/code/aie-hack/gate/reproduce_more.py", line 244, in <module>
+    main()
+    ~~~~^^
+  File "/Users/steve/Documents/Files/code/aie-hack/gate/reproduce_more.py", line 236, in main
+    result = crjudge() if mode == 'crjudge' else martian()
+                                                 ~~~~~~~^^
+  File "/Users/steve/Documents/Files/code/aie-hack/gate/reproduce_more.py", line 199, in martian
+    for pr, tool, result in pool.map(martian_job, jobs):
+                            ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.17/Frameworks/Python.framework/Versions/3.13/lib/python3.13/concurrent/futures/_base.py", line 625, in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.17/Frameworks/Python.framework/Versions/3.13/lib/python3.13/concurrent/futures/_base.py", line 318, in _result_or_cancel
+    return fut.result(timeout)
+           ~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.17/Frameworks/Python.framework/Versions/3.13/lib/python3.13/concurrent/futures/_base.py", line 455, in result
+    self._condition.wait(timeout)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.17/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py", line 359, in wait
+    waiter.acquire()
+    ~~~~~~~~~~~~~~^^
+KeyboardInterrupt

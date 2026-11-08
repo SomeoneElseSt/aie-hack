@@ -1,0 +1,615 @@
+===== FILE app/assets/javascripts/discourse/lib/utilities.js (after PR) =====
+Discourse.Utilities = {
+
+  translateSize: function(size) {
+    switch (size) {
+      case 'tiny': return 20;
+      case 'small': return 25;
+      case 'medium': return 32;
+      case 'large': return 45;
+      case 'extra_large': return 60;
+      case 'huge': return 120;
+    }
+    return size;
+  },
+
+  /**
+    Allows us to supply bindings without "binding" to a helper.
+  **/
+  normalizeHash: function(hash, hashTypes) {
+    for (var prop in hash) {
+      if (hashTypes[prop] === 'ID') {
+        hash[prop + 'Binding'] = hash[prop];
+        delete hash[prop];
+      }
+    }
+  },
+
+  avatarUrl: function(template, size) {
+    if (!template) { return ""; }
+    var rawSize = Discourse.Utilities.getRawSize(Discourse.Utilities.translateSize(size));
+    return template.replace(/\{size\}/g, rawSize);
+  },
+
+  getRawSize: function(size) {
+    var pixelRatio = window.devicePixelRatio || 1;
+    return size * Math.min(3, Math.max(1, Math.round(pixelRatio)));
+  },
+
+  avatarImg: function(options) {
+    var size = Discourse.Utilities.translateSize(options.size);
+    var url = Discourse.Utilities.avatarUrl(options.avatarTemplate, size);
+
+    // We won't render an invalid url
+    if (!url || url.length === 0) { return ""; }
+
+    var classes = "avatar" + (options.extraClasses ? " " + options.extraClasses : "");
+    var title = (options.title) ? " title='" + Handlebars.Utils.escapeExpression(options.title || "") + "'" : "";
+
+    return "<img alt='' width='" + size + "' height='" + size + "' src='" + Discourse.getURLWithCDN(url) + "' class='" + classes + "'" + title + ">";
+  },
+
+  tinyAvatar: function(avatarTemplate, options) {
+    return Discourse.Utilities.avatarImg(_.merge({avatarTemplate: avatarTemplate, size: 'tiny' }, options));
+  },
+
+  postUrl: function(slug, topicId, postNumber) {
+    var url = Discourse.getURL("/t/");
+    if (slug) {
+      url += slug + "/";
+    } else {
+      url += 'topic/';
+    }
+    url += topicId;
+    if (postNumber > 1) {
+      url += "/" + postNumber;
+    }
+    return url;
+  },
+
+  userUrl: function(username) {
+    return Discourse.getURL("/users/" + username.toLowerCase());
+  },
+
+  emailValid: function(email) {
+    // see:  http://stackoverflow.com/questions/46155/validate-email-address-in-javascript
+    var re = /^[a-zA-Z0-9!#$%&'*+\/=?\^_`{|}~\-]+(?:\.[a-zA-Z0-9!#$%&'\*+\/=?\^_`{|}~\-]+)*@(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?$/;
+    return re.test(email);
+  },
+
+  selectedText: function() {
+    var html = '';
+
+    if (typeof window.getSelection !== "undefined") {
+      var sel = window.getSelection();
+      if (sel.rangeCount) {
+        var container = document.createElement("div");
+        for (var i = 0, len = sel.rangeCount; i < len; ++i) {
+          container.appendChild(sel.getRangeAt(i).cloneContents());
+        }
+        html = container.innerHTML;
+      }
+    } else if (typeof document.selection !== "undefined") {
+      if (document.selection.type === "Text") {
+        html = document.selection.createRange().htmlText;
+      }
+    }
+
+    // Strip out any .click elements from the HTML before converting it to text
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    $('.clicks', $(div)).remove();
+    var text = div.textContent || div.innerText || "";
+
+    return String(text).trim();
+  },
+
+  // Determine the position of the caret in an element
+  caretPosition: function(el) {
+    var r, rc, re;
+    if (el.selectionStart) {
+      return el.selectionStart;
+    }
+    if (document.selection) {
+      el.focus();
+      r = document.selection.createRange();
+      if (!r) return 0;
+
+      re = el.createTextRange();
+      rc = re.duplicate();
+      re.moveToBookmark(r.getBookmark());
+      rc.setEndPoint('EndToStart', re);
+      return rc.text.length;
+    }
+    return 0;
+  },
+
+  // Set the caret's position
+  setCaretPosition: function(ctrl, pos) {
+    var range;
+    if (ctrl.setSelectionRange) {
+      ctrl.focus();
+      ctrl.setSelectionRange(pos, pos);
+      return;
+    }
+    if (ctrl.createTextRange) {
+      range = ctrl.createTextRange();
+      range.collapse(true);
+      range.moveEnd('character', pos);
+      range.moveStart('character', pos);
+      return range.select();
+    }
+  },
+
+  validateUploadedFiles: function(files, bypassNewUserRestriction) {
+    if (!files || files.length === 0) { return false; }
+
+    if (files.length > 1) {
+      bootbox.alert(I18n.t('post.errors.too_many_uploads'));
+      return false;
+    }
+
+    var upload = files[0];
+
+    // CHROME ONLY: if the image was pasted, sets its name to a default one
+    if (typeof Blob !== "undefined" && typeof File !== "undefined") {
+      if (upload instanceof Blob && !(upload instanceof File) && upload.type === "image/png") { upload.name = "blob.png"; }
+    }
+
+    var type = Discourse.Utilities.isAnImage(upload.name) ? 'image' : 'attachment';
+
+    return Discourse.Utilities.validateUploadedFile(upload, type, bypassNewUserRestriction);
+  },
+
+  validateUploadedFile: function(file, type, bypassNewUserRestriction) {
+    // check that the uploaded file is authorized
+    if (!Discourse.Utilities.authorizesAllExtensions() &&
+        !Discourse.Utilities.isAuthorizedUpload(file)) {
+      var extensions = Discourse.Utilities.authorizedExtensions();
+      bootbox.alert(I18n.t('post.errors.upload_not_authorized', { authorized_extensions: extensions }));
+      return false;
+    }
+
+    if (!bypassNewUserRestriction) {
+      // ensures that new users can upload a file
+      if (!Discourse.User.current().isAllowedToUploadAFile(type)) {
+        bootbox.alert(I18n.t('post.errors.' + type + '_upload_not_allowed_for_new_user'));
+        return false;
+      }
+    }
+
+    // check file size
+    var fileSizeKB = file.size / 1024;
+    var maxSizeKB = 10 * 1024; // 10MB
+    if (fileSizeKB > maxSizeKB) {
+      bootbox.alert(I18n.t('post.errors.file_too_large', { max_size_kb: maxSizeKB }));
+      return false;
+    }
+
+    // everything went fine
+    return true;
+  },
+
+  authorizesAllExtensions: function() {
+    return Discourse.SiteSettings.authorized_extensions.indexOf("*") >= 0;
+  },
+
+  isAuthorizedUpload: function(file) {
+    if (file && file.name) {
+      var extensions = _.chain(Discourse.SiteSettings.authorized_extensions.split("|"))
+                        .reject(function(extension) { return extension.indexOf("*") >= 0; })
+                        .map(function(extension) { return (extension.indexOf(".") === 0 ? extension.substring(1) : extension).replace(".", "\\."); })
+                        .value();
+      return new RegExp("\\.(" + extensions.join("|") + ")$", "i").test(file.name);
+    }
+    return false;
+  },
+
+  authorizedExtensions: function() {
+    return _.chain(Discourse.SiteSettings.authorized_extensions.split("|"))
+            .reject(function(extension) { return extension.indexOf("*") >= 0; })
+            .map(function(extension) { return extension.toLowerCase(); })
+            .value()
+            .join(", ");
+  },
+
+  getUploadMarkdown: function(upload) {
+    if (Discourse.Utilities.isAnImage(upload.original_filename)) {
+      return '<img src="' + upload.url + '" width="' + upload.width + '" height="' + upload.height + '">';
+    } else {
+      return '<a class="attachment" href="' + upload.url + '">' + upload.original_filename + '</a> (' + I18n.toHumanSize(upload.filesize) + ')';
+    }
+  },
+
+  isAnImage: function(path) {
+    return (/\.(png|jpe?g|gif|bmp|tiff?|svg|webp)$/i).test(path);
+  },
+
+  allowsImages: function() {
+    return Discourse.Utilities.authorizesAllExtensions() ||
+           (/(png|jpe?g|gif|bmp|tiff?|svg|webp)/i).test(Discourse.Utilities.authorizedExtensions());
+  },
+
+  allowsAttachments: function() {
+    return Discourse.Utilities.authorizesAllExtensions() ||
+           !(/((png|jpe?g|gif|bmp|tiff?|svg|webp)(,\s)?)+$/i).test(Discourse.Utilities.authorizedExtensions());
+  },
+
+  displayErrorForUpload: function(data) {
+    // deal with meaningful errors first
+    if (data.jqXHR) {
+      switch (data.jqXHR.status) {
+        // cancelled by the user
+        case 0: return;
+
+        // entity too large, usually returned from the web server
+        case 413:
+          var maxSizeKB = 10 * 1024; // 10 MB
+          bootbox.alert(I18n.t('post.errors.file_too_large', { max_size_kb: maxSizeKB }));
+          return;
+
+        // the error message is provided by the server
+        case 422:
+          if (data.jqXHR.responseJSON.message) {
+            bootbox.alert(data.jqXHR.responseJSON.message);
+          } else {
+            bootbox.alert(data.jqXHR.responseJSON.join("\n"));
+          }
+          return;
+      }
+    } else if (data.errors && data.errors.length > 0) {
+      bootbox.alert(data.errors.join("\n"));
+      return;
+    }
+    // otherwise, display a generic error message
+    bootbox.alert(I18n.t('post.errors.upload'));
+  },
+
+  defaultHomepage: function() {
+    // the homepage is the first item of the 'top_menu' site setting
+    return Discourse.SiteSettings.top_menu.split("|")[0].split(",")[0];
+  }
+
+};
+
+
+===== FILE app/controllers/uploads_controller.rb (after PR) =====
+class UploadsController < ApplicationController
+  before_filter :ensure_logged_in, except: [:show]
+  skip_before_filter :preload_json, :check_xhr, :redirect_to_login_if_required, only: [:show]
+
+  def create
+    type = params.require(:type)
+    file = params[:file] || params[:files].try(:first)
+    url = params[:url]
+    client_id = params[:client_id]
+    synchronous = is_api? && params[:synchronous]
+
+    # HACK FOR IE9 to prevent the "download dialog"
+    response.headers["Content-Type"] = "text/plain" if request.user_agent =~ /MSIE 9/
+
+    if synchronous
+      data = create_upload(type, file, url)
+      render json: data.as_json
+    else
+      Scheduler::Defer.later("Create Upload") do
+        data = create_upload(type, file, url)
+        MessageBus.publish("/uploads/#{type}", data.as_json, client_ids: [client_id])
+      end
+      render json: success_json
+    end
+  end
+
+  def show
+    return render_404 if !RailsMultisite::ConnectionManagement.has_db?(params[:site])
+
+    RailsMultisite::ConnectionManagement.with_connection(params[:site]) do |db|
+      return render_404 unless Discourse.store.internal?
+      return render_404 if SiteSetting.prevent_anons_from_downloading_files && current_user.nil?
+      return render_404 if SiteSetting.login_required? && db == "default" && current_user.nil?
+
+      if upload = Upload.find_by(sha1: params[:sha]) || Upload.find_by(id: params[:id], url: request.env["PATH_INFO"])
+        opts = { filename: upload.original_filename }
+        opts[:disposition] = 'inline' if params[:inline]
+        send_file(Discourse.store.path_for(upload), opts)
+      else
+        render_404
+      end
+    end
+  end
+
+  protected
+
+  def render_404
+    render nothing: true, status: 404
+  end
+
+  def create_upload(type, file, url)
+    begin
+      # API can provide a URL
+      if file.nil? && url.present? && is_api?
+        tempfile = FileHelper.download(url, 10.megabytes, "discourse-upload-#{type}") rescue nil
+        filename = File.basename(URI.parse(url).path)
+      else
+        tempfile = file.tempfile
+        filename = file.original_filename
+        content_type = file.content_type
+      end
+
+      # allow users to upload large images that will be automatically reduced to allowed size
+      if tempfile && tempfile.size > 0 && SiteSetting.max_image_size_kb > 0 && FileHelper.is_image?(filename)
+        attempt = 5
+        while attempt > 0 && tempfile.size > SiteSetting.max_image_size_kb.kilobytes
+          OptimizedImage.downsize(tempfile.path, tempfile.path, "80%", allow_animation: SiteSetting.allow_animated_thumbnails)
+          attempt -= 1
+        end
+      end
+
+      upload = Upload.create_for(current_user.id, tempfile, filename, tempfile.size, content_type: content_type, image_type: type)
+
+      if upload.errors.empty? && current_user.admin?
+        retain_hours = params[:retain_hours].to_i
+        upload.update_columns(retain_hours: retain_hours) if retain_hours > 0
+      end
+
+      if upload.errors.empty? && FileHelper.is_image?(filename)
+        Jobs.enqueue(:create_thumbnails, upload_id: upload.id, type: type, user_id: params[:user_id])
+      end
+
+      upload.errors.empty? ? upload : { errors: upload.errors.values.flatten }
+    ensure
+      tempfile.try(:close!) rescue nil
+    end
+  end
+
+end
+
+
+===== FILE app/models/optimized_image.rb (after PR) =====
+require "digest/sha1"
+require_dependency "file_helper"
+require_dependency "url_helper"
+require_dependency "db_helper"
+require_dependency "file_store/local_store"
+
+class OptimizedImage < ActiveRecord::Base
+  belongs_to :upload
+
+  # BUMP UP if optimized image algorithm changes
+  VERSION = 1
+
+  def self.create_for(upload, width, height, opts={})
+    return unless width > 0 && height > 0
+    return if upload.try(:sha1).blank?
+
+    DistributedMutex.synchronize("optimized_image_#{upload.id}_#{width}_#{height}") do
+      # do we already have that thumbnail?
+      thumbnail = find_by(upload_id: upload.id, width: width, height: height)
+
+      # make sure we have an url
+      if thumbnail && thumbnail.url.blank?
+        thumbnail.destroy
+        thumbnail = nil
+      end
+
+      # return the previous thumbnail if any
+      return thumbnail unless thumbnail.nil?
+
+      # create the thumbnail otherwise
+      original_path = Discourse.store.path_for(upload)
+      if original_path.blank?
+        external_copy = Discourse.store.download(upload) rescue nil
+        original_path = external_copy.try(:path)
+      end
+
+      if original_path.blank?
+        Rails.logger.error("Could not find file in the store located at url: #{upload.url}")
+      else
+        # create a temp file with the same extension as the original
+        extension = File.extname(original_path)
+        temp_file = Tempfile.new(["discourse-thumbnail", extension])
+        temp_path = temp_file.path
+
+        if extension =~ /\.svg$/i
+          FileUtils.cp(original_path, temp_path)
+          resized = true
+        else
+          resized = resize(original_path, temp_path, width, height, opts)
+        end
+
+        if resized
+          thumbnail = OptimizedImage.create!(
+            upload_id: upload.id,
+            sha1: Digest::SHA1.file(temp_path).hexdigest,
+            extension: extension,
+            width: width,
+            height: height,
+            url: "",
+          )
+          # store the optimized image and update its url
+          File.open(temp_path) do |file|
+            url = Discourse.store.store_optimized_image(file, thumbnail)
+            if url.present?
+              thumbnail.url = url
+              thumbnail.save
+            else
+              Rails.logger.error("Failed to store optimized image #{width}x#{height} for #{upload.url}")
+            end
+          end
+        else
+          Rails.logger.error("Failed to create optimized image #{width}x#{height} for #{upload.url}")
+        end
+
+        # close && remove temp file
+        temp_file.close!
+      end
+
+      # make sure we remove the cached copy from external stores
+      if Discourse.store.external?
+        external_copy.try(:close!) rescue nil
+      end
+
+      thumbnail
+    end
+  end
+
+  def destroy
+    OptimizedImage.transaction do
+      Discourse.store.remove_optimized_image(self)
+      super
+    end
+  end
+
+  def local?
+   !(url =~ /^(https?:)?\/\//)
+  end
+
+  def self.resize_instructions(from, to, dimensions, opts={})
+    # NOTE: ORDER is important!
+    %W{
+      convert
+      #{from}[0]
+      -gravity center
+      -background transparent
+      -thumbnail #{dimensions}^
+      -extent #{dimensions}
+      -interpolate bicubic
+      -unsharp 2x0.5+0.7+0
+      -quality 98
+      #{to}
+    }
+  end
+
+  def self.resize_instructions_animated(from, to, dimensions, opts={})
+    %W{
+      gifsicle
+      #{from}
+      --colors=256
+      --resize-fit #{dimensions}
+      --optimize=3
+      --output #{to}
+    }
+  end
+
+  def self.downsize_instructions(from, to, dimensions, opts={})
+    %W{
+      convert
+      #{from}[0]
+      -gravity center
+      -background transparent
+      -resize #{dimensions}#{!!opts[:force_aspect_ratio] ? "\\!" : "\\>"}
+      #{to}
+    }
+  end
+
+  def self.downsize_instructions_animated(from, to, dimensions, opts={})
+    resize_instructions_animated(from, to, dimensions, opts)
+  end
+
+  def self.resize(from, to, width, height, opts={})
+    optimize("resize", from, to, "#{width}x#{height}", opts)
+  end
+
+  def self.downsize(from, to, max_width, max_height, opts={})
+    optimize("downsize", from, to, "#{max_width}x#{max_height}", opts)
+  end
+
+  def self.downsize(from, to, dimensions, opts={})
+    optimize("downsize", from, to, dimensions, opts)
+  end
+
+  def self.optimize(operation, from, to, dimensions, opts={})
+    method_name = "#{operation}_instructions"
+    method_name += "_animated" if !!opts[:allow_animation] && from =~ /\.GIF$/i
+    instructions = self.send(method_name.to_sym, from, to, dimensions, opts)
+    convert_with(instructions, to)
+  end
+
+  def self.convert_with(instructions, to)
+    `#{instructions.join(" ")} &> /dev/null`
+    return false if $?.exitstatus != 0
+
+    ImageOptim.new.optimize_image!(to)
+    true
+  rescue
+    Rails.logger.error("Could not optimize image: #{to}")
+    false
+  end
+
+  def self.migrate_to_new_scheme(limit=50)
+    problems = []
+
+    if SiteSetting.migrate_to_new_scheme
+      max_file_size_kb = SiteSetting.max_image_size_kb.kilobytes
+      local_store = FileStore::LocalStore.new
+
+      OptimizedImage.includes(:upload)
+                    .where("url NOT LIKE '%/optimized/_X/%'")
+                    .limit(limit)
+                    .order(id: :desc)
+                    .each do |optimized_image|
+        begin
+          # keep track of the url
+          previous_url = optimized_image.url.dup
+          # where is the file currently stored?
+          external = previous_url =~ /^\/\//
+          # download if external
+          if external
+            url = SiteSetting.scheme + ":" + previous_url
+            file = FileHelper.download(url, max_file_size_kb, "discourse", true) rescue nil
+            path = file.path
+          else
+            path = local_store.path_for(optimized_image)
+            file = File.open(path)
+          end
+          # compute SHA if missing
+          if optimized_image.sha1.blank?
+            optimized_image.sha1 = Digest::SHA1.file(path).hexdigest
+          end
+          # optimize if image
+          ImageOptim.new.optimize_image!(path)
+          # store to new location & update the filesize
+          File.open(path) do |f|
+            optimized_image.url = Discourse.store.store_optimized_image(f, optimized_image)
+            optimized_image.save
+          end
+          # remap the URLs
+          DbHelper.remap(UrlHelper.absolute(previous_url), optimized_image.url) unless external
+          DbHelper.remap(previous_url, optimized_image.url)
+          # remove the old file (when local)
+          unless external
+            FileUtils.rm(path, force: true) rescue nil
+          end
+        rescue => e
+          problems << { optimized_image: optimized_image, ex: e }
+          # just ditch the optimized image if there was any errors
+          optimized_image.destroy
+        ensure
+          file.try(:unlink) rescue nil
+          file.try(:close) rescue nil
+        end
+      end
+    end
+
+    problems
+  end
+
+end
+
+# == Schema Information
+#
+# Table name: optimized_images
+#
+#  id        :integer          not null, primary key
+#  sha1      :string(40)       not null
+#  extension :string(10)       not null
+#  width     :integer          not null
+#  height    :integer          not null
+#  upload_id :integer          not null
+#  url       :string(255)      not null
+#
+# Indexes
+#
+#  index_optimized_images_on_upload_id                       (upload_id)
+#  index_optimized_images_on_upload_id_and_width_and_height  (upload_id,width,height) UNIQUE
+#

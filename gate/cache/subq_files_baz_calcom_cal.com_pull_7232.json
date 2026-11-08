@@ -1,0 +1,1 @@
+{"deleteScheduledEmailReminder and deleteScheduledSMSReminder are called in a fire-and-forget manner inside updatedBookings.forEach, allowing the API to return before the cancelled=true update or SMS delete actually commits": 0.8621287941932678}

@@ -1,0 +1,1 @@
+{"TestLogger.FromContext returns a new *TestLogger instance instead of returning the original instance (f), causing logs written through the returned logger to be recorded on an ephemeral instance that is discarded, preventing tests from verifying their logs": 0.9555731415748596}

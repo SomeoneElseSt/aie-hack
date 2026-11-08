@@ -1,0 +1,1 @@
+{"Allowing a negative offset to be used directly as the slice start on a Django queryset will raise an assertion error at runtime, since Django ORM does not support negative slice indices; should clamp the start offset to a non-negative value before slicing": 0.9497858881950378}

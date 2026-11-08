@@ -1,0 +1,1 @@
+{"The method `include_website_name` on line 153 is missing the trailing `?`, so the serializer framework never calls it. The framework expects `include_#{attr}?` methods to determine attribute inclusion. Without the `?`, `website_name` is always serialized even when `website` is blank.": 0.6252175569534302}

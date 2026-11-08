@@ -1,0 +1,1430 @@
+===== FILE model/infinispan/src/main/java/org/keycloak/models/cache/infinispan/idp/InfinispanIdentityProviderStorageProvider.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.models.cache.infinispan.idp;
+
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import org.keycloak.common.Profile;
+import org.keycloak.models.IdentityProviderMapperModel;
+import org.keycloak.models.IdentityProviderStorageProvider;
+import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.ModelException;
+import org.keycloak.models.OrganizationModel;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.cache.CacheRealmProvider;
+import org.keycloak.models.cache.infinispan.CachedCount;
+import org.keycloak.models.cache.infinispan.RealmCacheManager;
+import org.keycloak.models.cache.infinispan.RealmCacheSession;
+import org.keycloak.organization.OrganizationProvider;
+
+import static org.keycloak.models.IdentityProviderStorageProvider.LoginFilter.getLoginPredicate;
+
+public class InfinispanIdentityProviderStorageProvider implements IdentityProviderStorageProvider {
+
+    private static final String IDP_COUNT_KEY_SUFFIX = ".idp.count";
+    private static final String IDP_ALIAS_KEY_SUFFIX = ".idp.alias";
+    private static final String IDP_ORG_ID_KEY_SUFFIX = ".idp.orgId";
+    private static final String IDP_LOGIN_SUFFIX = ".idp.login";
+
+    private final KeycloakSession session;
+    private final IdentityProviderStorageProvider idpDelegate;
+    private final RealmCacheSession realmCache;
+    private final long startupRevision;
+
+    public InfinispanIdentityProviderStorageProvider(KeycloakSession session) {
+        this.session = session;
+        this.idpDelegate = session.getProvider(IdentityProviderStorageProvider.class, "jpa");
+        this.realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+        this.startupRevision = realmCache.getCache().getCurrentCounter();
+    }
+
+    private static String cacheKeyIdpCount(RealmModel realm) {
+        return realm.getId() + IDP_COUNT_KEY_SUFFIX;
+    }
+
+    private static String cacheKeyIdpAlias(RealmModel realm, String alias) {
+        return realm.getId() + "." + alias + IDP_ALIAS_KEY_SUFFIX;
+    }
+
+    private static String cacheKeyIdpMapperAliasName(RealmModel realm, String alias, String name) {
+        return realm.getId() + "." + alias + IDP_ALIAS_KEY_SUFFIX + "." + name;
+    }
+
+    public static String cacheKeyOrgId(RealmModel realm, String orgId) {
+        return realm.getId() + "." + orgId + IDP_ORG_ID_KEY_SUFFIX;
+    }
+
+    public static String cacheKeyForLogin(RealmModel realm, FetchMode fetchMode) {
+        return realm.getId() + IDP_LOGIN_SUFFIX + "." + fetchMode;
+    }
+
+    @Override
+    public IdentityProviderModel create(IdentityProviderModel model) {
+        registerCountInvalidation();
+        registerIDPLoginInvalidation(model);
+        return idpDelegate.create(model);
+    }
+
+    @Override
+    public void update(IdentityProviderModel model) {
+        // for cases the alias is being updated, it is needed to lookup the idp by id to obtain the original alias
+        IdentityProviderModel idpById = getById(model.getInternalId());
+        registerIDPInvalidation(idpById);
+        registerIDPLoginInvalidationOnUpdate(idpById, model);
+        idpDelegate.update(model);
+    }
+
+    @Override
+    public boolean remove(String alias) {
+        String cacheKey = cacheKeyIdpAlias(getRealm(), alias);
+        IdentityProviderModel storedIdp = idpDelegate.getByAlias(alias);
+        if (isInvalid(cacheKey)) {
+            //lookup idp by alias in cache to be able to invalidate its internalId
+            registerIDPInvalidation(storedIdp);
+        } else {
+            CachedIdentityProvider cached = realmCache.getCache().get(cacheKey, CachedIdentityProvider.class);
+            if (cached != null) {
+                registerIDPInvalidation(cached.getIdentityProvider());
+            }
+        }
+        registerCountInvalidation();
+        registerIDPLoginInvalidation(storedIdp);
+        return idpDelegate.remove(alias);
+    }
+
+    @Override
+    public void removeAll() {
+        registerCountInvalidation();
+        // no need to invalidate each entry in cache, removeAll() is (currently) called only in case the realm is being deleted
+        idpDelegate.removeAll();
+    }
+
+    @Override
+    public IdentityProviderModel getById(String internalId) {
+        if (internalId == null) return null;
+        CachedIdentityProvider cached = realmCache.getCache().get(internalId, CachedIdentityProvider.class);
+        String realmId = getRealm().getId();
+        if (cached != null && !cached.getRealm().equals(realmId)) {
+            cached = null;
+        }
+
+        if (cached == null) {
+            Long loaded = realmCache.getCache().getCurrentRevision(internalId);
+            IdentityProviderModel model = idpDelegate.getById(internalId);
+            if (model == null) return null;
+            if (isInvalid(internalId)) return createOrganizationAwareIdentityProviderModel(model);
+            cached = new CachedIdentityProvider(loaded, getRealm(), internalId, model);
+            realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
+        } else if (isInvalid(internalId)) {
+            return createOrganizationAwareIdentityProviderModel(idpDelegate.getById(internalId));
+        }
+        return createOrganizationAwareIdentityProviderModel(cached.getIdentityProvider());
+    }
+
+    @Override
+    public IdentityProviderModel getByAlias(String alias) {
+        String cacheKey = cacheKeyIdpAlias(getRealm(), alias);
+
+        if (isInvalid(cacheKey)) {
+            return createOrganizationAwareIdentityProviderModel(idpDelegate.getByAlias(alias));
+        }
+
+        CachedIdentityProvider cached = realmCache.getCache().get(cacheKey, CachedIdentityProvider.class);
+
+        if (cached == null) {
+            Long loaded = realmCache.getCache().getCurrentRevision(cacheKey);
+            IdentityProviderModel model = idpDelegate.getByAlias(alias);
+            if (model == null) {
+                return null;
+            }
+            cached = new CachedIdentityProvider(loaded, getRealm(), cacheKey, model);
+            realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
+        }
+
+        return createOrganizationAwareIdentityProviderModel(cached.getIdentityProvider());
+    }
+
+    @Override
+    public Stream<IdentityProviderModel> getByOrganization(String orgId, Integer first, Integer max) {
+        RealmModel realm = getRealm();
+        String cacheKey = cacheKeyOrgId(realm, orgId);
+
+        // check if there is invalidation for this key or the organization was invalidated
+        if (isInvalid(cacheKey) || isInvalid(orgId)) {
+            return idpDelegate.getByOrganization(orgId, first, max).map(this::createOrganizationAwareIdentityProviderModel);
+        }
+
+        RealmCacheManager cache = realmCache.getCache();
+        IdentityProviderListQuery query = cache.get(cacheKey, IdentityProviderListQuery.class);
+        String searchKey = Optional.ofNullable(first).orElse(-1) + "." + Optional.ofNullable(max).orElse(-1);
+        Set<String> cached;
+
+        if (query == null) {
+            // not cached yet
+            Long loaded = cache.getCurrentRevision(cacheKey);
+            cached = idpDelegate.getByOrganization(orgId, first, max).map(IdentityProviderModel::getInternalId).collect(Collectors.toSet());
+            query = new IdentityProviderListQuery(loaded, cacheKey, realm, searchKey, cached);
+            cache.addRevisioned(query, startupRevision);
+        } else {
+            cached = query.getIDPs(searchKey);
+            if (cached == null) {
+                // there is a cache entry, but the current search is not yet cached
+                cache.invalidateObject(cacheKey);
+                Long loaded = cache.getCurrentRevision(cacheKey);
+                cached = idpDelegate.getByOrganization(orgId, first, max).map(IdentityProviderModel::getInternalId).collect(Collectors.toSet());
+                query = new IdentityProviderListQuery(loaded, cacheKey, realm, searchKey, cached, query);
+                cache.addRevisioned(query, cache.getCurrentCounter());
+            }
+        }
+
+        Set<IdentityProviderModel> identityProviders = new HashSet<>();
+        for (String id : cached) {
+            IdentityProviderModel idp = session.identityProviders().getById(id);
+            if (idp == null) {
+                realmCache.registerInvalidation(cacheKey);
+                return idpDelegate.getByOrganization(orgId, first, max).map(this::createOrganizationAwareIdentityProviderModel);
+            }
+            identityProviders.add(idp);
+        }
+
+        return identityProviders.stream();
+    }
+
+    @Override
+    public Stream<IdentityProviderModel> getForLogin(FetchMode mode, String organizationId) {
+        String cacheKey = cacheKeyForLogin(getRealm(), mode);
+
+        if (isInvalid(cacheKey)) {
+            return idpDelegate.getForLogin(mode, organizationId).map(this::createOrganizationAwareIdentityProviderModel);
+        }
+
+        RealmCacheManager cache = realmCache.getCache();
+        IdentityProviderListQuery query = cache.get(cacheKey, IdentityProviderListQuery.class);
+        String searchKey = organizationId != null ? organizationId : "";
+        Set<String> cached;
+
+        if (query == null) {
+            // not cached yet
+            Long loaded = cache.getCurrentRevision(cacheKey);
+            cached = idpDelegate.getForLogin(mode, organizationId).map(IdentityProviderModel::getInternalId).collect(Collectors.toSet());
+            query = new IdentityProviderListQuery(loaded, cacheKey, getRealm(), searchKey, cached);
+            cache.addRevisioned(query, startupRevision);
+        } else {
+            cached = query.getIDPs(searchKey);
+            if (cached == null) {
+                // there is a cache entry, but the current search is not yet cached
+                cache.invalidateObject(cacheKey);
+                Long loaded = cache.getCurrentRevision(cacheKey);
+                cached = idpDelegate.getForLogin(mode, organizationId).map(IdentityProviderModel::getInternalId).collect(Collectors.toSet());
+                query = new IdentityProviderListQuery(loaded, cacheKey, getRealm(), searchKey, cached, query);
+                cache.addRevisioned(query, cache.getCurrentCounter());
+            }
+        }
+
+        Set<IdentityProviderModel> identityProviders = new HashSet<>();
+        for (String id : cached) {
+            IdentityProviderModel idp = session.identityProviders().getById(id);
+            if (idp == null) {
+                realmCache.registerInvalidation(cacheKey);
+                return idpDelegate.getForLogin(mode, organizationId).map(this::createOrganizationAwareIdentityProviderModel);
+            }
+            identityProviders.add(idp);
+        }
+
+        return identityProviders.stream();
+    }
+
+    @Override
+    public Stream<String> getByFlow(String flowId, String search, Integer first, Integer max) {
+        return idpDelegate.getByFlow(flowId, search, first, max);
+    }
+
+    @Override
+    public Stream<IdentityProviderModel> getAllStream(Map<String, String> attrs, Integer first, Integer max) {
+        return idpDelegate.getAllStream(attrs, first, max).map(this::createOrganizationAwareIdentityProviderModel);
+    }
+
+    @Override
+    public long count() {
+        String cacheKey = cacheKeyIdpCount(getRealm());
+        CachedCount cached = realmCache.getCache().get(cacheKey, CachedCount.class);
+
+        // cached and not invalidated
+        if (cached != null && !isInvalid(cacheKey)) {
+            return cached.getCount();
+        }
+
+        Long loaded = realmCache.getCache().getCurrentRevision(cacheKey);
+        long count = idpDelegate.count();
+        cached = new CachedCount(loaded, getRealm(), cacheKey, count);
+        realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
+
+        return count;
+    }
+
+    @Override
+    public void close() {
+        idpDelegate.close();
+    }
+
+    @Override
+    public IdentityProviderMapperModel createMapper(IdentityProviderMapperModel model) {
+        return idpDelegate.createMapper(model);
+    }
+
+    @Override
+    public void updateMapper(IdentityProviderMapperModel model) {
+        registerIDPMapperInvalidation(model);
+        idpDelegate.updateMapper(model);
+    }
+
+    @Override
+    public boolean removeMapper(IdentityProviderMapperModel model) {
+        registerIDPMapperInvalidation(model);
+        return idpDelegate.removeMapper(model);
+    }
+
+    @Override
+    public void removeAllMappers() {
+        // no need to invalidate each entry in cache, removeAllMappers() is (currently) called only in case the realm is being deleted
+        idpDelegate.removeAllMappers();
+    }
+
+    @Override
+    public IdentityProviderMapperModel getMapperById(String id) {
+        CachedIdentityProviderMapper cached = realmCache.getCache().get(id, CachedIdentityProviderMapper.class);
+        String realmId = getRealm().getId();
+        if (cached != null && !cached.getRealm().equals(realmId)) {
+            cached = null;
+        }
+
+        if (cached == null) {
+            Long loaded = realmCache.getCache().getCurrentRevision(id);
+            IdentityProviderMapperModel model = idpDelegate.getMapperById(id);
+            if (model == null) return null;
+            if (isInvalid(id)) return model;
+            cached = new CachedIdentityProviderMapper(loaded, getRealm(), id, model);
+            realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
+        } else if (isInvalid(id)) {
+            return idpDelegate.getMapperById(id);
+        }
+        return cached.getIdentityProviderMapper();
+    }
+
+    @Override
+    public IdentityProviderMapperModel getMapperByName(String identityProviderAlias, String name) {
+        String cacheKey = cacheKeyIdpMapperAliasName(getRealm(), identityProviderAlias, name);
+
+        if (isInvalid(cacheKey)) {
+            return idpDelegate.getMapperByName(identityProviderAlias, name);
+        }
+
+        CachedIdentityProviderMapper cached = realmCache.getCache().get(cacheKey, CachedIdentityProviderMapper.class);
+
+        if (cached == null) {
+            Long loaded = realmCache.getCache().getCurrentRevision(cacheKey);
+            IdentityProviderMapperModel model = idpDelegate.getMapperByName(identityProviderAlias, name);
+            if (model == null) return null;
+            cached = new CachedIdentityProviderMapper(loaded, getRealm(), cacheKey, model);
+            realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
+        }
+
+        return cached.getIdentityProviderMapper();
+    }
+
+    @Override
+    public Stream<IdentityProviderMapperModel> getMappersStream(Map<String, String> options, Integer first, Integer max) {
+        return idpDelegate.getMappersStream(options, first, max);
+    }
+
+    @Override
+    public Stream<IdentityProviderMapperModel> getMappersByAliasStream(String identityProviderAlias) {
+        return idpDelegate.getMappersByAliasStream(identityProviderAlias);
+    }
+
+    private void registerIDPInvalidation(IdentityProviderModel idp) {
+        realmCache.registerInvalidation(idp.getInternalId());
+        realmCache.registerInvalidation(cacheKeyIdpAlias(getRealm(), idp.getAlias()));
+    }
+
+    private void registerCountInvalidation() {
+        realmCache.registerInvalidation(cacheKeyIdpCount(getRealm()));
+    }
+
+    private void registerIDPMapperInvalidation(IdentityProviderMapperModel mapper) {
+        if (mapper.getId() == null) {
+            throw new ModelException("Identity Provider Mapper does not exist");
+        }
+        realmCache.registerInvalidation(mapper.getId());
+        realmCache.registerInvalidation(cacheKeyIdpMapperAliasName(getRealm(), mapper.getIdentityProviderAlias(), mapper.getName()));
+    }
+
+    private void registerIDPLoginInvalidation(IdentityProviderModel idp) {
+        // only invalidate login caches if the IDP qualifies as a login IDP.
+        if (getLoginPredicate().test(idp)) {
+            for (FetchMode mode : FetchMode.values()) {
+                realmCache.registerInvalidation(cacheKeyForLogin(getRealm(), mode));
+            }
+        }
+    }
+
+    /**
+     * Registers invalidations for the caches that hold the IDPs available for login when an IDP is updated. The caches
+     * are <strong>NOT</strong> invalidated if:
+     * <ul>
+     *     <li>IDP is currently NOT a login IDP, and the update hasn't changed that (i.e. it continues to be unavailable for login);</li>
+     *     <li>IDP is currently a login IDP, and the update hasn't changed that. This includes the organization link not being updated as well</li>
+     * </ul>
+     * In all other scenarios, the caches must be invalidated.
+     *
+     * @param original the identity provider's current model
+     * @param updated the identity provider's updated model
+     */
+    private void registerIDPLoginInvalidationOnUpdate(IdentityProviderModel original, IdentityProviderModel updated) {
+        // IDP isn't currently available for login and update preserves that - no need to invalidate.
+        if (!getLoginPredicate().test(original) && !getLoginPredicate().test(updated)) {
+            return;
+        }
+        // IDP is currently available for login and update preserves that, including organization link - no need to invalidate.
+        if (getLoginPredicate().test(original) && getLoginPredicate().test(updated)
+                && Objects.equals(original.getOrganizationId(), updated.getOrganizationId())) {
+            return;
+        }
+
+        // all other scenarios should invalidate the login caches.
+        for (FetchMode mode : FetchMode.values()) {
+            realmCache.registerInvalidation(cacheKeyForLogin(getRealm(), mode));
+        }
+    }
+
+    private RealmModel getRealm() {
+        RealmModel realm = session.getContext().getRealm();
+        if (realm == null) {
+            throw new IllegalArgumentException("Session not bound to a realm");
+        }
+        return realm;
+    }
+
+    private boolean isInvalid(String cacheKey) {
+        return realmCache.getInvalidations().contains(cacheKey);
+    }
+
+    private IdentityProviderModel createOrganizationAwareIdentityProviderModel(IdentityProviderModel idp) {
+        if (!Profile.isFeatureEnabled(Profile.Feature.ORGANIZATION)) return idp;
+        return new IdentityProviderModel(idp) {
+            @Override
+            public boolean isEnabled() {
+                // if IdP is bound to an org
+                if (getOrganizationId() != null) {
+                    OrganizationProvider provider = session.getProvider(OrganizationProvider.class);
+                    OrganizationModel org = provider == null ? null : provider.getById(getOrganizationId());
+                    return org != null && provider.isEnabled() && org.isEnabled() && super.isEnabled();
+                }
+                return super.isEnabled();
+            }
+        };
+    }
+}
+
+
+===== FILE server-spi/src/main/java/org/keycloak/models/IdentityProviderStorageProvider.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.keycloak.models;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.keycloak.provider.Provider;
+
+/**
+ * The {@link IdentityProviderStorageProvider} is concerned with the storage/retrieval of the configured identity providers
+ * in Keycloak. In other words, it is a provider of identity providers (IDPs) and, as such, handles the CRUD operations for IDPs.
+ * </p>
+ * It is not to be confused with the {@code IdentityProvider} found in server-spi-private as that provider is meant to be
+ * implemented by actual identity providers that handle the logic of authenticating users with third party brokers, such
+ * as Microsoft, Google, GitHub, LinkedIn, etc.
+ *
+ * @author <a href="mailto:sguilhen@redhat.com">Stefan Guilhen</a>
+ */
+public interface IdentityProviderStorageProvider extends Provider {
+
+    /**
+     * Creates a new identity provider from the specified model.
+     *
+     * @param model a {@link IdentityProviderModel} containing the identity provider's data.
+     * @return the model of the created identity provider.
+     */
+    IdentityProviderModel create(IdentityProviderModel model);
+
+    /**
+     * Updates the identity provider using the specified model.
+     *
+     * @param model a {@link IdentityProviderModel} containing the identity provider's data.
+     */
+    void update(IdentityProviderModel model);
+
+    /**
+     * Removes the identity provider with the specified alias.
+     *
+     * @param providerAlias the alias of the identity provider to be removed.
+     * @return {@code true} if an IDP with the specified alias was found and removed; {@code false} otherwise.
+     */
+    boolean remove(String providerAlias);
+
+    /**
+     * Removes all identity providers from the realm.
+     */
+    void removeAll();
+
+    /**
+     * Obtains the identity provider with the specified internal id.
+     *
+     * @param internalId the identity provider's internal id.
+     * @return a reference to the identity provider, or {@code null} if no provider is found.
+     */
+    IdentityProviderModel getById(String internalId);
+
+    /**
+     * Obtains the identity provider with the specified alias.
+     *
+     * @param alias the identity provider's alias.
+     * @return a reference to the identity provider, or {@code null} if no provider is found.
+     */
+    IdentityProviderModel getByAlias(String alias);
+
+    /**
+     * Obtains the identity provider whose id or alias match the specified key.
+     *
+     * @param key a {@code String} representing either the identity provider's id or alias.
+     * @return a reference to the identity provider, or {@code null} if no provider is found.
+     */
+    default IdentityProviderModel getByIdOrAlias(String key) {
+        IdentityProviderModel identityProvider = getById(key);
+        return identityProvider != null ? identityProvider : getByAlias(key);
+    }
+
+    /**
+     * Returns all identity providers in the current realm.
+     *
+     * @return a non-null stream of {@link IdentityProviderModel}s.
+     */
+    default Stream<IdentityProviderModel> getAllStream() {
+        return getAllStream(Map.of(), null, null);
+    }
+
+    /**
+     * Returns all identity providers in the realm filtered according to the specified search options. The options include:
+     * <ul>
+     *     <li>Regular fields found in {@link IdentityProviderModel}, such as {@code ALIAS}, {@code ENABLED}, {@code HIDE_ON_LOGIN}, etc;</li>
+     *     <li>Special search keys also present in {@link IdentityProviderModel}. Those include {@code SEARCH}, used to perform
+     *     exact, prefix, and infix searches by alias, and {@code ALIAS_NOT_IN}, used to perform searches for identity providers
+     *     whose alias doesn't match any of the specified aliases (separated by comma);</li>
+     *     <li>Any attribute found in the identity provider's config. If the option key doesn't match any of the previous
+     *     cases, the implementations must search the providers whose config contains a pair that matches the specified search
+     *     option</li>
+     * </ul>
+     *
+     * @param options a {@link Map} containing identity provider search options that must be matched.
+     * @param first the position of the first result to be processed (pagination offset). Ignored if negative or {@code null}.
+     * @param max the maximum number of results to be returned. Ignored if negative or {@code null}.
+     * @return a non-null stream of {@link IdentityProviderModel}s that match the search criteria.
+     */
+    Stream<IdentityProviderModel> getAllStream(Map<String, String> options, Integer first, Integer max);
+
+    /**
+     * Returns all identity providers associated with the organization with the provided id.
+     *
+     * @param orgId the id of the organization.
+     * @param first the position of the first result to be processed (pagination offset). Ignored if negative or {@code null}.
+     * @param max the maximum number of results to be returned. Ignored if negative or {@code null}.
+     * @return a non-null stream of {@link IdentityProviderModel}s that match the search criteria.
+     */
+    default Stream<IdentityProviderModel> getByOrganization(String orgId, Integer first, Integer max) {
+        return getAllStream(Map.of(IdentityProviderModel.ORGANIZATION_ID, orgId != null ? orgId : ""), first, max);
+    }
+
+    /**
+     * Returns the aliases of all identity providers whose {@code firstBrokerLoginFlowId} or {@code postBrokerLoginFlowId}
+     * matches the provided {@code flowId}.
+     *
+     * @param flowId the id of the flow.
+     * @param search an optional {@link String} representing an identity provider alias (partial or exact). If the value is enclosed
+     *               in double quotes, the method treats it as an exact search (e.g. {@code "name"}). If the value is enclosed in
+     *               wildcards, the method treats it as an infix search (e.g. {@code *name*}). Otherwise, the method treats it as a
+     *               prefix search (i.e. {@code name*} and {@code name} return the same results).
+     * @param first the position of the first result to be processed (pagination offset). Ignored if negative or {@code null}.
+     * @param max the maximum number of results to be returned. Ignored if negative or {@code null}.
+     * @return a non-null stream of {@link IdentityProviderModel}s that match the search criteria.
+     */
+    Stream<String> getByFlow(String flowId, String search, Integer first, Integer max);
+
+    /**
+     * Returns all identity providers available for login, according to the specified mode. An IDP can be used for login
+     * if it is enabled, is not a link-only IDP, and is not configured to be hidden on login page.
+     * </p>
+     * The mode parameter may narrow the list of IDPs that are available. {@code FETCH_MODE.REALM_ONLY} fetches only realm-level
+     * IDPs (i.e. those not associated with any org). {@code FETCH_MODE.ORG_ONLY} will work together with the {@code organizationId}
+     * parameter. If the latter is set, only the IDPs associated with that org will be returned. Otherwise, the method returns
+     * the IDPs associated with any org. {@code FETCH_MODE.ALL} combines both approaches, returning both the realm-level
+     * IDPs with those associated with organizations (or a specific organization as per the {@code organizationId} param).
+     *
+     * @param mode the fetch mode to be used. Can be {@code REALM_ONLY}, {@code ORG_ONLY}, or {@code ALL}.
+     * @param organizationId an optional organization ID. If present and the mode is not {@code REALM_ONLY}, the param indicates
+     *                       that only IDPs associated with the specified organization are to be returned.
+     * @return a non-null stream of {@link IdentityProviderModel}s that are suitable for being displayed in the login pages.
+     */
+    default Stream<IdentityProviderModel> getForLogin(FetchMode mode, String organizationId) {
+        Stream<IdentityProviderModel> result = Stream.of();
+        if (mode == FetchMode.REALM_ONLY || mode == FetchMode.ALL) {
+            // fetch all realm-only IDPs - i.e. those not associated with orgs.
+            Map<String, String> searchOptions = LoginFilter.getLoginSearchOptions();
+            searchOptions.put(IdentityProviderModel.ORGANIZATION_ID, null);
+            result = Stream.concat(result, getAllStream(searchOptions, null, null));
+        }
+        if (mode == FetchMode.ORG_ONLY || mode == FetchMode.ALL) {
+            // fetch IDPs associated with organizations.
+            Map<String, String> searchOptions = LoginFilter.getLoginSearchOptions();
+            if (organizationId != null) {
+                // we want the IDPs associated with a specific org.
+                searchOptions.put(IdentityProviderModel.ORGANIZATION_ID, organizationId);
+            }
+            searchOptions.put(OrganizationModel.BROKER_PUBLIC, "true");
+            result = Stream.concat(result, getAllStream(searchOptions, null, null));
+        }
+        return result;
+    }
+
+    /**
+     * Returns the number of IDPs in the realm.
+     *
+     * @return the number of IDPs found in the realm.
+     */
+    long count();
+
+    /**
+     * Checks whether the realm has any configured identity providers or not.
+     *
+     * @return {@code true} if the realm has at least one configured identity provider (federation is enabled); {@code false}
+     * otherwise.
+     */
+    default boolean isIdentityFederationEnabled() {
+        return count() > 0;
+    }
+
+    /**
+     * Enum to control how login identity providers should be fetched.
+     */
+    enum FetchMode {
+        /** only realm-level providers should be fetched (not linked to any organization) **/
+        REALM_ONLY,
+        /** only providers linked to organizations should be fetched **/
+        ORG_ONLY,
+        /** all providers should fetched, regardless of being linked to an organization or not **/
+        ALL
+    }
+
+    /**
+     * Enum that contains all fields that are considered when deciding if a provider should be available for login or not.
+     */
+    enum LoginFilter {
+
+        ENABLED(IdentityProviderModel.ENABLED, Boolean.TRUE.toString(), IdentityProviderModel::isEnabled),
+
+        LINK_ONLY(IdentityProviderModel.LINK_ONLY, Boolean.FALSE.toString(), Predicate.not(IdentityProviderModel::isLinkOnly)),
+
+        HIDE_ON_LOGIN(IdentityProviderModel.HIDE_ON_LOGIN, Boolean.FALSE.toString(), Predicate.not(IdentityProviderModel::isHideOnLogin));
+
+        private final String key;
+        private final String value;
+        private final Predicate<IdentityProviderModel> filter;
+
+        LoginFilter(String key, String value, java.util.function.Predicate<IdentityProviderModel> filter) {
+            this.key = key;
+            this.value = value;
+            this.filter = filter;
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public Predicate<IdentityProviderModel> getFilter() {
+            return filter;
+        }
+
+        public static Map<String, String> getLoginSearchOptions() {
+            return Stream.of(values()).collect(Collectors.toMap(LoginFilter::getKey, LoginFilter::getValue, (v1, v2) -> v1, LinkedHashMap::new));
+        }
+
+        public static Predicate<IdentityProviderModel> getLoginPredicate() {
+            return ((Predicate<IdentityProviderModel>) Objects::nonNull)
+                    .and(idp -> idp.getOrganizationId() == null || Boolean.parseBoolean(idp.getConfig().get(OrganizationModel.BROKER_PUBLIC)))
+                    .and(Stream.of(values()).map(LoginFilter::getFilter).reduce(Predicate::and).get());
+        }
+    }
+
+    /**
+     * Creates a new identity provider mapper from the specified model.
+     *
+     * @param model a {@link IdentityProviderMapperModel} containing the identity provider mapper's data.
+     * @return the model of the created identity provider mapper.
+     */
+    IdentityProviderMapperModel createMapper(IdentityProviderMapperModel model);
+
+    /**
+     * Updates the identity provider mapper using the specified model.
+     *
+     * @param model a {@link IdentityProviderMapperModel} containing the identity provider mapper's data.
+     */
+    void updateMapper(IdentityProviderMapperModel model);
+
+    /**
+     * Removes the given identity provider mapper.
+     *
+     * @param model a {@link IdentityProviderMapperModel} to be deleted.
+     * @return {@code true} if an identity provider mapper was removed; {@code false} otherwise.
+     */
+    boolean removeMapper(IdentityProviderMapperModel model);
+
+    /**
+     * Removes all identity provider mappers from the realm.
+     */
+    void removeAllMappers();
+
+    /**
+     * Obtains the identity provider mapper with the specified id.
+     *
+     * @param id the identity provider mapper's id.
+     * @return a reference to the identity provider mapper, or {@code null} if no mapper is found.
+     */
+    IdentityProviderMapperModel getMapperById(String id);
+
+    /**
+     * Obtains the identity provider mapper with the provided identity provider alias and name.
+     *
+     * @param identityProviderAlias the identity provider alias.
+     * @param name the identity provider mapper's name.
+     * @return a reference to the identity provider mapper, or {@code null} if no provider is found.
+     */
+    IdentityProviderMapperModel getMapperByName(String identityProviderAlias, String name);
+
+    /**
+     * Returns all identity provider mappers as a stream.
+     * @return Stream of {@link IdentityProviderMapperModel}. Never returns {@code null}.
+     */
+    default Stream<IdentityProviderMapperModel> getMappersStream() {
+        return this.getMappersStream(Map.of(), null, null);
+    }
+
+    /**
+     * Returns all identity provider mappers in the realm filtered according to the specified search options.
+     *
+     * @param options a {@link Map} containing identity provider search options that must be matched.
+     * @param first the position of the first result to be processed (pagination offset). Ignored if negative or {@code null}.
+     * @param max the maximum number of results to be returned. Ignored if negative or {@code null}.
+     * @return a non-null stream of {@link IdentityProviderModel}s that match the search criteria.
+     */
+    Stream<IdentityProviderMapperModel> getMappersStream(Map<String, String> options, Integer first, Integer max);
+
+    /**
+     * Returns identity provider mappers by the provided alias as a stream.
+     * @param identityProviderAlias {@code String} Identity provider alias to filter results.
+     * @return Stream of {@link IdentityProviderMapperModel} Never returns {@code null}.
+     */
+    Stream<IdentityProviderMapperModel> getMappersByAliasStream(String identityProviderAlias);
+}
+
+
+===== FILE services/src/main/java/org/keycloak/organization/forms/login/freemarker/model/OrganizationAwareIdentityProviderBean.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.organization.forms.login.freemarker.model;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Predicate;
+
+import org.keycloak.forms.login.freemarker.model.IdentityProviderBean;
+import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.OrganizationModel;
+import org.keycloak.organization.utils.Organizations;
+
+import static org.keycloak.models.IdentityProviderStorageProvider.FetchMode.ALL;
+import static org.keycloak.models.IdentityProviderStorageProvider.FetchMode.ORG_ONLY;
+import static org.keycloak.models.IdentityProviderStorageProvider.FetchMode.REALM_ONLY;
+
+public class OrganizationAwareIdentityProviderBean extends IdentityProviderBean {
+
+    private final OrganizationModel organization;
+    private final boolean onlyRealmBrokers;
+    private final boolean onlyOrganizationBrokers;
+
+    public OrganizationAwareIdentityProviderBean(IdentityProviderBean delegate) {
+        this(delegate, false);
+    }
+
+    public OrganizationAwareIdentityProviderBean(IdentityProviderBean delegate,  boolean onlyOrganizationBrokers) {
+        this(delegate, onlyOrganizationBrokers, false);
+    }
+
+    public OrganizationAwareIdentityProviderBean(IdentityProviderBean delegate, boolean onlyOrganizationBrokers, boolean onlyRealmBrokers) {
+        super(delegate.getSession(), delegate.getRealm(), delegate.getBaseURI(), delegate.getFlowContext());
+        this.organization = Organizations.resolveOrganization(super.session);
+        this.onlyRealmBrokers = onlyRealmBrokers;
+        this.onlyOrganizationBrokers = onlyOrganizationBrokers;
+    }
+
+    @Override
+    protected List<IdentityProvider> searchForIdentityProviders(String existingIDP) {
+        if (onlyRealmBrokers) {
+            // we only want the realm-level IDPs - i.e. those not associated with any orgs.
+            return session.identityProviders().getForLogin(REALM_ONLY, null)
+                    .filter(idp -> !Objects.equals(existingIDP, idp.getAlias()))
+                    .map(idp -> createIdentityProvider(this.realm, this.baseURI, idp))
+                    .sorted(IDP_COMPARATOR_INSTANCE).toList();
+        }
+        if (onlyOrganizationBrokers) {
+            // we already have the organization, just fetch the organization's public enabled IDPs.
+            if (this.organization != null) {
+                return organization.getIdentityProviders()
+                        .filter(idp -> idp.isEnabled() && !idp.isLinkOnly() && !idp.isHideOnLogin()
+                                && Boolean.parseBoolean(idp.getConfig().get(OrganizationModel.BROKER_PUBLIC)))
+                        .filter(idp -> !Objects.equals(existingIDP, idp.getAlias()))
+                        .map(idp -> createIdentityProvider(super.realm, super.baseURI, idp))
+                        .sorted(IDP_COMPARATOR_INSTANCE).toList();
+            }
+            // we don't have a specific organization - fetch public enabled IDPs linked to any org.
+            return session.identityProviders().getForLogin(ORG_ONLY, null)
+                    .filter(idp -> idp.isEnabled() && !Objects.equals(existingIDP, idp.getAlias())) // re-check isEnabled as idp might have been wrapped.
+                    .map(idp -> createIdentityProvider(this.realm, this.baseURI, idp))
+                    .sorted(IDP_COMPARATOR_INSTANCE).toList();
+        }
+        return session.identityProviders().getForLogin(ALL, this.organization != null ? this.organization.getId() : null)
+                .filter(idp -> idp.isEnabled() && !Objects.equals(existingIDP, idp.getAlias())) // re-check isEnabled as idp might have been wrapped.
+                .map(idp -> createIdentityProvider(this.realm, this.baseURI, idp))
+                .sorted(IDP_COMPARATOR_INSTANCE).toList();
+    }
+
+    @Override
+    protected Predicate<IdentityProviderModel> federatedProviderPredicate() {
+        // use the predicate from the superclass combined with the organization filter.
+        return super.federatedProviderPredicate().and(idp -> {
+            if (onlyRealmBrokers) {
+                return idp.getOrganizationId() == null;
+            } else if (onlyOrganizationBrokers) {
+                return isPublicOrganizationBroker(idp);
+            } else {
+                return idp.getOrganizationId() == null || isPublicOrganizationBroker(idp);
+            }
+        });
+    }
+
+    private boolean isPublicOrganizationBroker(IdentityProviderModel idp) {
+
+        if (idp.getOrganizationId() == null) {
+            return false;
+        }
+        if (organization != null && !Objects.equals(organization.getId(),idp.getOrganizationId())) {
+            return false;
+        }
+        return Boolean.parseBoolean(idp.getConfig().getOrDefault(OrganizationModel.BROKER_PUBLIC, Boolean.FALSE.toString()));
+    }
+}
+
+
+===== FILE testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/organization/cache/OrganizationCacheTest.java (after PR) =====
+/*
+ * Copyright 2024 Red Hat, Inc. and/or its affiliates
+ * and other contributors as indicated by the @author tags.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.keycloak.testsuite.organization.cache;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.keycloak.models.cache.infinispan.idp.InfinispanIdentityProviderStorageProvider.cacheKeyForLogin;
+import static org.keycloak.models.cache.infinispan.idp.InfinispanIdentityProviderStorageProvider.cacheKeyOrgId;
+import static org.keycloak.models.cache.infinispan.organization.InfinispanOrganizationProvider.cacheKeyOrgMemberCount;
+
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.keycloak.common.Profile.Feature;
+import org.keycloak.models.IdentityProviderStorageProvider;
+import org.keycloak.models.IdentityProviderStorageProvider.FetchMode;
+import org.keycloak.models.OrganizationDomainModel;
+import org.keycloak.models.OrganizationModel;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.cache.CacheRealmProvider;
+import org.keycloak.models.cache.infinispan.RealmCacheSession;
+import org.keycloak.models.cache.infinispan.CachedCount;
+import org.keycloak.models.cache.infinispan.idp.IdentityProviderListQuery;
+import org.keycloak.organization.OrganizationProvider;
+import org.keycloak.representations.idm.IdentityProviderRepresentation;
+import org.keycloak.representations.idm.OrganizationDomainRepresentation;
+import org.keycloak.representations.idm.OrganizationRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
+import org.keycloak.testsuite.organization.admin.AbstractOrganizationTest;
+import org.keycloak.testsuite.runonserver.RunOnServer;
+
+@EnableFeature(Feature.ORGANIZATION)
+public class OrganizationCacheTest extends AbstractOrganizationTest {
+
+    @Before
+    public void onBefore() {
+        createOrganization("orga");
+        createOrganization("orgb");
+    }
+
+    @After
+    public void onAfter() {
+        List<UserRepresentation> users = testRealm().users().search("member");
+
+        if (!users.isEmpty()) {
+            UserRepresentation member = users.get(0);
+            testRealm().users().get(member.getId()).remove();
+        }
+    }
+
+    @Test
+    public void testGetByDomain() {
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel acme = orgProvider.getByDomainName("orga.org");
+            assertNotNull(acme);
+            acme.setDomains(Set.of(new OrganizationDomainModel("acme.org")));
+        });
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel acme = orgProvider.getByDomainName("orga.org");
+            assertNull(acme);
+            acme = orgProvider.getByDomainName("acme.org");
+            assertNotNull(acme);
+        });
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel acme = orgProvider.getByDomainName("acme.org");
+            assertNotNull(acme);
+            orgProvider.remove(acme);
+        });
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel acme = orgProvider.getByDomainName("acme.org");
+            assertNull(acme);
+        });
+    }
+
+    @Test
+    public void testGetByMember() {
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orga = orgProvider.getByDomainName("orga.org");
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().addUser(realm, "member");
+            member.setEnabled(true);
+            orgProvider.addMember(orga, member);
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            orgProvider.addMember(orgb, member);
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            Stream<OrganizationModel> memberOf = orgProvider.getByMember(member);
+            assertEquals(2, memberOf.count());
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orga = orgProvider.getByDomainName("orga.org");
+            orgProvider.remove(orga);
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            Stream<OrganizationModel> memberOf = orgProvider.getByMember(member);
+            assertEquals(1, memberOf.count());
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            orgProvider.removeMember(orgb, member);
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            Stream<OrganizationModel> memberOf = orgProvider.getByMember(member);
+            assertEquals(0, memberOf.count());
+        });
+    }
+
+    @Test
+    public void testGetByMemberId() {
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orga = orgProvider.getByDomainName("orga.org");
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().addUser(realm, "member");
+            member.setEnabled(true);
+            orgProvider.addMember(orga, member);
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            orgProvider.addMember(orgb, member);
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel org = orgProvider.getByDomainName("orga.org");
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            UserModel memberOf = orgProvider.getMemberById(org, member.getId());
+            assertNotNull(memberOf);
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel org = orgProvider.getByDomainName("orga.org");
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            orgProvider.removeMember(org, member);
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orga = orgProvider.getByDomainName("orga.org");
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            assertNull(orgProvider.getMemberById(orga, member.getId()));
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            assertNotNull(orgProvider.getMemberById(orgb, member.getId()));
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            assertEquals(1, orgProvider.getByMember(member).count());
+            orgProvider.remove(orgb);
+        });
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().getUserByUsername(realm, "member");
+            assertEquals(0, orgProvider.getByMember(member).count());
+        });
+    }
+
+    @Test
+    public void testMembersCount() {
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            RealmModel realm = session.getContext().getRealm();
+            UserModel member = session.users().addUser(realm, "member");
+            member.setEnabled(true);
+            orgProvider.addMember(orgb, member);
+
+            String cachedKey = cacheKeyOrgMemberCount(realm, orgb);
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+            CachedCount cached = realmCache.getCache().get(cachedKey, CachedCount.class);
+
+            // initially members count is not cached
+            assertNull(cached);
+
+            // members count is cached after first call of getMembersCount()
+            long membersCount = orgProvider.getMembersCount(orgb);
+            assertEquals(1, membersCount);
+            cached = realmCache.getCache().get(cachedKey, CachedCount.class);
+            assertNotNull(cached);
+            assertEquals(1, cached.getCount());
+
+            UserModel user = session.users().addUser(realm, "another-member");
+            user.setEnabled(true);
+            orgProvider.addMember(orgb, user);
+        });
+
+        // addMember invalidates cached members count
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            RealmModel realm = session.getContext().getRealm();
+
+            String cachedKey = cacheKeyOrgMemberCount(realm, orgb);
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+            CachedCount cached = realmCache.getCache().get(cachedKey, CachedCount.class);
+
+            assertNull(cached);
+            assertEquals(2, orgProvider.getMembersCount(orgb));
+
+            cached = realmCache.getCache().get(cachedKey, CachedCount.class);
+            assertNotNull(cached);
+            assertEquals(2, cached.getCount());
+
+            orgProvider.removeMember(orgb, session.users().getUserByUsername(realm, "another-member"));
+        });
+
+        // removeMember invalidates cached members count
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            RealmModel realm = session.getContext().getRealm();
+
+            String cachedKey = cacheKeyOrgMemberCount(realm, orgb);
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+            CachedCount cached = realmCache.getCache().get(cachedKey, CachedCount.class);
+
+            assertNull(cached);
+            assertEquals(1, orgProvider.getMembersCount(orgb));
+
+            cached = realmCache.getCache().get(cachedKey, CachedCount.class);
+            assertNotNull(cached);
+            assertEquals(1, cached.getCount());
+
+            session.users().removeUser(realm, session.users().getUserByUsername(realm, "member"));
+        });
+
+        // remove user from the realm invalidates cached members count
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel orgb = orgProvider.getByDomainName("orgb.org");
+            RealmModel realm = session.getContext().getRealm();
+
+            String cachedKey = cacheKeyOrgMemberCount(realm, orgb);
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+            CachedCount cached = realmCache.getCache().get(cachedKey, CachedCount.class);
+
+            assertNull(cached);
+            assertEquals(0, orgProvider.getMembersCount(orgb));
+
+            cached = realmCache.getCache().get(cachedKey, CachedCount.class);
+            assertNotNull(cached);
+            assertEquals(0, cached.getCount());
+        });
+    }
+
+    @Test
+    public void testCacheIDPByOrg() {
+        IdentityProviderRepresentation idpRep = testRealm().identityProviders().get("orga-identity-provider").toRepresentation();
+        idpRep.setInternalId(null);
+        idpRep.setOrganizationId(null);
+        idpRep.getConfig().remove(OrganizationModel.ORGANIZATION_DOMAIN_ATTRIBUTE);
+        idpRep.getConfig().put(OrganizationModel.BROKER_PUBLIC, Boolean.TRUE.toString());
+
+        for (int i = 0; i < 10; i++) {
+            final String alias = "org-idp-" + i;
+            idpRep.setAlias(alias);
+            testRealm().identityProviders().create(idpRep).close();
+            getCleanup().addCleanup(testRealm().identityProviders().get("alias")::remove);
+        }
+
+        String orgaId = testRealm().organizations().getAll().get(0).getId();
+        String orgbId = testRealm().organizations().getAll().get(1).getId();
+
+        for (int i = 0; i < 5; i++) {
+            final String aliasA = "org-idp-" + i;
+            final String aliasB = "org-idp-" + (i + 5);
+            testRealm().organizations().get(orgaId).identityProviders().addIdentityProvider(aliasA);
+            testRealm().organizations().get(orgbId).identityProviders().addIdentityProvider(aliasB);
+        }
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            IdentityProviderStorageProvider idpProvider = session.getProvider(IdentityProviderStorageProvider.class);
+            RealmModel realm = session.getContext().getRealm();
+
+            String cachedKeyA = cacheKeyOrgId(realm, orgaId);
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+            IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cachedKeyA, IdentityProviderListQuery.class);
+            assertNull(identityProviderListQuery);
+            String cachedKeyB = cacheKeyOrgId(realm, orgbId);
+            identityProviderListQuery = realmCache.getCache().get(cachedKeyB, IdentityProviderListQuery.class);
+            assertNull(identityProviderListQuery);
+
+
+            idpProvider.getByOrganization(orgaId, null, null);
+            identityProviderListQuery = realmCache.getCache().get(cachedKeyA, IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(6, identityProviderListQuery.getIDPs("-1.-1").size());
+
+            idpProvider.getByOrganization(orgbId, 0, 2);
+            idpProvider.getByOrganization(orgbId, 2, 6);
+            identityProviderListQuery = realmCache.getCache().get(cachedKeyB, IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(2, identityProviderListQuery.getIDPs("0.2").size());
+            assertEquals(4, identityProviderListQuery.getIDPs("2.6").size());
+        });
+
+        // update orga which should invalidate getByOrganization IDP cache
+        OrganizationRepresentation rep = testRealm().organizations().get(orgaId).toRepresentation();
+        OrganizationDomainRepresentation orgDomainRep = new OrganizationDomainRepresentation();
+        orgDomainRep.setName("orgaa.org");
+        rep.addDomain(orgDomainRep);
+        testRealm().organizations().get(orgaId).update(rep).close();
+
+        // update an IDP that is associated with orgb, that should invalidate getByOrganization IDP cache
+        idpRep = testRealm().identityProviders().get("org-idp-5").toRepresentation();
+        idpRep.setDisplayName("something");
+        testRealm().identityProviders().get("org-idp-5").update(idpRep);
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            IdentityProviderStorageProvider idpProvider = session.getProvider(IdentityProviderStorageProvider.class);
+            RealmModel realm = session.getContext().getRealm();
+
+            String cachedKeyA = cacheKeyOrgId(realm, orgaId);
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+            IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cachedKeyA, IdentityProviderListQuery.class);
+            assertNull(identityProviderListQuery);
+
+            String cachedKeyB = cacheKeyOrgId(realm, orgbId);
+            identityProviderListQuery = realmCache.getCache().get(cachedKeyB, IdentityProviderListQuery.class);
+            assertNull(identityProviderListQuery);
+        });
+    }
+
+    @Test
+    public void testCacheIDPForLogin() {
+        // create 20 providers, and associate 10 of them with an organization.
+        for (int i = 0; i < 20; i++) {
+            IdentityProviderRepresentation idpRep = new IdentityProviderRepresentation();
+            idpRep.setAlias("idp-alias-" + i);
+            idpRep.setEnabled((i % 2) == 0); // half of the IDPs will be disabled and won't qualify for login.
+            idpRep.setDisplayName("Broker " + i);
+            idpRep.setProviderId("keycloak-oidc");
+            if (i >= 10)
+                idpRep.getConfig().put(OrganizationModel.BROKER_PUBLIC, Boolean.TRUE.toString());
+            testRealm().identityProviders().create(idpRep).close();
+            getCleanup().addCleanup(testRealm().identityProviders().get("alias")::remove);
+        }
+
+        String orgaId = testRealm().organizations().getAll().get(0).getId();
+        for (int i = 10; i < 20; i++) {
+            testRealm().organizations().get(orgaId).identityProviders().addIdentityProvider("idp-alias-" + i);
+        }
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            RealmModel realm = session.getContext().getRealm();
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+
+            // check all caches for login don't exist yet
+            for (FetchMode fetchMode : IdentityProviderStorageProvider.FetchMode.values()) {
+                String cachedKey = cacheKeyForLogin(realm, fetchMode);
+                IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cachedKey, IdentityProviderListQuery.class);
+                assertNull(identityProviderListQuery);
+            }
+
+            // perform some login IDP searches and ensure they are cached.
+            session.identityProviders().getForLogin(FetchMode.REALM_ONLY, null);
+            IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.REALM_ONLY), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(5, identityProviderListQuery.getIDPs("").size());
+
+            session.identityProviders().getForLogin(FetchMode.ORG_ONLY, orgaId);
+            identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.ORG_ONLY), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(5, identityProviderListQuery.getIDPs(orgaId).size());
+
+            session.identityProviders().getForLogin(FetchMode.ALL, orgaId);
+            identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.ALL), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(10, identityProviderListQuery.getIDPs(orgaId).size());
+        });
+
+        // 1- add/remove IDPs that are not available for login - none of these operations should invalidate the login caches.
+        IdentityProviderRepresentation idpRep = new IdentityProviderRepresentation();
+        idpRep.setAlias("idp-alias-" + 20);
+        idpRep.setEnabled(true);
+        idpRep.setHideOnLogin(true); // this will make the new IDP not available for login.
+        idpRep.setDisplayName("Broker " + 20);
+        idpRep.setProviderId("keycloak-oidc");
+        testRealm().identityProviders().create(idpRep).close();
+        getCleanup().addCleanup(testRealm().identityProviders().get("alias")::remove);
+
+        // remove one IDP that was not available for login.
+        testRealm().identityProviders().get("idp-alias-1").remove();
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            RealmModel realm = session.getContext().getRealm();
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+
+            // check all caches for login are still there.
+            for (FetchMode fetchMode : IdentityProviderStorageProvider.FetchMode.values()) {
+                String cachedKey = cacheKeyForLogin(realm, fetchMode);
+                IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cachedKey, IdentityProviderListQuery.class);
+                assertNotNull(identityProviderListQuery);
+            }
+        });
+
+        // 2- update a couple of idps (one not available for login, one available), but don't change their login-availability status
+        // none of these operations should invalidate the login caches.
+        idpRep = testRealm().identityProviders().get("idp-alias-20").toRepresentation();
+        idpRep.getConfig().put("somekey", "somevalue");
+        idpRep.setTrustEmail(true);
+        testRealm().identityProviders().get("idp-alias-20").update(idpRep); // should still be unavailable for login
+
+        idpRep = testRealm().identityProviders().get("idp-alias-0").toRepresentation();
+        idpRep.getConfig().put("somekey", "somevalue");
+        idpRep.setTrustEmail(true);
+        testRealm().identityProviders().get("idp-alias-0").update(idpRep); // should still be available for login
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            RealmModel realm = session.getContext().getRealm();
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+
+            // check all caches for login are still there.
+            for (FetchMode fetchMode : IdentityProviderStorageProvider.FetchMode.values()) {
+                String cachedKey = cacheKeyForLogin(realm, fetchMode);
+                IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cachedKey, IdentityProviderListQuery.class);
+                assertNotNull(identityProviderListQuery);
+            }
+        });
+
+        // 3- update an IDP, changing the availability for login - this should invalidate the caches.
+        idpRep = testRealm().identityProviders().get("idp-alias-20").toRepresentation();
+        idpRep.setHideOnLogin(false);
+        testRealm().identityProviders().get("idp-alias-20").update(idpRep);
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            RealmModel realm = session.getContext().getRealm();
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+
+            // check all caches have been cleared.
+            for (FetchMode fetchMode : IdentityProviderStorageProvider.FetchMode.values()) {
+                String cachedKey = cacheKeyForLogin(realm, fetchMode);
+                IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cachedKey, IdentityProviderListQuery.class);
+                assertNull(identityProviderListQuery);
+            }
+
+            // re-do searches to populate the caches again and check the updated results.
+            session.identityProviders().getForLogin(FetchMode.REALM_ONLY, null);
+            IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.REALM_ONLY), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(6, identityProviderListQuery.getIDPs("").size());
+
+            session.identityProviders().getForLogin(FetchMode.ORG_ONLY, orgaId);
+            identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.ORG_ONLY), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(5, identityProviderListQuery.getIDPs(orgaId).size());
+
+            session.identityProviders().getForLogin(FetchMode.ALL, orgaId);
+            identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.ALL), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(11, identityProviderListQuery.getIDPs(orgaId).size());
+
+        });
+
+        // 4- finally, change one of the realm-level login IDPs, linking it to an org - although it still qualifies for login, it is now
+        // linked to an org, which should invalidate all login caches.
+        idpRep = testRealm().identityProviders().get("idp-alias-20").toRepresentation();
+        idpRep.getConfig().put(OrganizationModel.BROKER_PUBLIC, Boolean.TRUE.toString());
+        testRealm().identityProviders().get("idp-alias-20").update(idpRep);
+        testRealm().organizations().get(orgaId).identityProviders().addIdentityProvider("idp-alias-20");
+
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            RealmModel realm = session.getContext().getRealm();
+            RealmCacheSession realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+
+            // check all caches have been cleared.
+            for (FetchMode fetchMode : IdentityProviderStorageProvider.FetchMode.values()) {
+                String cachedKey = cacheKeyForLogin(realm, fetchMode);
+                IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cachedKey, IdentityProviderListQuery.class);
+                assertNull(identityProviderListQuery);
+            }
+
+            // re-do searches to populate the caches again and check the updated results.
+            session.identityProviders().getForLogin(FetchMode.REALM_ONLY, null);
+            IdentityProviderListQuery identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.REALM_ONLY), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(5, identityProviderListQuery.getIDPs("").size());
+
+            session.identityProviders().getForLogin(FetchMode.ORG_ONLY, orgaId);
+            identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.ORG_ONLY), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(6, identityProviderListQuery.getIDPs(orgaId).size());
+
+            session.identityProviders().getForLogin(FetchMode.ALL, orgaId);
+            identityProviderListQuery = realmCache.getCache().get(cacheKeyForLogin(realm, FetchMode.ALL), IdentityProviderListQuery.class);
+            assertNotNull(identityProviderListQuery);
+            assertEquals(11, identityProviderListQuery.getIDPs(orgaId).size());
+
+        });
+    }
+}

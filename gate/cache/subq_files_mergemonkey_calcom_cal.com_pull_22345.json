@@ -1,0 +1,1 @@
+{"Dead code branches in getBaseConditions - authConditions is always truthy because getAuthorizationConditions() returns Promise<Prisma.Sql> which is always a truthy object (returns NOTHING_CONDITION even in failure cases), making the else if (filterConditions) and else branches unreachable": 0.7684242725372314}

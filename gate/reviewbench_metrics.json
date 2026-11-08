@@ -1,0 +1,23 @@
+{
+  "scope": "public sample; pooled producer-labeled findings, not complete agent runs",
+  "failures": [],
+  "prs": 23,
+  "counts": {
+    "reviewbench:attempts": 23,
+    "reviewbench:successes": 23
+  },
+  "rows": [
+    {
+      "producer": "llm_review:gpt-4o",
+      "baseline_retention_f1": 0.13861386138613863,
+      "heldout_gain": -0.04442335798268002,
+      "findings": 94
+    },
+    {
+      "producer": "llm_review:gemini-2.5-pro",
+      "baseline_retention_f1": 0.49557522123893805,
+      "heldout_gain": 0.027352472089314184,
+      "findings": 85
+    }
+  ]
+}

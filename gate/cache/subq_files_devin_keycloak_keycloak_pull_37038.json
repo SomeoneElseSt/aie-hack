@@ -1,0 +1,1 @@
+{"GroupPermissionsV2.canManage() incorrectly grants manage access to users with only VIEW permission - the method checks for both VIEW and MANAGE scopes but should only check for MANAGE scope, causing privilege escalation where users with only view permission can perform management operations like creating top-level groups": 0.9810464978218079}

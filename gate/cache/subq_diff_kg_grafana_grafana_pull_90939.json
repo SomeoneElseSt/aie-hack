@@ -1,0 +1,1 @@
+{"Incomplete double-checked locking implementation - missing second check after acquiring write lock to verify entryPointAssetsCache is still nil before redundant computation": 0.8453156352043152, "Typo in error message: 'asssets-manifest' should be 'assets-manifest'": 0.050466712564229965}

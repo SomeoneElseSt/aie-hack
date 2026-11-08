@@ -1,0 +1,25 @@
+{
+  "validation_raw_response_matches": 126,
+  "test_raw_response_matches": 359,
+  "test_correct": 308,
+  "independent_rank_auroc": 0.9159892509237487,
+  "data_sha256": {
+    "test.jsonl": "d320ae1ca0e86c0cc98003f638b3c961154d115e50840cfb04787111298ce92d",
+    "validation.jsonl": "db4168a8e31a318f11e121d022b6e73c6797a5237588891572a2ae3bc5e73eef"
+  },
+  "anthropic_claude-sonnet-4-5-20250929": {
+    "complete_candidate_coverage": true,
+    "independent_coderabbit_fold_gains": [
+      0.10190659178244155,
+      0.14515657009072286
+    ]
+  },
+  "openai_gpt-5.2": {
+    "complete_candidate_coverage": true,
+    "independent_coderabbit_fold_gains": [
+      0.10852713178294576,
+      0.1618578465869106
+    ]
+  },
+  "reviewbench_raw_response_matches": 179
+}

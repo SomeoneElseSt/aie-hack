@@ -1,0 +1,1 @@
+{"isConditionalPasskeysEnabled() now requires user != null, so when no user is selected (initial login) it always returns false and webauthnAuth.fillContextForm() is never called, which suppresses the WebAuthn challenge/conditional UI for discoverable/external passkeys on first login, breaking passkey sign-in for initial logins": 0.6597145795822144}

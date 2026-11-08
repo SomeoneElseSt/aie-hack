@@ -1,0 +1,1 @@
+{"Test patches time.sleep to a no-op but later relies on time.sleep(0.1) to give asynchronous flusher work time to complete, causing the test to be racey/flaky because the sleep returns instantly and flusher threads never get a guaranteed scheduling window": 0.9203947186470032}

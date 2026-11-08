@@ -1,0 +1,1 @@
+{"Test has race condition: reader thread not joined before assertion - main thread sets deletedAll.set(true) and immediately asserts caughtExceptions is empty without joining the reader thread, which may still be mid-iteration or about to add an exception, making the test flaky": 0.9724715948104858}

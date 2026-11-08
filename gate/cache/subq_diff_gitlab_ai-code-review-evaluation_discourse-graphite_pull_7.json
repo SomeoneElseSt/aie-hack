@@ -1,0 +1,1 @@
+{"The light-mode value was changed from $lightness: 30% to $lightness: 70%, which will make the username link in embedded/expanded posts significantly more washed out in light mode": 0.7091530561447144, "The dark-mode value is inconsistent with the complementary pattern used throughout this MR (light% + dark% = 100%): if light is 30%, dark should be 70%": 0.2511596977710724}

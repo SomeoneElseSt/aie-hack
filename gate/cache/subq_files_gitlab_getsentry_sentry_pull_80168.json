@@ -1,0 +1,1 @@
+{"MetricAlertDetectorHandler extends StatefulDetectorHandler but only has `pass` in the body, missing implementations of required abstract methods (counter_names, get_dedupe_value, get_group_key_values, build_occurrence_and_event_data), which will cause TypeError at runtime when instantiated": 0.9642519354820251}

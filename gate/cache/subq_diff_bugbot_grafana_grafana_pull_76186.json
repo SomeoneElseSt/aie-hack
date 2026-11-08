@@ -1,0 +1,1 @@
+{"TestLogger.FromContext method returns a new TestLogger instance via NewTestLogger() instead of returning the receiver or a logger that shares state, causing logged data to be written to an orphan instance that is immediately discarded, making it impossible to verify that logging occurred during tests": 0.9327999949455261}

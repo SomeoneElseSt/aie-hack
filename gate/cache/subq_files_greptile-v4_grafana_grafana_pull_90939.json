@@ -1,0 +1,1 @@
+{"Double-checked locking pattern is incomplete: after acquiring the write lock, the code does not re-check whether entryPointAssetsCache was already populated by another goroutine, causing all goroutines that observed a nil cache to redundantly read from disk/CDN and overwrite the cache under concurrent load at startup": 0.9690861105918884}

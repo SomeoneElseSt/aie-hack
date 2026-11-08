@@ -1,0 +1,951 @@
+diff --git a/docs/UserGuide.md b/docs/UserGuide.md
+index 32db47ee152..8d9929a0ad5 100644
+--- a/docs/UserGuide.md
++++ b/docs/UserGuide.md
+@@ -337,7 +337,7 @@ Records a date-bound note that will be persisted in future milestones. Currently
+ Format: `note n/NOTE d/DATE` (DATE required)
+ 
+ Examples:
+-* `note n/Great place d/2026-03-24`
++* `note n/Involves lots of walking. Bring extra water bottles. d/2026-03-24`
+ 
+ ### `note d-` - Deleting a note
+ 
+@@ -435,7 +435,7 @@ Format: `exit`
+ | **Edit**        | `edit INDEX [n/NAME] [p/PHONE_NUMBER] [e/EMAIL] [a/ADDRESS] [c/POSTAL_CODE] [d/DATE]… [d+/DATE]… [d-/DATE]… [t/TAG]… [t+/TAG]… [t-/TAG]…` | `edit 2 n/Happy Bistro e/contact@happybistro.com d+/e-friday`             |
+ | **Find**        | `find [KEYWORD] [MORE_KEYWORDS] [n/NAME] [p/PHONE] [e/EMAIL] [a/ADDRESS] [t/TAG]… [d/DATE]…`                                              | `find n/Cafe t/Halal d/3/4/26`                                            |
+ | **List**        | `list`                                                                                                                                    | `list`                                                                    |
+-| **Note**        | `note n/NOTE d/DATE`                                                                                                                      | `note n/Great place d/2026-03-24`                                         |
++| **Note**        | `note n/NOTE d/DATE`                                                                                                                      | `note n/Involves lots of walking. Bring extra water bottles. d/2026-03-24` |
+ | **Delete Note** | `note d-/DATE`                                                                                                                            | `note d-/2026-03-24`                                                      |
+ | **Plan**        | `plan DATE` or `plan`                                                                                                                     | `plan d/23/9`                                                             |
+ | **Shortcut**    | `shortcut set ALIAS COMMAND_WORD` / `shortcut remove ALIAS` / `shortcut list`                                                             | `shortcut set a add`, `shortcut remove a`, `shortcut list`                |
+diff --git a/src/main/java/seedu/address/logic/Logic.java b/src/main/java/seedu/address/logic/Logic.java
+index ca396f57744..792b049d0fb 100644
+--- a/src/main/java/seedu/address/logic/Logic.java
++++ b/src/main/java/seedu/address/logic/Logic.java
+@@ -2,6 +2,7 @@
+ 
+ import java.nio.file.Path;
+ 
++import javafx.beans.value.ObservableValue;
+ import javafx.collections.ObservableList;
+ import seedu.address.commons.core.GuiSettings;
+ import seedu.address.commons.core.Theme;
+@@ -10,6 +11,7 @@
+ import seedu.address.logic.parser.exceptions.ParseException;
+ import seedu.address.model.ReadOnlyAddressBook;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
+ 
+ /**
+  * API of the Logic component
+@@ -37,6 +39,9 @@ public interface Logic {
+     /** Returns an unmodifiable view of the locations to be displayed in the planner */
+     ObservableList<Location> getPlannerLocationList();
+ 
++    /** Returns an observable property pointing to the current active note in the planner */
++    ObservableValue<NoteContent> getPlannerNoteProperty();
++
+     /**
+      * Returns the user prefs' address book file path.
+      */
+diff --git a/src/main/java/seedu/address/logic/LogicManager.java b/src/main/java/seedu/address/logic/LogicManager.java
+index ac058f9ebbd..25d83439294 100644
+--- a/src/main/java/seedu/address/logic/LogicManager.java
++++ b/src/main/java/seedu/address/logic/LogicManager.java
+@@ -5,6 +5,7 @@
+ import java.nio.file.Path;
+ import java.util.logging.Logger;
+ 
++import javafx.beans.value.ObservableValue;
+ import javafx.collections.ObservableList;
+ import seedu.address.commons.core.GuiSettings;
+ import seedu.address.commons.core.LogsCenter;
+@@ -18,6 +19,7 @@
+ import seedu.address.model.Model;
+ import seedu.address.model.ReadOnlyAddressBook;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
+ import seedu.address.storage.Storage;
+ 
+ /**
+@@ -141,6 +143,11 @@ public ObservableList<Location> getPlannerLocationList() {
+         return model.getPlannerLocationList();
+     }
+ 
++    @Override
++    public ObservableValue<NoteContent> getPlannerNoteProperty() {
++        return model.getPlannerNoteProperty();
++    }
++
+     @Override
+     public Path getAddressBookFilePath() {
+         return model.getAddressBookFilePath();
+diff --git a/src/main/java/seedu/address/logic/commands/NoteCommand.java b/src/main/java/seedu/address/logic/commands/NoteCommand.java
+index 873d02c0df8..02fc9e94b7d 100644
+--- a/src/main/java/seedu/address/logic/commands/NoteCommand.java
++++ b/src/main/java/seedu/address/logic/commands/NoteCommand.java
+@@ -9,19 +9,15 @@
+ import seedu.address.model.location.dates.VisitDate;
+ 
+ /**
+- * Records a note in AddressMe (backend implementation deferred).
++ * Records a note in AddressMe.
+  */
+ public class NoteCommand extends Command {
+ 
+     public static final String COMMAND_WORD = "note";
+ 
+-    public static final String MESSAGE_USAGE = COMMAND_WORD + ": Records or deletes notes in AddressMe "
+-            + "(work in progress).\n"
+-            + "Add format: n/NOTE_CONTENT d/DATE\n"
+-            + "Delete format: d-/DATE\n"
+-            + "\nExamples:\n"
+-            + COMMAND_WORD + " n/Great place d/2026-03-24\n"
+-            + COMMAND_WORD + " d-/2026-03-24";
++    public static final String MESSAGE_USAGE = COMMAND_WORD + ": Records a note in AddressMe.\n"
++            + "Format: n/NOTE_CONTENT d/DATE\n"
++            + "Example: " + COMMAND_WORD + " n/Involves lots of walking. Bring extra water bottles. d/2026-03-24";
+ 
+     public static final String MESSAGE_SUCCESS = "New note recorded: %1$s";
+ 
+@@ -42,11 +38,17 @@ public NoteCommand(NoteContent noteContent, VisitDate date) {
+     public CommandResult execute(Model model) throws CommandException {
+         requireNonNull(model);
+ 
++        model.setNote(date, noteContent);
+         String detail = noteContent.toString() + " (" + date.toString() + ")";
+ 
+         return new CommandResult(String.format(MESSAGE_SUCCESS, detail));
+     }
+ 
++    @Override
++    public boolean isStateMutating() {
++        return true;
++    }
++
+     @Override
+     public boolean equals(Object other) {
+         if (other == this) {
+diff --git a/src/main/java/seedu/address/model/AddressBook.java b/src/main/java/seedu/address/model/AddressBook.java
+index e77ced9e869..a0aea441a64 100644
+--- a/src/main/java/seedu/address/model/AddressBook.java
++++ b/src/main/java/seedu/address/model/AddressBook.java
+@@ -2,12 +2,17 @@
+ 
+ import static java.util.Objects.requireNonNull;
+ 
++import java.util.Collections;
++import java.util.LinkedHashMap;
+ import java.util.List;
++import java.util.Map;
+ 
+ import javafx.collections.ObservableList;
+ import seedu.address.commons.util.ToStringBuilder;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
+ import seedu.address.model.location.UniqueLocationList;
++import seedu.address.model.location.dates.VisitDate;
+ 
+ /**
+  * Wraps all data at the address-book level
+@@ -16,6 +21,7 @@
+ public class AddressBook implements ReadOnlyAddressBook {
+ 
+     private final UniqueLocationList locations;
++    private final Map<VisitDate, NoteContent> notes;
+ 
+     /*
+      * The 'unusual' code block below is a non-static initialization block, sometimes used to avoid duplication
+@@ -26,6 +32,7 @@ public class AddressBook implements ReadOnlyAddressBook {
+      */
+     {
+         locations = new UniqueLocationList();
++        notes = new LinkedHashMap<>();
+     }
+ 
+     public AddressBook() {}
+@@ -55,8 +62,47 @@ public void resetData(ReadOnlyAddressBook newData) {
+         requireNonNull(newData);
+ 
+         setLocations(newData.getLocationList());
++        setNotes(newData.getNoteMap());
+     }
+ 
++    //// note-level operations
++
++    /**
++     * Replaces the contents of the notes map with {@code notes}.
++     */
++    public void setNotes(Map<VisitDate, NoteContent> notes) {
++        requireNonNull(notes);
++        notes.forEach((date, note) -> {
++            requireNonNull(date);
++            requireNonNull(note);
++        });
++        this.notes.clear();
++        this.notes.putAll(notes);
++    }
++
++    /**
++     * Sets a note for the specified date.
++     */
++    public void setNote(VisitDate date, NoteContent note) {
++        requireNonNull(date);
++        requireNonNull(note);
++        notes.put(date, note);
++    }
++
++    /**
++     * Removes the note for the specified date if it exists.
++     */
++    public void removeNote(VisitDate date) {
++        requireNonNull(date);
++        notes.remove(date);
++    }
++
++    @Override
++    public Map<VisitDate, NoteContent> getNoteMap() {
++        return Collections.unmodifiableMap(notes);
++    }
++
++
+     //// location-level operations
+ 
+     /**
+@@ -100,6 +146,7 @@ public void removeLocation(Location key) {
+     public String toString() {
+         return new ToStringBuilder(this)
+                 .add("locations", locations)
++                .add("notes", notes)
+                 .toString();
+     }
+ 
+@@ -120,11 +167,11 @@ public boolean equals(Object other) {
+         }
+ 
+         AddressBook otherAddressBook = (AddressBook) other;
+-        return locations.equals(otherAddressBook.locations);
++        return locations.equals(otherAddressBook.locations) && notes.equals(otherAddressBook.notes);
+     }
+ 
+     @Override
+     public int hashCode() {
+-        return locations.hashCode();
++        return locations.hashCode() + notes.hashCode();
+     }
+ }
+diff --git a/src/main/java/seedu/address/model/Model.java b/src/main/java/seedu/address/model/Model.java
+index d930667160f..57f9d09d794 100644
+--- a/src/main/java/seedu/address/model/Model.java
++++ b/src/main/java/seedu/address/model/Model.java
+@@ -4,10 +4,13 @@
+ import java.time.LocalDate;
+ import java.util.function.Predicate;
+ 
++import javafx.beans.value.ObservableValue;
+ import javafx.collections.ObservableList;
+ import seedu.address.commons.core.GuiSettings;
+ import seedu.address.commons.core.Theme;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
++import seedu.address.model.location.dates.VisitDate;
+ 
+ /**
+  * The API of the Model component.
+@@ -164,8 +167,18 @@ default void redoState() {}
+     void updateFilteredLocationList(Predicate<Location> predicate);
+ 
+     /**
+-     * Updates the planner list to filter by the given {@code daate}.
++     * Updates the planner list to filter by the given {@code date}.
+      * clears the list if {@code date} is null.
+      */
+     void updatePlannerLocationList(LocalDate date);
++
++    /**
++     * Sets a note for the specified visit date.
++     */
++    void setNote(VisitDate date, NoteContent note);
++
++    /**
++     * Returns an observable property pointing to the current active note in the planner.
++     */
++    ObservableValue<NoteContent> getPlannerNoteProperty();
+ }
+diff --git a/src/main/java/seedu/address/model/ModelManager.java b/src/main/java/seedu/address/model/ModelManager.java
+index ff75afd1367..3e415800952 100644
+--- a/src/main/java/seedu/address/model/ModelManager.java
++++ b/src/main/java/seedu/address/model/ModelManager.java
+@@ -5,15 +5,21 @@
+ 
+ import java.nio.file.Path;
+ import java.time.LocalDate;
++import java.util.Map;
+ import java.util.function.Predicate;
+ import java.util.logging.Logger;
+ 
++import javafx.beans.property.ObjectProperty;
++import javafx.beans.property.SimpleObjectProperty;
++import javafx.beans.value.ObservableValue;
+ import javafx.collections.ObservableList;
+ import javafx.collections.transformation.FilteredList;
+ import seedu.address.commons.core.GuiSettings;
+ import seedu.address.commons.core.LogsCenter;
+ import seedu.address.commons.core.Theme;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
++import seedu.address.model.location.dates.VisitDate;
+ import seedu.address.model.location.predicates.VisitDateMatchesKeywordsPredicate;
+ 
+ /**
+@@ -31,6 +37,9 @@ public class ModelManager implements Model {
+     private AppState redoState;
+     private AppState pendingState;
+ 
++    private final ObjectProperty<NoteContent> plannerNote;
++    private LocalDate currentPlannedDate;
++
+     /**
+      * Initializes a ModelManager with the given addressBook, userPrefs and shortcuts.
+      */
+@@ -45,6 +54,9 @@ public ModelManager(ReadOnlyAddressBook addressBook, ReadOnlyUserPrefs userPrefs
+         filteredLocations = new FilteredList<>(this.addressBook.getLocationList());
+         plannerLocations = new FilteredList<>(
+                 this.addressBook.getLocationList()).filtered(PREDICATE_HIDE_ALL_LOCATIONS);
++
++        this.plannerNote = new SimpleObjectProperty<>(null);
++        this.currentPlannedDate = null;
+     }
+ 
+     public ModelManager() {
+@@ -127,6 +139,7 @@ public void removeShortcut(String alias) {
+     @Override
+     public void setAddressBook(ReadOnlyAddressBook addressBook) {
+         this.addressBook.resetData(addressBook);
++        updatePlannerNote();
+     }
+ 
+     @Override
+@@ -235,13 +248,53 @@ public void updateFilteredLocationList(Predicate<Location> predicate) {
+      */
+     @Override
+     public void updatePlannerLocationList(LocalDate date) {
++        currentPlannedDate = date;
+         if (date == null) {
+             plannerLocations.setPredicate(PREDICATE_HIDE_ALL_LOCATIONS);
++            plannerNote.set(null);
+         } else {
+             plannerLocations.setPredicate(new VisitDateMatchesKeywordsPredicate(date));
++            updatePlannerNote();
++        }
++    }
++
++    private void updatePlannerNote() {
++        if (currentPlannedDate == null) {
++            plannerNote.set(null);
++            return;
++        }
++
++        StringBuilder combinedNotes = new StringBuilder();
++        for (Map.Entry<VisitDate, NoteContent> entry : addressBook.getNoteMap().entrySet()) {
++            if (entry.getKey().isOn(currentPlannedDate)) {
++                if (combinedNotes.length() > 0) {
++                    combinedNotes.append("\n\n");
++                }
++                combinedNotes.append(entry.getValue().toString());
++            }
++        }
++
++        if (combinedNotes.length() > 0) {
++            plannerNote.set(new NoteContent(combinedNotes.toString()));
++        } else {
++            plannerNote.set(null);
+         }
+     }
+ 
++    @Override
++    public void setNote(VisitDate date, NoteContent note) {
++        requireAllNonNull(date, note);
++        addressBook.setNote(date, note);
++        if (currentPlannedDate != null && date.isOn(currentPlannedDate)) {
++            updatePlannerNote();
++        }
++    }
++
++    @Override
++    public ObservableValue<NoteContent> getPlannerNoteProperty() {
++        return plannerNote;
++    }
++
+     @Override
+     public boolean equals(Object other) {
+         if (other == this) {
+@@ -257,7 +310,9 @@ public boolean equals(Object other) {
+         return addressBook.equals(otherModelManager.addressBook)
+                 && userPrefs.equals(otherModelManager.userPrefs)
+                 && shortcutMap.equals(otherModelManager.shortcutMap)
+-                && filteredLocations.equals(otherModelManager.filteredLocations);
++                && filteredLocations.equals(otherModelManager.filteredLocations)
++                && (currentPlannedDate == null ? otherModelManager.currentPlannedDate == null
++                        : currentPlannedDate.equals(otherModelManager.currentPlannedDate));
+     }
+ 
+     private void restoreState(AppState state) {
+diff --git a/src/main/java/seedu/address/model/ReadOnlyAddressBook.java b/src/main/java/seedu/address/model/ReadOnlyAddressBook.java
+index 4947a436bac..90365ccdd0c 100644
+--- a/src/main/java/seedu/address/model/ReadOnlyAddressBook.java
++++ b/src/main/java/seedu/address/model/ReadOnlyAddressBook.java
+@@ -1,7 +1,11 @@
+ package seedu.address.model;
+ 
++import java.util.Map;
++
+ import javafx.collections.ObservableList;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
++import seedu.address.model.location.dates.VisitDate;
+ 
+ /**
+  * Unmodifiable view of an address book
+@@ -14,4 +18,10 @@ public interface ReadOnlyAddressBook {
+      */
+     ObservableList<Location> getLocationList();
+ 
++    /**
++     * Returns an unmodifiable map of the scheduled visit dates to their respective global notes.
++     */
++    Map<VisitDate, NoteContent> getNoteMap();
++
++
+ }
+diff --git a/src/main/java/seedu/address/model/location/NoteContent.java b/src/main/java/seedu/address/model/location/NoteContent.java
+index 8e0506b9fec..7cdc0eb1740 100644
+--- a/src/main/java/seedu/address/model/location/NoteContent.java
++++ b/src/main/java/seedu/address/model/location/NoteContent.java
+@@ -15,8 +15,9 @@ public class NoteContent {
+     /*
+      * The first character of the note must not be a whitespace,
+      * otherwise " " (a blank string) becomes a valid input.
++     * Use DOTALL to match newlines as well.
+      */
+-    public static final String VALIDATION_REGEX = "[^\\s].*";
++    public static final String VALIDATION_REGEX = "(?s)[^\\s].*";
+ 
+     public final String value;
+ 
+diff --git a/src/main/java/seedu/address/storage/JsonSerializableAddressBook.java b/src/main/java/seedu/address/storage/JsonSerializableAddressBook.java
+index 8ee9283b5be..36abc6f8b25 100644
+--- a/src/main/java/seedu/address/storage/JsonSerializableAddressBook.java
++++ b/src/main/java/seedu/address/storage/JsonSerializableAddressBook.java
+@@ -1,7 +1,9 @@
+ package seedu.address.storage;
+ 
+ import java.util.ArrayList;
++import java.util.HashMap;
+ import java.util.List;
++import java.util.Map;
+ import java.util.stream.Collectors;
+ 
+ import com.fasterxml.jackson.annotation.JsonCreator;
+@@ -12,6 +14,8 @@
+ import seedu.address.model.AddressBook;
+ import seedu.address.model.ReadOnlyAddressBook;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
++import seedu.address.model.location.dates.VisitDate;
+ 
+ /**
+  * An Immutable AddressBook that is serializable to JSON format.
+@@ -22,13 +26,20 @@ class JsonSerializableAddressBook {
+     public static final String MESSAGE_DUPLICATE_LOCATION = "Locations list contains duplicate location(s).";
+ 
+     private final List<JsonAdaptedLocation> locations = new ArrayList<>();
++    private final Map<String, String> notes = new HashMap<>();
+ 
+     /**
+      * Constructs a {@code JsonSerializableAddressBook} with the given locations.
+      */
+     @JsonCreator
+-    public JsonSerializableAddressBook(@JsonProperty("locations") List<JsonAdaptedLocation> locations) {
+-        this.locations.addAll(locations);
++    public JsonSerializableAddressBook(@JsonProperty("locations") List<JsonAdaptedLocation> locations,
++                                       @JsonProperty("notes") Map<String, String> notes) {
++        if (locations != null) {
++            this.locations.addAll(locations);
++        }
++        if (notes != null) {
++            this.notes.putAll(notes);
++        }
+     }
+ 
+     /**
+@@ -38,6 +49,7 @@ public JsonSerializableAddressBook(@JsonProperty("locations") List<JsonAdaptedLo
+      */
+     public JsonSerializableAddressBook(ReadOnlyAddressBook source) {
+         locations.addAll(source.getLocationList().stream().map(JsonAdaptedLocation::new).collect(Collectors.toList()));
++        source.getNoteMap().forEach((date, note) -> notes.put(date.toDataString(), note.toString()));
+     }
+ 
+     /**
+@@ -54,6 +66,23 @@ public AddressBook toModelType() throws IllegalValueException {
+             }
+             addressBook.addLocation(location);
+         }
++        for (Map.Entry<String, String> entry : notes.entrySet()) {
++            String dateKey = entry.getKey();
++            VisitDate visitDate = VisitDate.of(dateKey);
++            String noteValue = entry.getValue();
++            NoteContent noteContent;
++            if (noteValue == null) {
++                throw new IllegalValueException("Note value is missing for date '" + dateKey + "'. "
++                        + NoteContent.MESSAGE_CONSTRAINTS);
++            }
++            if (NoteContent.isValidNoteContent(noteValue)) {
++                noteContent = new NoteContent(noteValue);
++            } else {
++                throw new IllegalValueException("Invalid note value for date '" + dateKey + "'. "
++                        + NoteContent.MESSAGE_CONSTRAINTS);
++            }
++            addressBook.setNote(visitDate, noteContent);
++        }
+         return addressBook;
+     }
+ 
+diff --git a/src/main/java/seedu/address/ui/MainWindow.java b/src/main/java/seedu/address/ui/MainWindow.java
+index 6690068de4c..8da9dcdc10a 100644
+--- a/src/main/java/seedu/address/ui/MainWindow.java
++++ b/src/main/java/seedu/address/ui/MainWindow.java
+@@ -130,7 +130,7 @@ void fillInnerParts() {
+         locationListPanel = new LocationListPanel(logic.getFilteredLocationList());
+         locationListPanelPlaceholder.getChildren().add(locationListPanel.getRoot());
+ 
+-        plannerListPanel = new PlannerListPanel(logic.getPlannerLocationList());
++        plannerListPanel = new PlannerListPanel(logic.getPlannerLocationList(), logic.getPlannerNoteProperty());
+         plannerPanelPlaceholder.getChildren().add(plannerListPanel.getRoot());
+ 
+         resultDisplay = new ResultDisplay();
+diff --git a/src/main/java/seedu/address/ui/PlannerListPanel.java b/src/main/java/seedu/address/ui/PlannerListPanel.java
+index 03220324942..b125b2153ed 100644
+--- a/src/main/java/seedu/address/ui/PlannerListPanel.java
++++ b/src/main/java/seedu/address/ui/PlannerListPanel.java
+@@ -2,6 +2,7 @@
+ 
+ import java.util.logging.Logger;
+ 
++import javafx.beans.value.ObservableValue;
+ import javafx.collections.ObservableList;
+ import javafx.fxml.FXML;
+ import javafx.scene.control.Label;
+@@ -30,15 +31,20 @@ public class PlannerListPanel extends UiPart<Region> {
+     private Label plannerHeader;
+ 
+     /**
+-     * Creates a {@code LocationListPanel} with the given {@code ObservableList}.
++     * Creates a {@code PlannerListPanel} with the given planner list and planner note observable.
++     *
++     * @param plannerList List of planner locations to display.
++     * @param plannerNote Observable planner note content to display.
+      */
+-    public PlannerListPanel(ObservableList<Location> plannerList) {
++    public PlannerListPanel(ObservableList<Location> plannerList, ObservableValue<NoteContent> plannerNote) {
+         super(FXML);
+         plannerListView.setItems(plannerList);
+         plannerListView.setCellFactory(listView -> new PlannerListPanel.PlannerListViewCell());
+ 
+-        //TODO: REMOVE THIS ONCE NOTE IS IMPLEMENTED CORRTECTLY, THIS IS JUST A PLACEHOLDER
+-        showNote(new NoteContent("TEST"));
++        if (plannerNote.getValue() != null) {
++            showNote(plannerNote.getValue());
++        }
++        plannerNote.addListener((observable, oldValue, newValue) -> showNote(newValue));
+     }
+ 
+     public void setPlannerHeader(String date) {
+diff --git a/src/test/java/seedu/address/logic/LogicManagerTest.java b/src/test/java/seedu/address/logic/LogicManagerTest.java
+index a5fca24f6e3..64ba0caa3e5 100644
+--- a/src/test/java/seedu/address/logic/LogicManagerTest.java
++++ b/src/test/java/seedu/address/logic/LogicManagerTest.java
+@@ -179,6 +179,14 @@ public void execute_shortcutStorageThrowsAdException_commandSucceeds() throws Ex
+         assertCommandSuccessForExceptionFromShortcutStorage(DUMMY_AD_EXCEPTION);
+     }
+ 
++    @Test
++    public void getMethods_success() {
++        assertEquals(model.getAddressBook(), logic.getAddressBook());
++        assertEquals(model.getAddressBookFilePath(), logic.getAddressBookFilePath());
++        assertEquals(model.getGuiSettings(), logic.getGuiSettings());
++        assertEquals(model.getTheme(), logic.getTheme());
++    }
++
+     @Test
+     public void getFilteredLocationList_modifyList_throwsUnsupportedOperationException() {
+         assertThrows(UnsupportedOperationException.class, () -> logic.getFilteredLocationList().remove(0));
+diff --git a/src/test/java/seedu/address/logic/commands/AddCommandTest.java b/src/test/java/seedu/address/logic/commands/AddCommandTest.java
+index 3a2e0e84d3d..1a4304ccdf5 100644
+--- a/src/test/java/seedu/address/logic/commands/AddCommandTest.java
++++ b/src/test/java/seedu/address/logic/commands/AddCommandTest.java
+@@ -15,6 +15,7 @@
+ 
+ import org.junit.jupiter.api.Test;
+ 
++import javafx.beans.value.ObservableValue;
+ import javafx.collections.ObservableList;
+ import seedu.address.commons.core.GuiSettings;
+ import seedu.address.commons.core.Theme;
+@@ -26,6 +27,8 @@
+ import seedu.address.model.ReadOnlyShortcutMap;
+ import seedu.address.model.ReadOnlyUserPrefs;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
++import seedu.address.model.location.dates.VisitDate;
+ import seedu.address.testutil.LocationBuilder;
+ 
+ public class AddCommandTest {
+@@ -213,6 +216,16 @@ public void updateFilteredLocationList(Predicate<Location> predicate) {
+         public void updatePlannerLocationList(LocalDate date) {
+             throw new AssertionError("This method should not be called.");
+         }
++
++        @Override
++        public void setNote(VisitDate date, NoteContent note) {
++            throw new AssertionError("This method should not be called.");
++        }
++
++        @Override
++        public ObservableValue<NoteContent> getPlannerNoteProperty() {
++            throw new AssertionError("This method should not be called.");
++        }
+     }
+ 
+     /**
+diff --git a/src/test/java/seedu/address/logic/commands/NoteCommandTest.java b/src/test/java/seedu/address/logic/commands/NoteCommandTest.java
+index 423b5310f54..348a2fd7748 100644
+--- a/src/test/java/seedu/address/logic/commands/NoteCommandTest.java
++++ b/src/test/java/seedu/address/logic/commands/NoteCommandTest.java
+@@ -2,6 +2,7 @@
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertNotEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
+ import static seedu.address.logic.commands.CommandTestUtil.assertCommandSuccess;
+ 
+ import org.junit.jupiter.api.BeforeEach;
+@@ -29,19 +30,37 @@ public void execute_noteWithDate_success() throws IllegalValueException {
+         NoteCommand command = new NoteCommand(new NoteContent("Great place"), VisitDate.of("2026-03-24"));
+         String expectedMessage = String.format(NoteCommand.MESSAGE_SUCCESS, "Great place (24 Mar 26)");
+ 
++        expectedModel.setNote(VisitDate.of("2026-03-24"), new NoteContent("Great place"));
+         assertCommandSuccess(command, model, expectedMessage, expectedModel);
+     }
+ 
++    @Test
++    public void isStateMutating() throws IllegalValueException {
++        NoteCommand command = new NoteCommand(new NoteContent("Great place"), VisitDate.of("2026-03-24"));
++        assertTrue(command.isStateMutating());
++    }
++
++    @Test
++    public void toStringMethod() throws IllegalValueException {
++        NoteContent note = new NoteContent("Great place");
++        VisitDate date = VisitDate.of("2026-03-24");
++        NoteCommand command = new NoteCommand(note, date);
++        String expected = NoteCommand.class.getCanonicalName() + "{noteContent=" + note + ", date=" + date + "}";
++        assertEquals(expected, command.toString());
++    }
++
+     @Test
+     public void equals() throws IllegalValueException {
+         NoteCommand first = new NoteCommand(new NoteContent("Great place"), VisitDate.of("2026-03-24"));
+         NoteCommand second = new NoteCommand(new NoteContent("Great place"), VisitDate.of("2026-03-24"));
+         NoteCommand third = new NoteCommand(new NoteContent("Different note"), VisitDate.of("2026-03-24"));
++        NoteCommand fourth = new NoteCommand(new NoteContent("Great place"), VisitDate.of("2026-03-25"));
+ 
+         assertEquals(first, first);
+         assertEquals(first, second);
+         assertNotEquals(first, third);
++        assertNotEquals(first, fourth);
+         assertNotEquals(first, null);
+-        assertNotEquals(first, new Object());
++        assertNotEquals(first, 1);
+     }
+ }
+diff --git a/src/test/java/seedu/address/model/AddressBookTest.java b/src/test/java/seedu/address/model/AddressBookTest.java
+index 37e7b80c5cd..c7a005c6526 100644
+--- a/src/test/java/seedu/address/model/AddressBookTest.java
++++ b/src/test/java/seedu/address/model/AddressBookTest.java
+@@ -13,12 +13,16 @@
+ import java.util.Collection;
+ import java.util.Collections;
+ import java.util.List;
++import java.util.Map;
+ 
+ import org.junit.jupiter.api.Test;
+ 
+ import javafx.collections.FXCollections;
+ import javafx.collections.ObservableList;
++import seedu.address.commons.exceptions.IllegalValueException;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
++import seedu.address.model.location.dates.VisitDate;
+ import seedu.address.model.location.exceptions.DuplicateLocationException;
+ import seedu.address.testutil.LocationBuilder;
+ 
+@@ -85,10 +89,41 @@ public void getLocationList_modifyList_throwsUnsupportedOperationException() {
+ 
+     @Test
+     public void toStringMethod() {
+-        String expected = AddressBook.class.getCanonicalName() + "{locations=" + addressBook.getLocationList() + "}";
++        String expected = AddressBook.class.getCanonicalName() + "{locations=" + addressBook.getLocationList()
++                + ", notes=" + addressBook.getNoteMap() + "}";
+         assertEquals(expected, addressBook.toString());
+     }
+ 
++    @Test
++    public void removeNote_nullDate_throwsNullPointerException() {
++        assertThrows(NullPointerException.class, () -> addressBook.removeNote(null));
++    }
++
++    @Test
++    public void removeNote_existingDate_removesNote() throws IllegalValueException {
++        VisitDate date = VisitDate.of("2026-03-24");
++        NoteContent note = new NoteContent("Test Note");
++        addressBook.setNote(date, note);
++        assertTrue(addressBook.getNoteMap().containsKey(date));
++        addressBook.removeNote(date);
++        assertFalse(addressBook.getNoteMap().containsKey(date));
++    }
++
++    @Test
++    public void equals_sameObject_returnsTrue() {
++        assertTrue(addressBook.equals(addressBook));
++    }
++
++    @Test
++    public void equals_notAddressBook_returnsFalse() {
++        assertFalse(addressBook.equals(1));
++    }
++
++    @Test
++    public void hashCodeMethod() {
++        assertEquals(addressBook.hashCode(), addressBook.hashCode());
++    }
++
+     /**
+      * A stub ReadOnlyAddressBook whose locations list can violate interface constraints.
+      */
+@@ -103,6 +138,11 @@ private static class AddressBookStub implements ReadOnlyAddressBook {
+         public ObservableList<Location> getLocationList() {
+             return locations;
+         }
++
++        @Override
++        public Map<VisitDate, NoteContent> getNoteMap() {
++            return Collections.emptyMap();
++        }
+     }
+ 
+ }
+diff --git a/src/test/java/seedu/address/model/ModelManagerTest.java b/src/test/java/seedu/address/model/ModelManagerTest.java
+index 5ea5dd8b52d..82400ac9d74 100644
+--- a/src/test/java/seedu/address/model/ModelManagerTest.java
++++ b/src/test/java/seedu/address/model/ModelManagerTest.java
+@@ -10,12 +10,16 @@
+ 
+ import java.nio.file.Path;
+ import java.nio.file.Paths;
++import java.time.LocalDate;
+ import java.util.Arrays;
+ import java.util.Map;
+ 
+ import org.junit.jupiter.api.Test;
+ 
+ import seedu.address.commons.core.GuiSettings;
++import seedu.address.commons.exceptions.IllegalValueException;
++import seedu.address.model.location.NoteContent;
++import seedu.address.model.location.dates.VisitDate;
+ import seedu.address.model.location.predicates.NameContainsKeywordsPredicate;
+ import seedu.address.testutil.AddressBookBuilder;
+ 
+@@ -130,6 +134,44 @@ public void undoRedoState_singleLevelHistory_success() {
+         assertFalse(modelManager.canRedoState());
+     }
+ 
++    @Test
++    public void setNote_updatesPlannerNote() throws IllegalValueException {
++        VisitDate date = VisitDate.of("2026-03-24");
++        NoteContent note = new NoteContent("Test Note");
++        modelManager.updatePlannerLocationList(LocalDate.of(2026, 3, 24));
++        NoteContent initialPlannerNote = modelManager.getPlannerNoteProperty().getValue();
++        modelManager.setNote(date, note);
++        NoteContent updatedPlannerNote = modelManager.getPlannerNoteProperty().getValue();
++
++        assertFalse(note.equals(initialPlannerNote));
++        assertEquals(note, updatedPlannerNote);
++    }
++
++    @Test
++    public void discardState_clearsPendingState() {
++        modelManager.saveState();
++        modelManager.discardState();
++        modelManager.commitState();
++        assertFalse(modelManager.canUndoState());
++    }
++
++    @Test
++    public void commitState_noPendingState_noChange() {
++        modelManager.commitState();
++        assertFalse(modelManager.canUndoState());
++    }
++
++    @Test
++    public void updatePlannerLocationList_nullDate_clearsPredicate() {
++        modelManager.updatePlannerLocationList(null);
++        assertEquals(0, modelManager.getPlannerLocationList().size());
++    }
++
++    @Test
++    public void equals_differentTypes_returnsFalse() {
++        assertFalse(modelManager.equals(new Object()));
++    }
++
+     @Test
+     public void commitState_noChange_preservesHistory() {
+         modelManager.saveState();
+@@ -220,5 +262,61 @@ public void equals() {
+         ShortcutMap differentShortcutMap = new ShortcutMap();
+         differentShortcutMap.setShortcutMappings(Map.of("e", "edit"));
+         assertFalse(modelManager.equals(new ModelManager(addressBook, userPrefs, differentShortcutMap)));
++
++        // different currentPlannedDate -> returns false
++        modelManager.updatePlannerLocationList(LocalDate.of(2026, 3, 24));
++        assertFalse(modelManager.equals(new ModelManager(addressBook, userPrefs, shortcutMap)));
++    }
++
++    @Test
++    public void setNote_nullDate_throwsNullPointerException() {
++        assertThrows(NullPointerException.class, () -> modelManager.setNote(null, new NoteContent("Note")));
++    }
++
++    @Test
++    public void setNote_nullNote_throwsNullPointerException() throws Exception {
++        assertThrows(NullPointerException.class, () -> modelManager.setNote(VisitDate.of("2026-03-24"), null));
++    }
++
++    @Test
++    public void getPlannerNoteProperty_initialState_returnsNull() {
++        assertEquals(null, modelManager.getPlannerNoteProperty().getValue());
++    }
++
++    @Test
++    public void updatePlannerLocationList_validDate_updatesPlannerNote() throws Exception {
++        ModelManager separateModel = new ModelManager();
++        VisitDate date = VisitDate.of("2026-03-24");
++        NoteContent note = new NoteContent("Great day");
++        separateModel.setNote(date, note);
++
++        // Date matches -> note should be present
++        separateModel.updatePlannerLocationList(LocalDate.of(2026, 3, 24));
++        assertEquals(note, separateModel.getPlannerNoteProperty().getValue());
++
++        // Date does not match -> note should be null
++        separateModel.updatePlannerLocationList(LocalDate.of(2026, 3, 25));
++        assertEquals(null, separateModel.getPlannerNoteProperty().getValue());
++    }
++
++    @Test
++    public void updatePlannerNote_multipleNotes_mergesNotes() throws Exception {
++        ModelManager separateModel = new ModelManager();
++        VisitDate everyDay = VisitDate.of("everyday");
++        VisitDate oneTime = VisitDate.of("2026-03-24");
++        NoteContent genericNote = new NoteContent("Generic note");
++        NoteContent specificNote = new NoteContent("Specific note");
++
++        // Use LinkedHashMap in AddressBook to ensure order
++        separateModel.setNote(everyDay, genericNote);
++        separateModel.setNote(oneTime, specificNote);
++
++        separateModel.updatePlannerLocationList(LocalDate.of(2026, 3, 24));
++
++        String value = separateModel.getPlannerNoteProperty().getValue().toString();
++        String[] mergedNotes = value.split("\n\n");
++        assertEquals(2, mergedNotes.length);
++        assertTrue(java.util.Arrays.asList(mergedNotes).contains("Generic note"));
++        assertTrue(java.util.Arrays.asList(mergedNotes).contains("Specific note"));
+     }
+ }
+diff --git a/src/test/java/seedu/address/storage/JsonSerializableAddressBookTest.java b/src/test/java/seedu/address/storage/JsonSerializableAddressBookTest.java
+index 6a9f1a61e6c..db8058da4db 100644
+--- a/src/test/java/seedu/address/storage/JsonSerializableAddressBookTest.java
++++ b/src/test/java/seedu/address/storage/JsonSerializableAddressBookTest.java
+@@ -11,6 +11,7 @@
+ import seedu.address.commons.exceptions.IllegalValueException;
+ import seedu.address.commons.util.JsonUtil;
+ import seedu.address.model.AddressBook;
++import seedu.address.testutil.AddressBookBuilder;
+ import seedu.address.testutil.TypicalLocations;
+ 
+ public class JsonSerializableAddressBookTest {
+@@ -58,12 +59,29 @@ public void toModelType_locationWithMissingOptionalFields_success() throws Excep
+                 .withTags()
+                 .build());
+ 
+-        JsonSerializableAddressBook jsonAddressBook =
+-                new JsonSerializableAddressBook(addressBook);
++        // Deserialization check
++        JsonSerializableAddressBook dataFromModel = new JsonSerializableAddressBook(addressBook);
++        assertEquals(addressBook, dataFromModel.toModelType());
++    }
+ 
+-        AddressBook converted = jsonAddressBook.toModelType();
++    @Test
++    public void constructor_nullLocations_success() throws IllegalValueException {
++        JsonSerializableAddressBook jsonSerializableAddressBook = new JsonSerializableAddressBook(null, null);
++        AddressBook addressBook = jsonSerializableAddressBook.toModelType();
++        assertEquals(new AddressBook(), addressBook);
++    }
+ 
+-        assertEquals(addressBook, converted);
++    @Test
++    public void toModelType_addressBookWithNotes_success() throws Exception {
++        AddressBook addressBook = new AddressBookBuilder()
++                .withNote(seedu.address.model.location.dates.VisitDate.of("2026-03-24"),
++                        new seedu.address.model.location.NoteContent("Note 1"))
++                .withNote(seedu.address.model.location.dates.VisitDate.of("every Tuesday"),
++                        new seedu.address.model.location.NoteContent("Note 2"))
++                .build();
++
++        JsonSerializableAddressBook dataFromModel = new JsonSerializableAddressBook(addressBook);
++        assertEquals(addressBook, dataFromModel.toModelType());
+     }
+ 
+     @Test
+diff --git a/src/test/java/seedu/address/testutil/AddressBookBuilder.java b/src/test/java/seedu/address/testutil/AddressBookBuilder.java
+index c9e9336ce31..b04557ea0cc 100644
+--- a/src/test/java/seedu/address/testutil/AddressBookBuilder.java
++++ b/src/test/java/seedu/address/testutil/AddressBookBuilder.java
+@@ -2,6 +2,8 @@
+ 
+ import seedu.address.model.AddressBook;
+ import seedu.address.model.location.Location;
++import seedu.address.model.location.NoteContent;
++import seedu.address.model.location.dates.VisitDate;
+ 
+ /**
+  * A utility class to help with building Addressbook objects.
+@@ -28,6 +30,14 @@ public AddressBookBuilder withLocation(Location location) {
+         return this;
+     }
+ 
++    /**
++     * Adds a new note to the {@code AddressBook} that we are building.
++     */
++    public AddressBookBuilder withNote(VisitDate date, NoteContent note) {
++        addressBook.setNote(date, note);
++        return this;
++    }
++
+     public AddressBook build() {
+         return addressBook;
+     }

@@ -1,0 +1,1 @@
+{"Race condition in test logic: main thread asserts on caughtExceptions without waiting for reader thread to terminate via join(), allowing exceptions to be added after assertion passes": 0.9664984345436096}

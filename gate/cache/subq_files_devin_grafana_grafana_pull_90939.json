@@ -1,0 +1,1 @@
+{"Missing re-check after write lock acquisition in double-checked locking pattern - after acquiring the write Lock at line 48, the code does not re-check entryPointAssetsCache before proceeding to re-read the manifest from disk, causing redundant disk I/O when multiple goroutines are waiting on the lock": 0.8755220770835876}

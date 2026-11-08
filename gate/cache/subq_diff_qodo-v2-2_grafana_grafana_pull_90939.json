@@ -1,0 +1,1 @@
+{"GetWebAssets acquires the write lock after releasing the read lock without re-checking entryPointAssetsCache, so concurrent requests that observe a nil cache will each sequentially reload the manifest and overwrite the cache, causing severely increased latency and I/O during startup/traffic spikes": 0.9349682331085205}

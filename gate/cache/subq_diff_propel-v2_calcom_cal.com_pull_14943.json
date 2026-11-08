@@ -1,0 +1,1 @@
+{"The new OR branch deletes any reminder with retryCount > 1 across all methods, not just SMS. This is fragile because if retry logic is later added to email or WhatsApp schedulers, this SMS cron job would silently delete those reminders too. Fix by scoping this branch to SMS by adding method: WorkflowMethods.SMS to the retryCount condition.": 0.8886066675186157}

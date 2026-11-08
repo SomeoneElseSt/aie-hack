@@ -1,0 +1,1 @@
+{"InsightsBookingServicePublicOptions makes teamId optional even when scope is 'team', but the runtime zod schema requires teamId for team scope. This allows callers to compile invalid 'team' options and then get empty results at runtime because validation fails and authorization falls back to NOTHING_CONDITION": 0.8734296560287476}

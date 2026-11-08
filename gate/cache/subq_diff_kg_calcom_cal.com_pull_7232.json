@@ -1,0 +1,1 @@
+{"Add `method: WorkflowMethods.EMAIL` to the `where` clause for `remindersToCancel` in `packages/features/ee/workflows/api/scheduleEmailReminders.ts` at line 44 to ensure only email reminders are processed by the SendGrid cancellation logic, preventing potential errors if SMS reminders were ever marked as cancelled.": 0.917140007019043}

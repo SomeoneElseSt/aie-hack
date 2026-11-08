@@ -1,0 +1,1 @@
+{"userPermDenialCacheKey concatenates userUID/action/name/parent using '_' separators but Grafana UIDs may contain '_', causing different (name,parent) tuples to generate the same cache key and incorrectly reuse a cached denial for the wrong resource/folder": 0.8677926659584045}

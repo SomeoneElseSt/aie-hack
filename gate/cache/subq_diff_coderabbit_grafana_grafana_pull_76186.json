@@ -1,0 +1,1 @@
+{"The ContextualLoggerMiddleware dereferences req.PluginContext unconditionally in QueryData, CallResource, CheckHealth, and CollectMetrics methods, which can cause a panic when req is nil": 0.09523805975914001}

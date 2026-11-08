@@ -1,0 +1,1 @@
+{"Mutable default value in AssignmentSource.queued field causes all instances to share the same timestamp - should use field(default_factory=timezone.now) instead": 0.8455834984779358, "Typo in test method name: 'test_from_dict_inalid_data' should be 'test_from_dict_invalid_data'": 0.479757159948349}

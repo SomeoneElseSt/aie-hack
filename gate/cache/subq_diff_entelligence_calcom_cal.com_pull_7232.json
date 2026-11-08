@@ -1,0 +1,1 @@
+{"When immediateDelete is true, the function returns early after the SendGrid API call without updating the database, leaving the reminder in an inconsistent state where it is cancelled in SendGrid but still appears as active/scheduled in the local database": 0.9100921750068665}

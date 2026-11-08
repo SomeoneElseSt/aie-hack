@@ -1,0 +1,1 @@
+{"The comment on line 981 is misleading as the code does not actually allow access": 0.3164154589176178, "Using `false` as a value in `permCache` is not representative of how this cache is populated in production code, which stores a set of allowed scopes where the boolean value is always `true`": 0.2337314486503601}

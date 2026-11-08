@@ -1,0 +1,1 @@
+{"The .d-header .contents element is converted to a flex container but still has the .clearfix class applied, which injects ::before/::after pseudo-elements that become additional flex items under flex layout, causing unexpected spacing/ordering artifacts in the header": 0.3184884488582611}

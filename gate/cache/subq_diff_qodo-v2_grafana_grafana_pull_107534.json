@@ -1,0 +1,1 @@
+{"Shard splitting repeats template variable interpolation multiple times: once in runShardSplitQuery(), again in runSplitQuery(), and again during execution via DataSourceWithBackend.query(), causing unnecessary CPU overhead and potentially exacerbating ad-hoc filter duplication issues": 0.7603335976600647}

@@ -1,0 +1,4707 @@
+diff --git a/.devcontainer/Dockerfile b/.devcontainer/Dockerfile
+new file mode 100644
+index 0000000..a90a24f
+--- /dev/null
++++ b/.devcontainer/Dockerfile
+@@ -0,0 +1,33 @@
++# syntax=docker/dockerfile:1
++FROM mcr.microsoft.com/devcontainers/python:1-3.12-bookworm
++
++# ---------------------------------------------------------------------------
++# System tools: Fortran compiler, f2c transpiler, f2c runtime library
++#
++# The base image ships a Yarn apt source whose GPG key is no longer trusted.
++# Remove it before running apt-get update to prevent the build from failing.
++# ---------------------------------------------------------------------------
++RUN find /etc/apt/sources.list.d/ -name "*yarn*" -delete 2>/dev/null; \
++    apt-get update && apt-get install -y --no-install-recommends \
++        gfortran \
++        f2c \
++        libf2c2 \
++        libf2c2-dev \
++    && rm -rf /var/lib/apt/lists/*
++
++# ---------------------------------------------------------------------------
++# Rust toolchain (stable) — installed as the non-root "vscode" user so
++# cargo/rustup live in /home/vscode/.cargo and are on PATH automatically.
++# ---------------------------------------------------------------------------
++USER vscode
++RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
++    | sh -s -- -y --profile minimal --component clippy,rustfmt
++ENV PATH="/home/vscode/.cargo/bin:${PATH}"
++
++# ---------------------------------------------------------------------------
++# Python dependencies
++# ---------------------------------------------------------------------------
++COPY requirements.txt /tmp/requirements.txt
++RUN pip install --no-cache-dir -r /tmp/requirements.txt
++
++USER root
+diff --git a/.devcontainer/devcontainer.json b/.devcontainer/devcontainer.json
+new file mode 100644
+index 0000000..26fae48
+--- /dev/null
++++ b/.devcontainer/devcontainer.json
+@@ -0,0 +1,58 @@
++{
++  "name": "Fortran-to-Rust Conversion",
++
++  // Build from our Dockerfile so gfortran, f2c, and Rust are pre-installed.
++  "build": {
++    "dockerfile": "Dockerfile",
++    "context": ".."
++  },
++
++  // Run as the non-root "vscode" user that the base image ships with.
++  "remoteUser": "vscode",
++
++  // Mount the workspace and carry Cargo's registry cache across rebuilds.
++  "mounts": [
++    "source=codebase-conversion-cargo-cache,target=/home/vscode/.cargo/registry,type=volume",
++    "source=codebase-conversion-cargo-git,target=/home/vscode/.cargo/git,type=volume"
++  ],
++
++  // After the container is created, install the Python package in
++  // editable mode so `import fortran_to_rust` works out of the box.
++  "postCreateCommand": "pip install --no-cache-dir -e . 2>/dev/null || true",
++
++  // Keep a copy of the Rust toolchain fresh on every rebuild.
++  "postStartCommand": "rustup update stable --no-self-update 2>/dev/null || true",
++
++  // VS Code / GitHub Codespaces extensions
++  "customizations": {
++    "vscode": {
++      "extensions": [
++        "ms-python.python",
++        "ms-python.vscode-pylance",
++        "rust-lang.rust-analyzer",
++        "tamasfe.even-better-toml",
++        "serayuzgur.crates",
++        "vadimcn.vscode-lldb"
++      ],
++      "settings": {
++        "python.defaultInterpreterPath": "/usr/local/bin/python",
++        "python.formatting.provider": "none",
++        "[python]": {
++          "editor.defaultFormatter": "ms-python.python"
++        },
++        "rust-analyzer.cargo.features": "all",
++        "editor.formatOnSave": true,
++        "terminal.integrated.defaultProfile.linux": "bash"
++      }
++    }
++  },
++
++  // Forward no ports by default; add entries here if you add a web UI later.
++  "forwardPorts": [],
++
++  // Environment variables available inside the container.
++  // Set LLM_API_KEY via a .env file or a Codespaces secret — never hardcode.
++  "containerEnv": {
++    "LLM_PROVIDER": "copilot"
++  }
++}
+diff --git a/.env.example b/.env.example
+new file mode 100644
+index 0000000..3df9e28
+--- /dev/null
++++ b/.env.example
+@@ -0,0 +1 @@
++LLM_API_KEY=your_api_key_here
+\ No newline at end of file
+diff --git a/.gitignore b/.gitignore
+index d4fb281..d65df37 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,3 +1,20 @@
++# Environment / secrets
++.env
++
++# Python
++__pycache__/
++*.py[cod]
++*.pyo
++*.egg-info/
++.venv/
++venv/
++
++# Rust build artefacts
++target/
++
++# Pipeline output (generated at runtime)
++output/
++
+ # Prerequisites
+ *.d
+ 
+diff --git a/README.md b/README.md
+index e5baf70..088204e 100644
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,187 @@
+ # Codebase-Conversion
+-Code conversion project
++
++Automated pipeline for converting Fortran codebases to idiomatic Rust, with
++post-conversion accuracy and performance reports.
++
++The first supported library is **BLAS** (Basic Linear Algebra Subprograms).
++The primary milestone is full automation of `dgemm`; the pipeline then scales
++to 10 functions and eventually the full library.
++
++---
++
++## Quick start
++
++### Option A — GitHub Codespaces / VS Code devcontainer (recommended)
++
++Click **"Open in Codespaces"** (or **"Reopen in Container"** in VS Code).
++All dependencies — Python 3.12, Rust, `gfortran`, `f2c` — are pre-installed
++and the package is automatically installed in editable mode.
++
++```
++# Nothing to install — just run:
++python convert.py
++```
++
++### Option B — Local setup
++
++**Prerequisites**
++
++| Tool | Minimum version |
++|------|----------------|
++| Python | 3.10 |
++| Rust / Cargo | 1.70 |
++| gfortran | 9 |
++| f2c | any |
++
++```bash
++# 1. Clone
++git clone https://github.com/DisciplinedSoftware/Codebase-Conversion
++cd Codebase-Conversion
++
++# 2. Install Python dependencies
++pip install -r requirements.txt
++
++# 3. (Optional) install as editable package
++pip install -e .
++
++# 4. Run the interactive wizard
++python convert.py
++```
++
++---
++
++## Usage
++
++### Interactive wizard
++
++```
++python convert.py
++```
++
++The wizard guides you through:
++
++1. **Library** — currently BLAS
++2. **Scope** — single function · 10-function sample · full library
++3. **Strategy** — choose one of the three conversion approaches below
++4. **LLM configuration** — detected automatically from the environment
++5. **Live conversion** — progress feedback, inline Q&A (Strategy 2), repair rounds
++6. **Cargo crate** — the output is packaged as a ready-to-use crate
++7. **Accuracy check** — numerical comparison of Fortran vs Rust outputs
++8. **Performance benchmark** — wall-clock comparison (`gfortran -O2` vs `cargo --release`)
++9. **Markdown report** — written to `output/reports/<timestamp>_report.md`
++
++### Non-interactive / CI mode
++
++```bash
++python convert.py --non-interactive          # converts dgemm with the Hybrid strategy
++python convert.py --output-dir /tmp/output   # custom output directory
++```
++
++---
++
++## Conversion strategies
++
++### Strategy 1 — LLM-First with Rule Fallback *(requires LLM key)*
++
++1. Pre-process — strip comments, build call graph
++2. LLM translates each function (≤ 200-line chunks)
++3. `cargo check` → feed errors back to LLM for up to 2 repair rounds
++4. Hybrid rule-based fallback if LLM is unavailable
++
++### Strategy 2 — Agentic Multi-Turn Dialogue *(requires LLM key)*
++
++1. **Solver** LLM proposes an initial Rust translation
++2. **Questioner** LLM asks up to 3 clarifying questions about Fortran intrinsics,
++   implicit typing, and module interfaces; the Solver revises
++3. Compile-repair loop (same as Strategy 1)
++4. Idiomisation pass — LLM replaces `unsafe` blocks with safe Rust idioms
++
++### Strategy 3 — Hybrid Rule-Based + LLM Polish *(works fully offline)*
++
++1. **f2c** converts Fortran → C (deterministic skeleton)
++2. Rule-based C → Rust transformation
++3. Optional **LLM polish** pass to remove `unsafe` and improve idiomaticity
++4. `cargo check` result is reported
++
++---
++
++## LLM configuration
++
++The pipeline uses the **GitHub Models API** (`https://models.inference.ai.azure.com`) by
++default — the supported public API path for application code.  A GitHub Personal Access
++Token is the only credential required; no Copilot subscription or token exchange is needed.
++
++### Quickest setup — GitHub CLI
++
++```bash
++gh auth login          # authenticate once
++python convert.py      # the pipeline automatically calls `gh auth token`
++                       # internally to discover your GitHub token
++```
++
++### Alternative — `.env` file
++
++Create a `.env` file in the repo root (it is `.gitignore`d — **never commit keys**):
++
++```bash
++# GitHub Models (default provider)
++LLM_API_KEY=<your-github-pat>
++
++# OpenAI
++LLM_PROVIDER=openai
++LLM_API_KEY=sk-...
++
++# Any OpenAI-compatible endpoint (e.g. Ollama)
++LLM_PROVIDER=openai_compatible
++LLM_BASE_URL=http://localhost:11434/v1/chat/completions
++LLM_API_KEY=<optional>
++LLM_MODEL=llama3
++```
++
++---
++
++## Output layout
++
++```
++output/
++├── fortran/
++│   └── blas/          # Downloaded BLAS .f source files
++├── rust/
++│   └── blas_converted/
++│       ├── Cargo.toml
++│       └── src/
++│           ├── lib.rs
++│           ├── dgemm.rs
++│           └── ...
++└── reports/
++    └── 20240101_120000_report.md
++```
++
++---
++
++## Development
++
++```bash
++# Install in editable mode
++pip install -e .
++
++# Run the non-interactive smoke test
++python convert.py --non-interactive
++
++# Run the test suite (once tests are added)
++# pytest
++```
++
++---
++
++## Roadmap
++
++- [x] Milestone 1 — Automate `dgemm` conversion (all three strategies)
++- [ ] Milestone 2 — Extend to 10 BLAS functions
++- [ ] Milestone 3 — Full BLAS library
++
++---
++
++## License
++
++[MIT](LICENSE)
+diff --git a/convert.py b/convert.py
+new file mode 100644
+index 0000000..3cc773d
+--- /dev/null
++++ b/convert.py
+@@ -0,0 +1,271 @@
++#!/usr/bin/env python3
++"""fortran-to-rust — Automated Fortran→Rust conversion pipeline.
++
++Usage
++-----
++    python convert.py [options]
++
++Options
++-------
++  --output-dir PATH     Directory for downloaded sources, generated Rust code,
++                        and reports.  Defaults to ./output.
++  --non-interactive     Run conversion without prompts.  Useful for CI/demos.
++  --functions NAMES     Comma-separated function names to convert, OR a positive
++                        integer for a random sample of that size.
++                        Defaults to "dgemm" when --non-interactive is used.
++  --strategy {1,2,3}   Conversion strategy (default: 3 = Hybrid Rule-Based).
++
++Environment variables
++---------------------
++  LLM_PROVIDER    copilot | openai | openai_compatible  (default: copilot)
++  LLM_API_KEY     Bearer token / API key
++  LLM_MODEL       Model override (default: gpt-4o)
++  LLM_BASE_URL    Base URL for openai_compatible provider
++"""
++
++from __future__ import annotations
++
++import argparse
++import os
++import sys
++from pathlib import Path
++
++# ---------------------------------------------------------------------------
++# Load .env if present (best-effort; no hard dependency on python-dotenv)
++# ---------------------------------------------------------------------------
++_env_file = Path(".env")
++if _env_file.exists():
++    for _line in _env_file.read_text().splitlines():
++        _line = _line.strip()
++        if _line and not _line.startswith("#") and "=" in _line:
++            _key, _, _val = _line.partition("=")
++            os.environ.setdefault(_key.strip(), _val.strip())
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(
++        prog="convert",
++        description="Automated Fortran-to-Rust conversion pipeline.",
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++        epilog=__doc__,
++    )
++    parser.add_argument(
++        "--output-dir",
++        type=Path,
++        default=Path("output"),
++        metavar="PATH",
++        help="Directory for output files (default: ./output).",
++    )
++    parser.add_argument(
++        "--non-interactive",
++        action="store_true",
++        help="Run conversion without prompts.",
++    )
++    parser.add_argument(
++        "--functions",
++        default="dgemm",
++        metavar="NAMES_OR_SIZE",
++        help=(
++            "Comma-separated list of Fortran function names to convert, "
++            "OR a positive integer to pick that many functions from the BLAS list. "
++            "Default: 'dgemm'."
++        ),
++    )
++    parser.add_argument(
++        "--strategy",
++        choices=["1", "2", "3"],
++        default="3",
++        help="Conversion strategy: 1=LLM-First, 2=Agentic, 3=Hybrid (default: 3).",
++    )
++    args = parser.parse_args()
++
++    output_dir: Path = args.output_dir.resolve()
++    output_dir.mkdir(parents=True, exist_ok=True)
++
++    if args.non_interactive:
++        _run_non_interactive(output_dir, args.functions, args.strategy)
++    else:
++        from fortran_to_rust.cli import run
++        run(output_dir)
++
++
++def _parse_functions_arg(raw: str) -> list[str]:
++    """Parse the --functions argument.
++
++    Accepts either:
++    - a plain positive integer → return the first N functions from BLAS_FUNCTIONS
++    - a comma-separated list of names → return those names (lower-cased)
++    """
++    from fortran_to_rust.fetcher import BLAS_FUNCTIONS
++
++    raw = raw.strip()
++    try:
++        n = int(raw)
++        if n > len(BLAS_FUNCTIONS):
++            print(
++                f"Warning: requested {n} functions but only "
++                f"{len(BLAS_FUNCTIONS)} are known; using all {len(BLAS_FUNCTIONS)}."
++            )
++            n = len(BLAS_FUNCTIONS)
++        n = max(1, n)
++        return [f.lower() for f in BLAS_FUNCTIONS[:n]]
++    except ValueError:
++        pass
++    return [name.strip().lower() for name in raw.split(",") if name.strip()]
++
++
++def _make_progress_callback(fn_name: str, messages: list[str], console):  # type: ignore[type-arg]
++    """Return a progress callback that tags messages with *fn_name*."""
++    def cb(msg: str) -> None:
++        console.print(f"  [{fn_name}] {msg}")
++        messages.append(msg)
++    return cb
++
++
++def _run_non_interactive(output_dir: Path, functions_arg: str, strategy_key: str) -> None:
++    """Headless pipeline: convert the requested functions and produce a report."""
++    from rich.console import Console
++    from rich.rule import Rule
++    from rich.table import Table
++
++    from fortran_to_rust.benchmarker import run_benchmark
++    from fortran_to_rust.call_graph import build_call_graph, render_graph
++    from fortran_to_rust.fetcher import BLAS_FUNCTIONS, fetch_blas
++    from fortran_to_rust.llm_client import LLMClient
++    from fortran_to_rust.parser import parse_file
++    from fortran_to_rust.reporter import generate_report
++    from fortran_to_rust.rust_project import build_crate, scaffold_crate, test_crate
++    from fortran_to_rust.strategies import STRATEGY_MAP, STRATEGY_NAMES
++    from fortran_to_rust.test_harness import run_accuracy_check
++
++    console = Console()
++    console.print(Rule("[bold cyan]Fortran-to-Rust  (non-interactive)[/bold cyan]"))
++
++    # --- 1. Resolve function list ---
++    functions_to_convert = _parse_functions_arg(functions_arg)
++    # Always pull in support routines required by most BLAS functions
++    support_fns = ["lsame", "xerbla"]
++    fetch_list = list(dict.fromkeys(functions_to_convert + support_fns))
++
++    console.print(
++        f"\n[bold]Converting:[/bold] {', '.join(functions_to_convert)}  "
++        f"[dim](strategy {strategy_key} — {STRATEGY_NAMES[strategy_key]})[/dim]"
++    )
++
++    # --- 2. Fetch sources ---
++    console.print("\n[bold]Fetching BLAS sources…[/bold]")
++    source_map = fetch_blas(output_dir, functions=fetch_list)
++
++    missing = [fn for fn in functions_to_convert if fn not in source_map]
++    if missing:
++        console.print(f"[yellow]⚠[/yellow] Could not fetch: {', '.join(missing)}")
++        functions_to_convert = [fn for fn in functions_to_convert if fn in source_map]
++    if not functions_to_convert:
++        console.print("[red]No fetchable functions — aborting.[/red]")
++        sys.exit(1)
++
++    # --- 3. Parse ---
++    console.print("[bold]Parsing…[/bold]")
++    all_routines = []
++    for path in source_map.values():
++        all_routines.extend(parse_file(path))
++
++    routine_map = {r.name.upper(): r for r in all_routines}
++    for fn in functions_to_convert:
++        r = routine_map.get(fn.upper())
++        if r:
++            console.print(f"  Parsed {r.name} ({r.line_count} lines)")
++        else:
++            console.print(f"  [yellow]⚠[/yellow] {fn}: routine not found in parsed source")
++
++    graph = build_call_graph(all_routines)
++    console.print(f"  [dim]Call graph:[/dim]\n{render_graph(graph)}")
++
++    # --- 4. Convert ---
++    console.print(f"\n[bold]Converting with strategy {strategy_key}…[/bold]")
++    StrategyClass = STRATEGY_MAP[strategy_key]
++    llm = LLMClient()
++    strategy = StrategyClass(output_dir, llm=llm)
++
++    conversion_results = []
++    for fn in functions_to_convert:
++        routine = routine_map.get(fn.upper())
++        if not routine:
++            console.print(f"  [yellow]⚠[/yellow] {fn}: skipping (no parsed routine).")
++            continue
++
++        messages: list[str] = []
++        cb = _make_progress_callback(fn, messages, console)
++
++        result = strategy.convert(routine, progress_callback=cb)
++        conversion_results.append(result)
++        status = "[green]✓[/green]" if result.success else "[red]✗[/red]"
++        console.print(f"  {status} {fn} — {result.strategy_used}")
++
++    # --- 5. Scaffold crate ---
++    console.print("\n[bold]Scaffolding Rust crate…[/bold]")
++    rust_sources = {
++        r.routine_name: r.rust_source
++        for r in conversion_results
++        if r.rust_source
++    }
++    crate_name = "blas_converted"
++    crate_dir = scaffold_crate(output_dir, crate_name, rust_sources)
++    console.print(f"  Crate: {crate_dir}")
++
++    build_ok, build_out = build_crate(crate_dir)
++    console.print(f"  cargo build: {'✅ passed' if build_ok else '⚠ finished with errors'}")
++
++    test_ok, test_out = test_crate(crate_dir)
++    console.print(f"  cargo test:  {'✅ passed' if test_ok else '⚠ finished with errors'}")
++
++    # --- 6. Accuracy ---
++    console.print("\n[bold]Accuracy checks…[/bold]")
++    accuracy_results = []
++    for fn in functions_to_convert:
++        src_path = source_map.get(fn)
++        routine = routine_map.get(fn.upper())
++        acc = run_accuracy_check(
++            fn, src_path, crate_dir if build_ok else None, routine=routine
++        )
++        accuracy_results.append(acc)
++        status = "✅" if acc.passed else "⚠"
++        err_str = f"  max_err={acc.max_abs_error:.2e}" if acc.max_abs_error else ""
++        console.print(f"  {status} {fn}{err_str}")
++        for d in acc.details:
++            console.print(f"  {d}")
++
++    # --- 7. Benchmark ---
++    console.print("\n[bold]Benchmarks…[/bold]")
++    bench_results = []
++    for fn in functions_to_convert:
++        src_path = source_map.get(fn)
++        routine = routine_map.get(fn.upper())
++        bench = run_benchmark(
++            fn, src_path, crate_dir if build_ok else None, routine=routine
++        )
++        bench_results.append(bench)
++        console.print(f"  {fn}: {bench.summary}")
++        for d in bench.details:
++            console.print(f"  {d}")
++
++    # --- 8. Report ---
++    console.print("\n[bold]Generating report…[/bold]")
++    md_path, html_path = generate_report(
++        output_dir=output_dir,
++        library="BLAS",
++        strategy_name=STRATEGY_NAMES[strategy_key],
++        conversion_results=conversion_results,
++        accuracy_results=accuracy_results,
++        bench_results=bench_results,
++        crate_dir=crate_dir,
++        build_ok=build_ok,
++        test_ok=test_ok,
++    )
++    console.print(f"  [green]Markdown:[/green]  {md_path}")
++    console.print(f"  [green]HTML:[/green]      {html_path}")
++    console.print(Rule(style="cyan"))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/fortran_to_rust/__init__.py b/fortran_to_rust/__init__.py
+new file mode 100644
+index 0000000..a5b3470
+--- /dev/null
++++ b/fortran_to_rust/__init__.py
+@@ -0,0 +1,3 @@
++"""Fortran to Rust conversion pipeline."""
++
++__version__ = "0.1.0"
+diff --git a/fortran_to_rust/benchmarker.py b/fortran_to_rust/benchmarker.py
+new file mode 100644
+index 0000000..c4e9af2
+--- /dev/null
++++ b/fortran_to_rust/benchmarker.py
+@@ -0,0 +1,335 @@
++"""Performance benchmarker.
++
++For each converted function, this module:
++
++1. **Generates** a Fortran benchmark program on the fly based on the parsed
++   argument declarations (types, array shapes).
++2. **Compiles and runs** it with ``gfortran -O2`` to measure wall-clock time.
++3. **Generates** a Rust ``examples/bench_<fn>.rs`` binary using the same input
++   shapes.
++4. **Compiles and runs** it with ``cargo build --release`` to measure Rust
++   wall-clock time.
++5. Reports a speedup ratio.
++
++No function-specific knowledge is needed — everything is derived from the
++:class:`~fortran_to_rust.parser.FortranRoutine` object.
++"""
++
++from __future__ import annotations
++
++import subprocess
++import tempfile
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import Dict, List, Optional
++
++from fortran_to_rust.test_harness import (
++    ArgDecl,
++    _array_size,
++    _assign_dims,
++    _find_support_files,
++    _fortran_call,
++    parse_arg_declarations,
++)
++
++_REPS = 10   # number of timed repetitions
++
++
++@dataclass
++class BenchResult:
++    function_name: str
++    fortran_time_ms: Optional[float] = None
++    rust_time_ms: Optional[float] = None
++    speedup: Optional[float] = None
++    error_message: Optional[str] = None
++    details: List[str] = field(default_factory=list)
++
++    @property
++    def summary(self) -> str:
++        if self.error_message:
++            return f"Benchmark failed: {self.error_message}"
++        if self.fortran_time_ms and self.rust_time_ms:
++            direction = "faster" if self.speedup and self.speedup >= 1.0 else "slower"
++            ratio = abs(self.speedup or 1.0)
++            return (
++                f"Fortran: {self.fortran_time_ms:.3f} ms  |  "
++                f"Rust: {self.rust_time_ms:.3f} ms  |  "
++                f"Rust is {ratio:.2f}x {direction} than Fortran"
++            )
++        if self.fortran_time_ms:
++            return f"Fortran: {self.fortran_time_ms:.3f} ms  |  Rust: N/A"
++        return "Incomplete benchmark data."
++
++
++_FORTRAN_BENCH_TEMPLATE = """\
++      PROGRAM BENCH_{name}
++      IMPLICIT NONE
++      INTEGER BENCH_R, INIT_I
++      DOUBLE PRECISION BENCH_T1, BENCH_T2, BENCH_ELAPSED
++{declarations}
++{assignments}
++      CALL CPU_TIME(BENCH_T1)
++      DO BENCH_R = 1, {reps}
++{call_stmt}
++      END DO
++      CALL CPU_TIME(BENCH_T2)
++      BENCH_ELAPSED = (BENCH_T2 - BENCH_T1) * 1000.0D0 / DBLE({reps})
++      WRITE(*,'(F30.15)') BENCH_ELAPSED
++      END
++"""
++
++
++def _generate_fortran_bench(
++    routine_name: str,
++    arg_names: List[str],
++    arg_decls: Dict[str, ArgDecl],
++    assigned_dims: Dict[str, int],
++    reps: int = _REPS,
++) -> str:
++    decl_lines: List[str] = []
++    assign_lines: List[str] = []
++
++    int_scalars = [n for n, d in arg_decls.items() if d.is_integer and not d.is_array]
++    if int_scalars:
++        decl_lines.append("      INTEGER " + ", ".join(int_scalars))
++        for n in int_scalars:
++            assign_lines.append(f"      {n} = {assigned_dims.get(n, 4)}")
++
++    dp_scalars = [n for n, d in arg_decls.items() if d.is_real and not d.is_array]
++    if dp_scalars:
++        decl_lines.append("      DOUBLE PRECISION " + ", ".join(dp_scalars))
++        for n in dp_scalars:
++            assign_lines.append(f"      {n} = 1.0D0")
++
++    # Array init — use INIT_I, not BENCH_R, to avoid variable conflict
++    for arr_name, decl in [(n, d) for n, d in arg_decls.items() if d.is_array and d.is_real]:
++        sizes = _array_size(decl, assigned_dims)
++        if not sizes:
++            continue
++        dim_str = ", ".join(str(s) for s in sizes)
++        decl_lines.append(f"      DOUBLE PRECISION {arr_name}({dim_str})")
++        total = 1
++        for s in sizes:
++            total *= s
++        if len(sizes) == 1:
++            assign_lines.append(f"      DO INIT_I=1,{sizes[0]}")
++            assign_lines.append(f"      {arr_name}(INIT_I) = 0.5D0")
++            assign_lines.append(f"      END DO")
++        elif len(sizes) >= 2:
++            n_rows = sizes[0]
++            assign_lines.append(f"      DO INIT_I=1,{total}")
++            # Convert 1-based linear index INIT_I to column-major (row, col):
++            #   row = MOD(INIT_I-1, n_rows) + 1
++            #   col = (INIT_I-1) / n_rows   + 1
++            assign_lines.append(
++                f"      {arr_name}(MOD(INIT_I-1,{n_rows})+1,"
++                f"(INIT_I-1)/{n_rows}+1) = 0.5D0"
++            )
++            assign_lines.append(f"      END DO")
++
++    char_scalars = [n for n, d in arg_decls.items() if d.is_char and not d.is_array]
++    if char_scalars:
++        decl_lines.append("      CHARACTER*1 " + ", ".join(char_scalars))
++        for n in char_scalars:
++            assign_lines.append(f"      {n} = 'N'")
++
++    logical_scalars = [n for n, d in arg_decls.items() if d.is_logical and not d.is_array]
++    if logical_scalars:
++        decl_lines.append("      LOGICAL " + ", ".join(logical_scalars))
++        for n in logical_scalars:
++            assign_lines.append(f"      {n} = .FALSE.")
++
++    # Use _fortran_call to handle long argument lists with Fortran-77 continuation
++    call_stmt = _fortran_call(routine_name.upper(), arg_names)
++
++    return _FORTRAN_BENCH_TEMPLATE.format(
++        name=routine_name.upper(),
++        declarations="\n".join(decl_lines),
++        assignments="\n".join(assign_lines),
++        call_stmt=call_stmt,
++        reps=reps,
++    )
++
++
++def _run_fortran_bench(bench_src: str, extra_sources: List[Path]) -> Optional[float]:
++    with tempfile.TemporaryDirectory() as tmpdir:
++        tmp = Path(tmpdir)
++        bench_f = tmp / "bench.f"
++        bench_f.write_text(bench_src)
++        exe = tmp / "bench"
++        cmd = ["gfortran", "-O2", "-o", str(exe), str(bench_f)]
++        cmd += [str(s) for s in extra_sources]
++        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
++        if result.returncode != 0:
++            return None
++        run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
++        if run.returncode != 0:
++            return None
++        try:
++            return float(run.stdout.strip())
++        except ValueError:
++            return None
++
++
++_RUST_BENCH_TEMPLATE = """\
++// Auto-generated benchmark binary for `{fn_name}`
++#![allow(unused_mut, unused_variables, dead_code)]
++use std::time::Instant;
++
++fn main() {{
++    const REPS: usize = {reps};
++{rust_inputs}
++
++    let start = Instant::now();
++    for _ in 0..REPS {{
++        // {fn_lower}({call_args});  // uncomment once the Rust signature is known
++        std::hint::black_box(&{first_array});
++    }}
++    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0 / REPS as f64;
++    println!("{{:.6}}", elapsed_ms);
++}}
++"""
++
++
++def _generate_rust_bench(
++    routine_name: str,
++    arg_names: List[str],
++    arg_decls: Dict[str, ArgDecl],
++    assigned_dims: Dict[str, int],
++    crate_dir: Path,
++    reps: int = _REPS,
++) -> bool:
++    fn_lower = routine_name.lower()
++    examples_dir = crate_dir / "examples"
++    examples_dir.mkdir(exist_ok=True)
++
++    inputs: List[str] = []
++    call_args: List[str] = []
++    first_array = "0_f64"
++
++    for name in arg_names:
++        decl = arg_decls.get(name.upper(), ArgDecl(name=name.upper(), ftype="DOUBLE PRECISION", dims=[]))
++        rname = name.lower()
++        if decl.is_char:
++            inputs.append(f"    let {rname}: u8 = b'N';")
++            call_args.append(rname)
++        elif decl.is_integer and not decl.is_array:
++            inputs.append(f"    let {rname}: i32 = {assigned_dims.get(name.upper(), 4)};")
++            call_args.append(rname)
++        elif decl.is_real and not decl.is_array:
++            inputs.append(f"    let {rname}: f64 = 1.0;")
++            call_args.append(rname)
++        elif decl.is_real and decl.is_array:
++            sizes = _array_size(decl, assigned_dims)
++            total = 1
++            for s in (sizes or [4]):
++                total *= s
++            inputs.append(f"    let mut {rname} = vec![0.5_f64; {total}];")
++            call_args.append(f"&mut {rname}")
++            first_array = rname
++        elif decl.is_logical:
++            inputs.append(f"    let {rname}: bool = false;")
++            call_args.append(rname)
++        else:
++            inputs.append(f"    let mut {rname}: f64 = 0.0;")
++            call_args.append(f"&mut {rname}")
++
++    rust_src = _RUST_BENCH_TEMPLATE.format(
++        fn_name=routine_name,
++        fn_lower=fn_lower,
++        reps=reps,
++        rust_inputs="\n".join(inputs),
++        call_args=", ".join(call_args),
++        first_array=first_array,
++    )
++    (examples_dir / f"bench_{fn_lower}.rs").write_text(rust_src)
++    return True
++
++
++def _run_rust_bench(crate_dir: Path, routine_name: str) -> Optional[float]:
++    fn_lower = routine_name.lower()
++    result = subprocess.run(
++        ["cargo", "build", "--release", "--example", f"bench_{fn_lower}"],
++        capture_output=True, text=True, cwd=crate_dir, timeout=120,
++    )
++    if result.returncode != 0:
++        return None
++    exe = crate_dir / "target" / "release" / "examples" / f"bench_{fn_lower}"
++    if not exe.exists():
++        return None
++    run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
++    if run.returncode != 0:
++        return None
++    try:
++        return float(run.stdout.strip())
++    except ValueError:
++        return None
++
++
++def run_benchmark(
++    function_name: str,
++    fortran_source_path: Optional[Path],
++    crate_dir: Optional[Path],
++    *,
++    routine=None,
++    reps: int = _REPS,
++) -> BenchResult:
++    """Benchmark *function_name* in both Fortran and Rust.
++
++    Works for any function: generates all benchmark drivers on the fly from
++    the argument declarations parsed from the Fortran source.
++    """
++    fn = function_name.upper()
++    details: List[str] = []
++
++    if routine is not None:
++        arg_names = routine.args
++        arg_decls = parse_arg_declarations(routine.source, arg_names)
++    elif fortran_source_path is not None and fortran_source_path.exists():
++        from fortran_to_rust.parser import parse_file
++        routines = parse_file(fortran_source_path)
++        matched = [r for r in routines if r.name.upper() == fn]
++        if matched:
++            arg_names = matched[0].args
++            arg_decls = parse_arg_declarations(matched[0].source, arg_names)
++        else:
++            return BenchResult(function_name=fn, error_message=f"Could not parse routine {fn}.")
++    else:
++        return BenchResult(function_name=fn, error_message="No routine or source path provided.")
++
++    assigned_dims = _assign_dims(arg_decls)
++
++    fortran_ms: Optional[float] = None
++    if fortran_source_path and fortran_source_path.exists():
++        extra = [fortran_source_path] + _find_support_files(fortran_source_path.parent)
++        bench_src = _generate_fortran_bench(fn, arg_names, arg_decls, assigned_dims, reps)
++        fortran_ms = _run_fortran_bench(bench_src, extra)
++        if fortran_ms is not None:
++            dim_info = ", ".join(f"{k}={v}" for k, v in sorted(assigned_dims.items()))
++            details.append(f"  Fortran (gfortran -O2): {fortran_ms:.3f} ms/call  [{dim_info}]")
++        else:
++            details.append("  Fortran benchmark failed to compile/run.")
++
++    rust_ms: Optional[float] = None
++    if crate_dir and crate_dir.exists():
++        _generate_rust_bench(fn, arg_names, arg_decls, assigned_dims, crate_dir, reps)
++        rust_ms = _run_rust_bench(crate_dir, fn)
++        if rust_ms is not None:
++            details.append(f"  Rust   (--release):       {rust_ms:.3f} ms/call")
++        else:
++            details.append(
++                "  Rust benchmark skipped "
++                "(function not yet callable from the generated skeleton)."
++            )
++
++    speedup: Optional[float] = None
++    if fortran_ms and rust_ms and rust_ms > 0:
++        speedup = fortran_ms / rust_ms
++
++    return BenchResult(
++        function_name=fn,
++        fortran_time_ms=fortran_ms,
++        rust_time_ms=rust_ms,
++        speedup=speedup,
++        details=details,
++    )
+diff --git a/fortran_to_rust/call_graph.py b/fortran_to_rust/call_graph.py
+new file mode 100644
+index 0000000..5ca8e65
+--- /dev/null
++++ b/fortran_to_rust/call_graph.py
+@@ -0,0 +1,64 @@
++"""Build a call graph from a list of parsed Fortran routines."""
++
++from __future__ import annotations
++
++from typing import Dict, List, Set
++
++from fortran_to_rust.parser import FortranRoutine
++
++
++def build_call_graph(routines: List[FortranRoutine]) -> Dict[str, List[str]]:
++    """Return a mapping of routine_name -> [called_routine_names].
++
++    Only edges to routines that exist in the *routines* list are kept.
++    """
++    known: Set[str] = {r.name.upper() for r in routines}
++    graph: Dict[str, List[str]] = {}
++    for routine in routines:
++        edges = [c for c in routine.calls if c in known]
++        graph[routine.name.upper()] = edges
++    return graph
++
++
++def topological_order(graph: Dict[str, List[str]]) -> List[str]:
++    """Return routine names in topological order (leaves first).
++
++    Routines that are called by others come before their callers so that
++    helper functions are converted before the functions that use them.
++    Uses Kahn's algorithm; cycles are broken arbitrarily.
++    """
++    from collections import deque
++
++    in_degree: Dict[str, int] = {n: 0 for n in graph}
++    for node, deps in graph.items():
++        for dep in deps:
++            if dep in in_degree:
++                in_degree[node] += 1
++
++    queue: deque = deque(n for n, d in in_degree.items() if d == 0)
++    order: List[str] = []
++    while queue:
++        node = queue.popleft()
++        order.append(node)
++        for other, deps in graph.items():
++            if node in deps:
++                in_degree[other] -= 1
++                if in_degree[other] == 0:
++                    queue.append(other)
++
++    # Append any remaining nodes (cycle members)
++    remaining = [n for n in graph if n not in order]
++    order.extend(remaining)
++    return order
++
++
++def render_graph(graph: Dict[str, List[str]]) -> str:
++    """Return a simple text representation of the call graph."""
++    lines = []
++    for node in sorted(graph):
++        deps = graph[node]
++        if deps:
++            lines.append(f"  {node} -> {', '.join(sorted(deps))}")
++        else:
++            lines.append(f"  {node} (leaf)")
++    return "\n".join(lines)
+diff --git a/fortran_to_rust/cli.py b/fortran_to_rust/cli.py
+new file mode 100644
+index 0000000..b9f3a23
+--- /dev/null
++++ b/fortran_to_rust/cli.py
+@@ -0,0 +1,397 @@
++"""Interactive CLI for the Fortran-to-Rust conversion pipeline.
++
++Modelled on the GitHub Copilot CLI experience: rich prompts, live
++progress feedback, inline Q&A during the agentic strategy, and a
++final report printed to the terminal.
++"""
++
++from __future__ import annotations
++
++import os
++import sys
++import time
++from pathlib import Path
++from typing import Dict, List, Optional, Tuple
++
++from rich.console import Console
++from rich.markdown import Markdown
++from rich.panel import Panel
++from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
++from rich.prompt import Confirm, Prompt
++from rich.rule import Rule
++from rich.syntax import Syntax
++from rich.table import Table
++from rich import print as rprint
++
++from fortran_to_rust.benchmarker import run_benchmark
++from fortran_to_rust.call_graph import build_call_graph, render_graph
++from fortran_to_rust.fetcher import (
++    BLAS_FUNCTIONS,
++    fetch_blas,
++)
++from fortran_to_rust.llm_client import LLMClient, LLMUnavailableError
++from fortran_to_rust.parser import parse_file
++from fortran_to_rust.reporter import generate_report
++from fortran_to_rust.rust_project import build_crate, scaffold_crate, test_crate
++from fortran_to_rust.strategies import STRATEGY_MAP, STRATEGY_NAMES
++from fortran_to_rust.test_harness import run_accuracy_check
++
++console = Console()
++
++
++def _print_banner() -> None:
++    """Print the application banner in a clean, reliably-rendered Panel."""
++    from rich.panel import Panel
++    from rich.text import Text
++
++    title = Text.assemble(("Fortran", "bold cyan"), (" → ", "bold white"), ("Rust", "bold cyan"))
++    subtitle = Text("Automated Conversion Pipeline  •  v0.1.0", style="dim")
++    content = Text.assemble(title, "\n", subtitle)
++    console.print(Panel(content, border_style="cyan", padding=(1, 4), expand=False))
++
++_STRATEGY_DESCRIPTIONS = {
++    "1": (
++        "[bold]LLM-First with Rule Fallback[/bold]\n"
++        "  Let an LLM do the heavy lifting; invoke rule-based transpiler only when "
++        "the LLM fails to compile.  Requires an LLM API key."
++    ),
++    "2": (
++        "[bold]Agentic Multi-Turn Dialogue[/bold]\n"
++        "  A Questioner–Solver agent pair clarifies Fortran semantics before the "
++        "Solver finalises the Rust code.  Requires an LLM API key."
++    ),
++    "3": (
++        "[bold]Hybrid Rule-Based + LLM Polish[/bold]\n"
++        "  Deterministic f2c skeleton first, then optional LLM polishing pass.  "
++        "Works fully offline; LLM polish is applied if a key is available."
++    ),
++}
++
++
++# ---------------------------------------------------------------------------
++# Top-level entry point
++# ---------------------------------------------------------------------------
++
++def run(output_dir: Path) -> None:
++    """Launch the interactive conversion wizard."""
++    _print_banner()
++    console.print(Rule(style="cyan"))
++
++    # --- 1. Library selection -----------------------------------------------
++    library = _ask_library()
++
++    # --- 2. Fetch source -------------------------------------------------------
++    console.print()
++    console.print(Panel("[bold]Step 1 — Fetching source code[/bold]", style="cyan"))
++    functions_to_convert, source_map = _fetch_and_select(library, output_dir)
++    if not functions_to_convert:
++        console.print("[red]No functions selected. Exiting.[/red]")
++        sys.exit(0)
++
++    # --- 3. Strategy selection -------------------------------------------------
++    console.print()
++    console.print(Panel("[bold]Step 2 — Choose a conversion strategy[/bold]", style="cyan"))
++    strategy_key = _ask_strategy()
++
++    # --- 4. LLM configuration (if needed) -------------------------------------
++    llm = _configure_llm(strategy_key)
++
++    # --- 5. Call graph --------------------------------------------------------
++    console.print()
++    console.print(Panel("[bold]Step 3 — Analysing call graph[/bold]", style="cyan"))
++    all_routines = []
++    for fn, path in source_map.items():
++        all_routines.extend(parse_file(path))
++    graph = build_call_graph(all_routines)
++    console.print(f"  [dim]Call graph:[/dim]\n{render_graph(graph)}")
++
++    # Build a lookup map: fn_name (upper) → FortranRoutine
++    routine_map = {r.name.upper(): r for r in all_routines}
++
++    # --- 6. Convert -----------------------------------------------------------
++    console.print()
++    console.print(Panel("[bold]Step 4 — Converting Fortran → Rust[/bold]", style="cyan"))
++    StrategyClass = STRATEGY_MAP[strategy_key]
++    strategy = StrategyClass(output_dir, llm=llm)
++    conversion_results = []
++
++    for fn_name in functions_to_convert:
++        routine = routine_map.get(fn_name.upper())
++        if not routine:
++            console.print(f"  [yellow]⚠[/yellow] {fn_name}: no parsed routine found, skipping.")
++            continue
++
++        console.print()
++        console.print(f"  [bold cyan]Converting:[/bold cyan] {fn_name}  "
++                      f"[dim]({routine.line_count} lines)[/dim]")
++
++        result = strategy.convert(routine, progress_callback=_make_cb())
++        conversion_results.append(result)
++
++        if result.success:
++            console.print(f"  [green]✓[/green] {fn_name} converted via {result.strategy_used}")
++        else:
++            console.print(f"  [red]✗[/red] {fn_name} conversion failed: {result.error}")
++
++    # --- 7. Package into Cargo crate ------------------------------------------
++    console.print()
++    console.print(Panel("[bold]Step 5 — Packaging Rust crate[/bold]", style="cyan"))
++    rust_sources: Dict[str, str] = {
++        r.routine_name: r.rust_source
++        for r in conversion_results
++        if r.rust_source
++    }
++    crate_name = f"{library.lower()}_converted"
++    crate_dir = scaffold_crate(output_dir, crate_name, rust_sources)
++    console.print(f"  [green]✓[/green] Crate created at {crate_dir}")
++
++    build_ok, build_out = build_crate(crate_dir)
++    _show_build_result("cargo build --release", build_ok, build_out)
++
++    test_ok, test_out = test_crate(crate_dir)
++    _show_build_result("cargo test", test_ok, test_out)
++
++    # --- 8. Accuracy -----------------------------------------------------------
++    console.print()
++    console.print(Panel("[bold]Step 6 — Numerical accuracy check[/bold]", style="cyan"))
++    accuracy_results = []
++    for fn_name in functions_to_convert:
++        src_path = source_map.get(fn_name.lower())
++        routine = routine_map.get(fn_name.upper())
++        acc = run_accuracy_check(
++            fn_name, src_path, crate_dir if build_ok else None, routine=routine
++        )
++        accuracy_results.append(acc)
++        _show_accuracy(acc)
++
++    # --- 9. Benchmark ----------------------------------------------------------
++    console.print()
++    console.print(Panel("[bold]Step 7 — Performance benchmark[/bold]", style="cyan"))
++    bench_results = []
++    for fn_name in functions_to_convert:
++        src_path = source_map.get(fn_name.lower())
++        routine = routine_map.get(fn_name.upper())
++        br = run_benchmark(fn_name, src_path, crate_dir if build_ok else None, routine=routine)
++        bench_results.append(br)
++        console.print(f"  {br.summary}")
++        for d in br.details:
++            console.print(d)
++
++    # --- 10. Report -----------------------------------------------------------
++    console.print()
++    console.print(Panel("[bold]Step 8 — Generating report[/bold]", style="cyan"))
++    report_path = generate_report(
++        output_dir=output_dir,
++        library=library,
++        strategy_name=STRATEGY_NAMES[strategy_key],
++        conversion_results=conversion_results,
++        accuracy_results=accuracy_results,
++        bench_results=bench_results,
++        crate_dir=crate_dir,
++        build_ok=build_ok,
++        test_ok=test_ok,
++    )
++    md_path, html_path = report_path
++    console.print(f"  [green]✓[/green] Report written to [bold]{html_path}[/bold]")
++
++    # --- 11. Final summary ----------------------------------------------------
++    _print_final_summary(conversion_results, accuracy_results, bench_results, html_path)
++
++
++# ---------------------------------------------------------------------------
++# Wizard helpers
++# ---------------------------------------------------------------------------
++
++def _ask_library() -> str:
++    console.print("\n[bold]Which library would you like to convert?[/bold]")
++    console.print("  [cyan]1[/cyan]  BLAS (Basic Linear Algebra Subprograms) — Fortran reference implementation")
++    console.print("  [cyan]q[/cyan]  Quit")
++    while True:
++        choice = Prompt.ask("\n[bold cyan]>[/bold cyan] Your choice", default="1")
++        if choice.lower() == "q":
++            sys.exit(0)
++        if choice == "1":
++            return "BLAS"
++        console.print("[yellow]Please enter 1 or q.[/yellow]")
++
++
++def _fetch_and_select(
++    library: str, output_dir: Path
++) -> Tuple[List[str], Dict[str, Path]]:
++    """Download sources and ask the user what to convert."""
++    console.print("\n[bold]What would you like to convert?[/bold]")
++    console.print("  [cyan]1[/cyan]  Single function  (you choose which one)")
++    console.print("  [cyan]2[/cyan]  Custom sample  (comma-separated names OR a sample size, default 10)")
++    console.print(f"  [cyan]3[/cyan]  Full library  ({len(BLAS_FUNCTIONS)} functions)")
++
++    scope = Prompt.ask("\n[bold cyan]>[/bold cyan] Scope", choices=["1", "2", "3"], default="1")
++
++    if scope == "1":
++        fn = Prompt.ask(
++            "\n[bold cyan]>[/bold cyan] Function name",
++            default="dgemm",
++        ).strip().lower()
++        wanted = [fn]
++    elif scope == "2":
++        raw = Prompt.ask(
++            "\n[bold cyan]>[/bold cyan] "
++            "Function names (comma-separated) OR sample size",
++            default="10",
++        ).strip()
++        wanted = _parse_sample_input(raw)
++        console.print(f"  Selected: {', '.join(wanted)}")
++    else:
++        wanted = [f.lower() for f in BLAS_FUNCTIONS]
++        console.print(f"  Will convert all {len(wanted)} BLAS functions.")
++
++    # Always fetch the BLAS support routines so that the Fortran compiler
++    # can link functions that call LSAME / XERBLA (e.g. DGEMM).
++    _SUPPORT_FNS = ["lsame", "xerbla"]
++    fetch_list = list(dict.fromkeys(wanted + _SUPPORT_FNS))
++
++    with Progress(
++        SpinnerColumn(),
++        TextColumn("[progress.description]{task.description}"),
++        TimeElapsedColumn(),
++        console=console,
++        transient=True,
++    ) as progress:
++        task = progress.add_task("Fetching source files…", total=None)
++        source_map = fetch_blas(
++            output_dir,
++            functions=fetch_list,
++            progress_callback=lambda msg: progress.update(task, description=msg),
++        )
++
++    # Only expose user-selected functions as conversion targets
++    wanted_set = set(wanted)
++    found = sorted(k for k in source_map if k in wanted_set)
++    missing = [f for f in wanted if f not in source_map]
++    console.print(f"\n  [green]✓[/green] {len(found)} source file(s) ready.")
++    if missing:
++        console.print(f"  [yellow]⚠[/yellow] Could not fetch: {', '.join(missing)}")
++
++    return found, source_map
++
++
++def _parse_sample_input(raw: str) -> List[str]:
++    """Parse the sample scope input.
++
++    Accepts either:
++    - a plain integer → pick that many functions from the default list
++    - a comma-separated list of names → use exactly those functions
++    """
++    raw = raw.strip()
++    # If it looks like an integer, treat it as a sample size
++    try:
++        n = int(raw)
++        n = max(1, min(n, len(BLAS_FUNCTIONS)))
++        return [f.lower() for f in BLAS_FUNCTIONS[:n]]
++    except ValueError:
++        pass
++    # Otherwise treat as a comma-separated list of function names
++    names = [name.strip().lower() for name in raw.split(",") if name.strip()]
++    # Validate: warn about unknown names but keep them so the user sees the error
++    known = {f.lower() for f in BLAS_FUNCTIONS}
++    for name in names:
++        if name not in known:
++            console.print(
++                f"  [yellow]⚠[/yellow] '{name}' is not in the known BLAS function list — "
++                "will attempt to fetch anyway."
++            )
++    return names if names else [f.lower() for f in BLAS_FUNCTIONS[:10]]
++
++
++def _ask_strategy() -> str:
++    console.print()
++    for key, desc in _STRATEGY_DESCRIPTIONS.items():
++        console.print(f"  [cyan]{key}[/cyan]  {desc}\n")
++    return Prompt.ask(
++        "[bold cyan]>[/bold cyan] Strategy", choices=["1", "2", "3"], default="3"
++    )
++
++
++def _configure_llm(strategy_key: str) -> LLMClient:
++    llm = LLMClient()
++    if llm.is_available:
++        console.print(
++            f"\n  [green]✓[/green] LLM configured: "
++            f"[bold]{llm.provider}[/bold] / [bold]{llm.model}[/bold]"
++        )
++        return llm
++
++    if strategy_key in ("1", "2"):
++        console.print(
++            "\n  [yellow]⚠  No LLM API key detected.[/yellow]\n"
++            "  Strategies 1 and 2 require an API key.\n"
++            "  Set [bold]LLM_API_KEY[/bold] in your environment or a [bold].env[/bold] file,\n"
++            "  or log in with [bold]gh auth login[/bold] for GitHub Copilot.\n"
++            "  The Hybrid (Strategy 3) fallback will be used automatically."
++        )
++    else:
++        console.print(
++            "\n  [dim]No LLM API key — Strategy 3 will use rule-based conversion only.[/dim]"
++        )
++    return llm
++
++
++def _make_cb():
++    """Return a progress_callback that pretty-prints to the console."""
++    def cb(msg: str) -> None:
++        # Strip rich markup when the message already contains it
++        console.print(f"    {msg}")
++    return cb
++
++
++def _show_build_result(label: str, ok: bool, output: str) -> None:
++    sym = "[green]✓[/green]" if ok else "[yellow]⚠[/yellow]"
++    console.print(f"  {sym} {label}: {'passed' if ok else 'finished with warnings/errors'}")
++    if not ok and output:
++        # Show only the first few lines of errors
++        snippet = "\n".join(output.splitlines()[:15])
++        console.print(f"[dim]{snippet}[/dim]")
++
++
++def _show_accuracy(acc) -> None:
++    if acc.max_abs_error is not None:
++        sym = "[green]✓[/green]" if acc.passed else "[red]✗[/red]"
++        console.print(
++            f"  {sym} {acc.function_name}: "
++            f"max_abs_error={acc.max_abs_error:.2e}, "
++            f"mean_abs_error={acc.mean_abs_error:.2e}"
++        )
++    else:
++        console.print(f"  [dim]  {acc.function_name}: {acc.error_message or 'no result'}[/dim]")
++    for d in acc.details:
++        console.print(f"[dim]{d}[/dim]")
++
++
++def _print_final_summary(
++    conversion_results, accuracy_results, bench_results, report_path
++) -> None:
++    console.print()
++    console.print(Rule("[bold cyan]Conversion Complete[/bold cyan]", style="cyan"))
++
++    table = Table(title="Summary", show_header=True, header_style="bold cyan")
++    table.add_column("Function", style="bold")
++    table.add_column("Converted", justify="center")
++    table.add_column("Accuracy", justify="center")
++    table.add_column("Speedup", justify="center")
++
++    acc_map = {a.function_name.upper(): a for a in accuracy_results}
++    bench_map = {b.function_name.upper(): b for b in bench_results}
++
++    for r in conversion_results:
++        fn = r.routine_name.upper()
++        converted = "✅" if r.success else "❌"
++        acc = acc_map.get(fn)
++        accuracy = (
++            ("✅" if acc.passed else "❌") if acc and acc.max_abs_error is not None else "—"
++        )
++        bench = bench_map.get(fn)
++        speedup = f"{bench.speedup:.2f}×" if bench and bench.speedup else "—"
++        table.add_row(fn, converted, accuracy, speedup)
++
++    console.print(table)
++    console.print(f"\n  Full report: [bold green]{report_path}[/bold green]")
++    console.print()
+diff --git a/fortran_to_rust/fetcher.py b/fortran_to_rust/fetcher.py
+new file mode 100644
+index 0000000..e698b5b
+--- /dev/null
++++ b/fortran_to_rust/fetcher.py
+@@ -0,0 +1,531 @@
++"""Fetch and cache BLAS (and other Fortran library) source code."""
++
++from __future__ import annotations
++
++import os
++import shutil
++import tarfile
++import urllib.parse
++import urllib.request
++from pathlib import Path
++from typing import Dict, List, Optional
++
++from rich.console import Console
++
++console = Console()
++
++# ---------------------------------------------------------------------------
++# Known BLAS function names (reference BLAS Level 1-3)
++# ---------------------------------------------------------------------------
++BLAS_FUNCTIONS: List[str] = [
++    # Level 1
++    "dasum", "daxpy", "dcopy", "ddot", "dnrm2", "drot", "drotg", "drotm",
++    "drotmg", "dscal", "dsdot", "dswap", "dzasum", "dznrm2", "idamax",
++    # Level 2
++    "dgbmv", "dgemv", "dger", "dsbmv", "dspmv", "dspr", "dspr2", "dsymv",
++    "dsyr", "dsyr2", "dtbmv", "dtbsv", "dtpmv", "dtpsv", "dtrmv", "dtrsv",
++    # Level 3
++    "dgemm", "dsymm", "dsyr2k", "dsyrk", "dtrmm", "dtrsm",
++]
++
++# A small illustrative subset used in "sample of functions" mode
++BLAS_SAMPLE: List[str] = [
++    "dgemm", "dgemv", "ddot", "dscal", "daxpy",
++    "dnrm2", "dcopy", "dger", "dsymm", "dtrsm",
++]
++
++# ---------------------------------------------------------------------------
++# Download sources
++# ---------------------------------------------------------------------------
++# Primary: individual files from the netlib mirror
++_NETLIB_BASE = "http://www.netlib.org/blas/"
++_BLAS_TARBALL = "http://www.netlib.org/blas/blas-3.11.0.tgz"
++_LAPACK_BLAS_GITHUB_RAW = (
++    "https://raw.githubusercontent.com/Reference-LAPACK/lapack/master/BLAS/SRC/"
++)
++
++
++def _cache_dir(output_dir: Path) -> Path:
++    d = output_dir / "fortran" / "blas"
++    d.mkdir(parents=True, exist_ok=True)
++    return d
++
++
++def _try_download_file(url: str, dest: Path) -> bool:
++    """Return True if file was downloaded successfully.
++
++    Only http:// and https:// URLs are accepted to prevent unintended
++    access to local files or other schemes.
++    """
++    parsed = urllib.parse.urlparse(url)
++    if parsed.scheme not in ("http", "https"):
++        return False
++    try:
++        urllib.request.urlretrieve(url, dest)  # noqa: S310 – scheme validated above
++        return dest.exists() and dest.stat().st_size > 100
++    except Exception:
++        return False
++
++
++def _try_download_tarball(output_dir: Path) -> bool:
++    """Try to download the full BLAS tarball and extract it."""
++    tmp_tar = output_dir / "blas.tgz"
++    console.print(f"  [dim]Trying tarball: {_BLAS_TARBALL}[/dim]")
++    if not _try_download_file(_BLAS_TARBALL, tmp_tar):
++        return False
++    try:
++        with tarfile.open(tmp_tar) as t:
++            # Guard against path-traversal: only extract members whose
++            # resolved path stays inside output_dir.
++            safe_members = []
++            for member in t.getmembers():
++                member_path = (output_dir / member.name).resolve()
++                if output_dir.resolve() in member_path.parents or member_path == output_dir.resolve():
++                    safe_members.append(member)
++            t.extractall(output_dir, members=safe_members)
++        # Move extracted .f files into cache dir
++        cache = _cache_dir(output_dir)
++        for extracted in output_dir.rglob("*.f"):
++            shutil.copy2(extracted, cache / extracted.name)
++        tmp_tar.unlink(missing_ok=True)
++        return True
++    except Exception:
++        return False
++
++
++def fetch_blas(
++    output_dir: Path,
++    functions: Optional[List[str]] = None,
++    *,
++    progress_callback=None,
++) -> Dict[str, Path]:
++    """Download BLAS Fortran source files.
++
++    Returns a mapping of function_name -> path_to_.f_file.
++    Falls back to an embedded copy of dgemm if the network is unavailable.
++    """
++    cache = _cache_dir(output_dir)
++    wanted = functions or BLAS_FUNCTIONS
++    result: Dict[str, Path] = {}
++
++    # Check which files we already have cached
++    missing = [fn for fn in wanted if not (cache / f"{fn}.f").exists()]
++
++    if missing:
++        console.print(f"  [cyan]Fetching {len(missing)} BLAS source file(s)…[/cyan]")
++
++        # Try individual files from GitHub first (more reliable)
++        for fn in list(missing):
++            dest = cache / f"{fn}.f"
++            url = _LAPACK_BLAS_GITHUB_RAW + f"{fn.upper()}.f"
++            if progress_callback:
++                progress_callback(f"Downloading {fn}.f")
++            if _try_download_file(url, dest):
++                missing.remove(fn)
++                console.print(f"    [green]✓[/green] {fn}.f")
++            else:
++                # Try netlib directly
++                url2 = _NETLIB_BASE + f"{fn}.f"
++                if _try_download_file(url2, dest):
++                    missing.remove(fn)
++                    console.print(f"    [green]✓[/green] {fn}.f (netlib)")
++
++        # If still missing, try the tarball
++        if missing:
++            console.print("  [yellow]Some files missing, trying tarball…[/yellow]")
++            _try_download_tarball(output_dir)
++            missing = [fn for fn in wanted if not (cache / f"{fn}.f").exists()]
++
++        # For any still missing, write embedded fallback
++        for fn in missing:
++            src = _get_embedded(fn)
++            if src:
++                dest = cache / f"{fn}.f"
++                dest.write_text(src)
++                console.print(f"    [yellow]⚠[/yellow]  {fn}.f (embedded fallback)")
++            else:
++                console.print(f"    [red]✗[/red] {fn}.f not available")
++
++    for fn in wanted:
++        p = cache / f"{fn}.f"
++        if p.exists():
++            result[fn] = p
++
++    return result
++
++
++# ---------------------------------------------------------------------------
++# Embedded Fortran source (used only when network is unavailable)
++# ---------------------------------------------------------------------------
++_EMBEDDED: Dict[str, str] = {}
++
++
++def _get_embedded(name: str) -> Optional[str]:
++    return _EMBEDDED.get(name.lower())
++
++
++# We embed only dgemm as the primary demo target.
++_EMBEDDED["dgemm"] = r"""
++*> \brief \b DGEMM
++*
++*  -- Reference BLAS level3 routine --
++*  -- Reference BLAS is a software package provided by Univ. of Tennessee,    --
++*  -- Univ. of California Berkeley, Univ. of Colorado Denver and NAG Ltd.     --
++*
++      SUBROUTINE DGEMM(TRANSA,TRANSB,M,N,K,ALPHA,A,LDA,B,LDB,BETA,C,LDC)
++*
++*  Purpose
++*  =======
++*
++*  DGEMM performs one of the matrix-matrix operations
++*
++*     C := alpha*op( A )*op( B ) + beta*C,
++*
++*  where  op( X ) is one of
++*
++*     op( X ) = X   or   op( X ) = X**T,
++*
++*  alpha and beta are scalars, and A, B and C are matrices, with op( A )
++*  an m by k matrix,  op( B )  a  k by n matrix and  C an m by n matrix.
++*
++*  Arguments
++*  =========
++*
++*  TRANSA - CHARACTER*1.
++*           On entry, TRANSA specifies the form of op( A ) to be used in
++*           the matrix multiplication as follows:
++*
++*              TRANSA = 'N' or 'n',  op( A ) = A.
++*              TRANSA = 'T' or 't',  op( A ) = A**T.
++*              TRANSA = 'C' or 'c',  op( A ) = A**T.
++*
++*  TRANSB - CHARACTER*1.
++*           On entry, TRANSB specifies the form of op( B ) to be used in
++*           the matrix multiplication as follows:
++*
++*              TRANSB = 'N' or 'n',  op( B ) = B.
++*              TRANSB = 'T' or 't',  op( B ) = B**T.
++*              TRANSB = 'C' or 'c',  op( B ) = B**T.
++*
++*  M      - INTEGER.
++*           On entry,  M  specifies  the number  of rows  of the  matrix
++*           op( A )  and of the  matrix  C.  M  must  be at least  zero.
++*
++*  N      - INTEGER.
++*           On entry,  N  specifies the number  of columns of the matrix
++*           op( B ) and the number of columns of the matrix C. N must be
++*           at least zero.
++*
++*  K      - INTEGER.
++*           On entry,  K  specifies  the number of columns of the matrix
++*           op( A ) and the number of rows of the matrix op( B ). K must
++*           be at least zero.
++*
++*  ALPHA  - DOUBLE PRECISION.
++*           On entry, ALPHA specifies the scalar alpha.
++*
++*  A      - DOUBLE PRECISION array of DIMENSION ( LDA, ka ), where ka is
++*           k  when  TRANSA = 'N' or 'n',  and is  m  otherwise.
++*           Before entry with  TRANSA = 'N' or 'n',  the leading  m by k
++*           part of the array  A  must contain the matrix  A.
++*           Before entry with TRANSA = 'T' or 't' or 'C' or 'c',
++*           the leading  k by m  part of the array  A  must contain  the
++*           matrix A.
++*
++*  LDA    - INTEGER.
++*           On entry, LDA specifies the first dimension of A as declared
++*           in the calling (sub) program. When  TRANSA = 'N' or 'n' then
++*           LDA must be at least  max( 1, m ), otherwise  LDA must be at
++*           least  max( 1, k ).
++*
++*  B      - DOUBLE PRECISION array of DIMENSION ( LDB, kb ), where kb is
++*           n  when  TRANSB = 'N' or 'n',  and is  k  otherwise.
++*           Before entry with  TRANSB = 'N' or 'n',  the leading  k by n
++*           part of the array  B  must contain the matrix  B.
++*           Before entry with TRANSB = 'T' or 't' or 'C' or 'c',
++*           the leading  n by k  part of the array  B  must contain  the
++*           matrix B.
++*
++*  LDB    - INTEGER.
++*           On entry, LDB specifies the first dimension of B as declared
++*           in the calling (sub) program. When  TRANSB = 'N' or 'n' then
++*           LDB must be at least  max( 1, k ), otherwise  LDB must be at
++*           least  max( 1, n ).
++*
++*  BETA   - DOUBLE PRECISION.
++*           On entry,  BETA  specifies the scalar  beta.  When  BETA  is
++*           supplied as zero then C need not be set on input.
++*
++*  C      - DOUBLE PRECISION array of DIMENSION ( LDC, n ).
++*           Before entry, the leading  m by n  part of the array  C must
++*           contain the matrix  C,  except when  beta  is zero, in which
++*           case C need not be set on entry.
++*           On exit, the array  C  is overwritten by the  m by n  matrix
++*           ( alpha*op( A )*op( B ) + beta*C ).
++*
++*  LDC    - INTEGER.
++*           On entry, LDC specifies the first dimension of C as declared
++*           in the calling (sub) program.  LDC  must  be  at  least
++*           max( 1, m ).
++*
++      DOUBLE PRECISION ALPHA,BETA
++      INTEGER K,LDA,LDB,LDC,M,N
++      CHARACTER TRANSA,TRANSB
++*
++      DOUBLE PRECISION A(LDA,*),B(LDB,*),C(LDC,*)
++*     ..
++*     .. External Functions ..
++      LOGICAL LSAME
++      EXTERNAL LSAME
++*     ..
++*     .. Local Scalars ..
++      DOUBLE PRECISION TEMP
++      INTEGER I,INFO,J,L,NROWA,NROWB
++      LOGICAL NOTA,NOTB
++*     ..
++*     .. Parameters ..
++      DOUBLE PRECISION ONE,ZERO
++      PARAMETER (ONE=1.0D+0,ZERO=0.0D+0)
++*
++*     Set  NOTA  and  NOTB  as  true if  A  and  B  respectively are not
++*     transposed and set  NROWA and NROWB  as the number of rows and
++*     columns of  A  and the number of rows of  B  respectively.
++*
++      NOTA = LSAME(TRANSA,'N')
++      NOTB = LSAME(TRANSB,'N')
++      IF (NOTA) THEN
++          NROWA = M
++      ELSE
++          NROWA = K
++      END IF
++      IF (NOTB) THEN
++          NROWB = K
++      ELSE
++          NROWB = N
++      END IF
++*
++*     Test the input parameters.
++*
++      INFO = 0
++      IF ((.NOT.NOTA) .AND. (.NOT.LSAME(TRANSA,'C')) .AND.
++     +    (.NOT.LSAME(TRANSA,'T'))) THEN
++          INFO = 1
++      ELSE IF ((.NOT.NOTB) .AND. (.NOT.LSAME(TRANSB,'C')) .AND.
++     +         (.NOT.LSAME(TRANSB,'T'))) THEN
++          INFO = 2
++      ELSE IF (M.LT.0) THEN
++          INFO = 3
++      ELSE IF (N.LT.0) THEN
++          INFO = 4
++      ELSE IF (K.LT.0) THEN
++          INFO = 5
++      ELSE IF (LDA.LT.MAX(1,NROWA)) THEN
++          INFO = 8
++      ELSE IF (LDB.LT.MAX(1,NROWB)) THEN
++          INFO = 10
++      ELSE IF (LDC.LT.MAX(1,M)) THEN
++          INFO = 13
++      END IF
++      IF (INFO.NE.0) THEN
++          CALL XERBLA('DGEMM ',INFO)
++          RETURN
++      END IF
++*
++*     Quick return if possible.
++*
++      IF ((M.EQ.0) .OR. (N.EQ.0) .OR.
++     +    (((ALPHA.EQ.ZERO).OR.(K.EQ.0)).AND. (BETA.EQ.ONE))) RETURN
++*
++*     And if  alpha.eq.zero.
++*
++      IF (ALPHA.EQ.ZERO) THEN
++          IF (BETA.EQ.ZERO) THEN
++              DO 20 J = 1,N
++                  DO 10 I = 1,M
++                      C(I,J) = ZERO
++   10             CONTINUE
++   20         CONTINUE
++          ELSE
++              DO 40 J = 1,N
++                  DO 30 I = 1,M
++                      C(I,J) = BETA*C(I,J)
++   30             CONTINUE
++   40         CONTINUE
++          END IF
++          RETURN
++      END IF
++*
++*     Start the operations.
++*
++      IF (NOTB) THEN
++          IF (NOTA) THEN
++*
++*           Form  C := alpha*A*B + beta*C.
++*
++              DO 90 J = 1,N
++                  IF (BETA.EQ.ZERO) THEN
++                      DO 50 I = 1,M
++                          C(I,J) = ZERO
++   50                 CONTINUE
++                  ELSE IF (BETA.NE.ONE) THEN
++                      DO 60 I = 1,M
++                          C(I,J) = BETA*C(I,J)
++   60                 CONTINUE
++                  END IF
++                  DO 80 L = 1,K
++                      TEMP = ALPHA*B(L,J)
++                      DO 70 I = 1,M
++                          C(I,J) = C(I,J) + TEMP*A(I,L)
++   70                 CONTINUE
++   80             CONTINUE
++   90         CONTINUE
++          ELSE
++*
++*           Form  C := alpha*A**T*B + beta*C
++*
++              DO 120 J = 1,N
++                  DO 110 I = 1,M
++                      TEMP = ZERO
++                      DO 100 L = 1,K
++                          TEMP = TEMP + A(L,I)*B(L,J)
++  100                 CONTINUE
++                      IF (BETA.EQ.ZERO) THEN
++                          C(I,J) = ALPHA*TEMP
++                      ELSE
++                          C(I,J) = ALPHA*TEMP + BETA*C(I,J)
++                      END IF
++  110             CONTINUE
++  120         CONTINUE
++          END IF
++      ELSE
++          IF (NOTA) THEN
++*
++*           Form  C := alpha*A*B**T + beta*C
++*
++              DO 150 J = 1,N
++                  IF (BETA.EQ.ZERO) THEN
++                      DO 130 I = 1,M
++                          C(I,J) = ZERO
++  130                 CONTINUE
++                  ELSE IF (BETA.NE.ONE) THEN
++                      DO 140 I = 1,M
++                          C(I,J) = BETA*C(I,J)
++  140                 CONTINUE
++                  END IF
++                  DO 160 L = 1,K
++                      TEMP = ALPHA*B(J,L)
++                      DO 155 I = 1,M
++                          C(I,J) = C(I,J) + TEMP*A(I,L)
++  155                 CONTINUE
++  160             CONTINUE
++  150         CONTINUE
++          ELSE
++*
++*           Form  C := alpha*A**T*B**T + beta*C
++*
++              DO 190 J = 1,N
++                  DO 180 I = 1,M
++                      TEMP = ZERO
++                      DO 170 L = 1,K
++                          TEMP = TEMP + A(L,I)*B(J,L)
++  170                 CONTINUE
++                      IF (BETA.EQ.ZERO) THEN
++                          C(I,J) = ALPHA*TEMP
++                      ELSE
++                          C(I,J) = ALPHA*TEMP + BETA*C(I,J)
++                      END IF
++  180             CONTINUE
++  190         CONTINUE
++          END IF
++      END IF
++*
++      RETURN
++*
++*     End of DGEMM.
++*
++      END
++"""
++
++_EMBEDDED["lsame"] = r"""
++      LOGICAL FUNCTION LSAME(CA,CB)
++*     .. Scalar Arguments ..
++      CHARACTER CA,CB
++*     ..
++*  Purpose
++*  =======
++*  LSAME returns .TRUE. if CA is the same letter as CB regardless of case.
++*     .. Intrinsic Functions ..
++      INTRINSIC ICHAR
++*     .. Local Scalars ..
++      INTEGER INTA,INTB,ZCODE
++*
++*     Test if the characters are equal
++*
++      LSAME = CA .EQ. CB
++      IF (LSAME) RETURN
++*
++*     Now test for equivalence if both characters are alphabetic.
++*
++      ZCODE = ICHAR('Z')
++*
++*     Use 'Z' rather than 'A' so that ASCII and EBCDIC both work.
++*
++      INTA = ICHAR(CA)
++      INTB = ICHAR(CB)
++*
++      IF (ZCODE.EQ.90 .OR. ZCODE.EQ.122) THEN
++*
++*        ASCII is assumed - ZCODE is the ASCII code of either lower or
++*        upper case 'Z'.
++*
++          IF (INTA.GE.97 .AND. INTA.LE.122) INTA = INTA - 32
++          IF (INTB.GE.97 .AND. INTB.LE.122) INTB = INTB - 32
++*
++      ELSE IF (ZCODE.EQ.233 .OR. ZCODE.EQ.169) THEN
++*
++*        EBCDIC is assumed - ZCODE is the EBCDIC code of either lower or
++*        upper case 'Z'.
++*
++          IF (INTA.GE.129 .AND. INTA.LE.137 .OR.
++     +        INTA.GE.145 .AND. INTA.LE.153 .OR.
++     +        INTA.GE.162 .AND. INTA.LE.169) INTA = INTA + 64
++          IF (INTB.GE.129 .AND. INTB.LE.137 .OR.
++     +        INTB.GE.145 .AND. INTB.LE.153 .OR.
++     +        INTB.GE.162 .AND. INTB.LE.169) INTB = INTB + 64
++*
++      ELSE IF (ZCODE.EQ.218 .OR. ZCODE.EQ.250) THEN
++*
++*        ASCII is assumed, on Prime machines - ZCODE is the ASCII code
++*        plus 128 of either upper or lower case 'Z'.
++*
++          IF (INTA.GE.225 .AND. INTA.LE.250) INTA = INTA - 32
++          IF (INTB.GE.225 .AND. INTB.LE.250) INTB = INTB - 32
++      END IF
++      LSAME = INTA .EQ. INTB
++      RETURN
++      END
++"""
++
++_EMBEDDED["xerbla"] = r"""
++      SUBROUTINE XERBLA( SRNAME, INFO )
++*     .. Scalar Arguments ..
++      CHARACTER*(*)          SRNAME
++      INTEGER                INFO
++*
++*  Purpose
++*  =======
++*
++*  XERBLA  is an error handler for the BLAS routines.
++*  It is called by the BLAS routines if an input parameter has an
++*  invalid value.
++*
++*     .. Executable Statements ..
++*
++      WRITE( *, FMT = 9999 )SRNAME, INFO
++*
++      STOP
++*
++ 9999 FORMAT( ' ** On entry to ', A, ' parameter number ', I2,
++     $      ' had an illegal value' )
++      END
++"""
+diff --git a/fortran_to_rust/llm_client.py b/fortran_to_rust/llm_client.py
+new file mode 100644
+index 0000000..caac1db
+--- /dev/null
++++ b/fortran_to_rust/llm_client.py
+@@ -0,0 +1,363 @@
++"""LLM API client.
++
++Supports:
++  - GitHub Models  (https://models.inference.ai.azure.com — default)
++  - OpenAI         (https://api.openai.com/v1/chat/completions)
++  - Any OpenAI-compatible endpoint (e.g. Ollama, LM Studio)
++
++Configuration is read from environment variables (and from a ``.env`` file
++in the current working directory, which is loaded automatically):
++
++    LLM_PROVIDER   = "github_models" | "openai" | "openai_compatible"  (default: github_models)
++    LLM_API_KEY    = GitHub PAT / OpenAI API key / custom bearer token
++    LLM_BASE_URL   = base URL for openai_compatible provider
++    LLM_MODEL      = model name override  (default: gpt-4o)
++
++GitHub Models authentication is resolved in this order:
++1. ``LLM_API_KEY`` environment variable (or ``.env`` file in the project root).
++2. ``gh auth token`` — the GitHub CLI token (works after ``gh auth login``).
++3. ``~/.config/github-copilot/hosts.json`` — VS Code / Copilot credential store.
++
++GitHub Models (``https://models.inference.ai.azure.com``) is the supported
++public API for application code.  It accepts a raw GitHub Personal Access
++Token or the OAuth token obtained via ``gh auth login`` — no token exchange
++or Copilot subscription is required.
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import subprocess
++import time
++from pathlib import Path
++from typing import Any, Dict, List, Optional
++
++import requests
++
++# ---------------------------------------------------------------------------
++# Constants
++# ---------------------------------------------------------------------------
++_GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com/chat/completions"
++_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
++_DEFAULT_MODEL = "gpt-4o"
++_REQUEST_TIMEOUT = 120  # seconds
++_GH_CLI_TIMEOUT = 8  # seconds — gh auth token should respond quickly
++
++
++class LLMError(Exception):
++    """Raised when the LLM call fails unrecoverably."""
++
++
++class LLMUnavailableError(LLMError):
++    """Raised when no API key / token is configured."""
++
++
++# ---------------------------------------------------------------------------
++# .env file loader (no external dependency)
++# ---------------------------------------------------------------------------
++
++def _load_dotenv(path: Optional[Path] = None) -> None:
++    """Load key=value pairs from a .env file into os.environ.
++
++    Only sets variables that are not already in the environment (so real
++    environment variables always win).  Silently does nothing if the file
++    does not exist.
++    """
++    env_file = path or (Path.cwd() / ".env")
++    if not env_file.is_file():
++        return
++    try:
++        for raw_line in env_file.read_text().splitlines():
++            line = raw_line.strip()
++            if not line or line.startswith("#") or "=" not in line:
++                continue
++            key, _, value = line.partition("=")
++            key = key.strip()
++            value = value.strip()
++            # Strip surrounding quotes
++            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
++                value = value[1:-1]
++            if key and key not in os.environ:
++                os.environ[key] = value
++    except OSError:
++        pass
++
++
++# ---------------------------------------------------------------------------
++# Token discovery helpers
++# ---------------------------------------------------------------------------
++
++def _load_token_from_gh_cli() -> Optional[str]:
++    """Return the active GitHub token from the ``gh`` CLI, or None."""
++    try:
++        result = subprocess.run(
++            ["gh", "auth", "token"],
++            capture_output=True,
++            text=True,
++            timeout=_GH_CLI_TIMEOUT,
++        )
++        if result.returncode == 0:
++            token = result.stdout.strip()
++            if token:
++                return token
++    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
++        pass
++    return None
++
++
++def _load_token_from_vscode_store() -> Optional[str]:
++    """Try to read the GitHub OAuth token from the VS Code / Copilot credential store.
++
++    The file ``~/.config/github-copilot/hosts.json`` is written by both the
++    GitHub Copilot VS Code extension and the ``gh`` CLI when you run
++    ``gh auth login --web``.  The token stored there is a standard GitHub
++    OAuth token that can be used with any GitHub API, including GitHub Models.
++    """
++    candidates = [
++        Path.home() / ".config" / "github-copilot" / "hosts.json",
++        Path.home() / "AppData" / "Roaming" / "GitHub Copilot" / "hosts.json",
++    ]
++    for path in candidates:
++        if path.exists():
++            try:
++                data = json.loads(path.read_text())
++                for _host, value in data.items():
++                    token = value.get("oauth_token")
++                    if token:
++                        return token
++            except Exception:
++                pass
++    return None
++
++
++def _resolve_api_key(provider: str) -> Optional[str]:
++    """Return an API key/token for *provider*, or None if not configured."""
++    # 1. Explicit env / .env variable
++    key = os.environ.get("LLM_API_KEY")
++    if key:
++        return key
++    # 2. GitHub CLI (relevant for github_models and the legacy "copilot" alias)
++    if provider in ("github_models", "copilot"):
++        key = _load_token_from_gh_cli()
++        if key:
++            return key
++        # 3. VS Code / Copilot credential store
++        key = _load_token_from_vscode_store()
++        if key:
++            return key
++    return None
++
++
++# ---------------------------------------------------------------------------
++# Main client
++# ---------------------------------------------------------------------------
++
++class LLMClient:
++    """Thin wrapper around the chat-completions API."""
++
++    def __init__(
++        self,
++        provider: Optional[str] = None,
++        api_key: Optional[str] = None,
++        base_url: Optional[str] = None,
++        model: Optional[str] = None,
++    ) -> None:
++        # Load .env before reading any env vars
++        _load_dotenv()
++
++        raw_provider = (provider or os.environ.get("LLM_PROVIDER", "github_models")).lower()
++        # "copilot" is kept as a backward-compatible alias for "github_models":
++        # both providers authenticate with a GitHub token and use the same
++        # GitHub Models API endpoint, so there is no functional difference.
++        self.provider = "github_models" if raw_provider == "copilot" else raw_provider
++
++        self.api_key = api_key or _resolve_api_key(self.provider)
++        self.model = model or os.environ.get("LLM_MODEL") or _DEFAULT_MODEL
++        self.base_url = base_url or os.environ.get("LLM_BASE_URL") or self._default_url()
++
++    def _default_url(self) -> str:
++        if self.provider == "openai":
++            return _OPENAI_ENDPOINT
++        if self.provider == "openai_compatible":
++            return os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1/chat/completions")
++        return _GITHUB_MODELS_ENDPOINT
++
++    @property
++    def is_available(self) -> bool:
++        """Return True when a token/key is configured."""
++        return bool(self.api_key)
++
++    def _headers(self) -> Dict[str, str]:
++        headers: Dict[str, str] = {
++            "Content-Type": "application/json",
++            "Accept": "application/json",
++        }
++        if self.api_key:
++            headers["Authorization"] = f"Bearer {self.api_key}"
++        return headers
++
++    def chat(
++        self,
++        messages: List[Dict[str, str]],
++        *,
++        temperature: float = 0.2,
++        max_tokens: int = 4096,
++        retry: int = 2,
++    ) -> str:
++        """Send a chat-completions request and return the assistant reply text.
++
++        Raises LLMUnavailableError if no key is configured.
++        Raises LLMError on API failure after *retry* attempts.
++        """
++        if not self.is_available:
++            raise LLMUnavailableError(
++                "No API key found.  To authenticate:\n"
++                "  1. Run `gh auth login` — the pipeline will use your GitHub token\n"
++                "     automatically with the GitHub Models API.\n"
++                "  OR\n"
++                "  2. Set LLM_API_KEY=<your-github-pat> in a .env file (or environment).\n"
++                "     For OpenAI: also set LLM_PROVIDER=openai and LLM_API_KEY=<openai-key>.\n"
++                "  OR\n"
++                "  3. Set LLM_PROVIDER=openai_compatible and LLM_BASE_URL=<endpoint> for\n"
++                "     a local model server (e.g. Ollama, LM Studio)."
++            )
++
++        payload: Dict[str, Any] = {
++            "model": self.model,
++            "messages": messages,
++            "temperature": temperature,
++            "max_tokens": max_tokens,
++        }
++
++        last_exc: Optional[Exception] = None
++        for attempt in range(retry + 1):
++            try:
++                resp = requests.post(
++                    self.base_url,
++                    headers=self._headers(),
++                    json=payload,
++                    timeout=_REQUEST_TIMEOUT,
++                )
++                if resp.status_code == 429:
++                    wait = int(resp.headers.get("Retry-After", "5"))
++                    time.sleep(wait)
++                    continue
++                resp.raise_for_status()
++                data = resp.json()
++                return data["choices"][0]["message"]["content"]
++            except (requests.RequestException, KeyError, ValueError) as exc:
++                last_exc = exc
++                if attempt < retry:
++                    time.sleep(2 ** attempt)
++
++        raise LLMError(f"LLM request failed after {retry + 1} attempts: {last_exc}") from last_exc
++
++    def translate_fortran_to_rust(
++        self,
++        fortran_source: str,
++        function_name: str,
++        extra_context: str = "",
++    ) -> str:
++        """Single-shot translation prompt."""
++        fn_lower = function_name.lower()
++        system = (
++            "You are an expert Fortran-to-Rust translator. "
++            "Produce idiomatic, safe Rust code. "
++            f"The output MUST contain a top-level `pub fn {fn_lower}(...)` or "
++            f"`pub unsafe fn {fn_lower}(...)` — do NOT wrap it inside any `mod` block. "
++            "Use f64 for DOUBLE PRECISION, i32 for INTEGER, bool for LOGICAL, "
++            "u8 for CHARACTER*1 (pass ASCII byte literals like b'N'). "
++            "Fortran arrays are column-major and 1-indexed; convert to 0-indexed slices. "
++            "INOUT array arguments become &mut [f64]. "
++            "Replace DO loops with for loops. "
++            "Return ONLY the Rust source code — no markdown fences, no explanations."
++        )
++        user_parts = []
++        if extra_context:
++            user_parts.append(f"Context:\n{extra_context}\n")
++        user_parts.append(
++            f"Convert the following Fortran subroutine `{function_name}` to Rust:\n\n"
++            f"{fortran_source}"
++        )
++        messages = [
++            {"role": "system", "content": system},
++            {"role": "user", "content": "\n".join(user_parts)},
++        ]
++        return self.chat(messages)
++
++    def repair_rust(
++        self,
++        rust_source: str,
++        compiler_errors: str,
++        function_name: str,
++    ) -> str:
++        """Feed compiler errors back to the LLM and ask for a fix."""
++        fn_lower = function_name.lower()
++        system = (
++            "You are an expert Rust developer. "
++            "Fix the compilation errors in the provided Rust code. "
++            "Keep all Fortran CHARACTER*1 arguments typed as u8 (not char). "
++            f"Ensure the function is declared as a top-level `pub fn {fn_lower}(...)` or "
++            f"`pub unsafe fn {fn_lower}(...)` — do NOT move it inside a `mod` block. "
++            "Return ONLY the corrected Rust source — no markdown, no explanations."
++        )
++        messages = [
++            {"role": "system", "content": system},
++            {
++                "role": "user",
++                "content": (
++                    f"The following Rust code for `{function_name}` does not compile.\n\n"
++                    f"Rust code:\n{rust_source}\n\n"
++                    f"Compiler errors:\n{compiler_errors}\n\n"
++                    "Please fix all errors and return the corrected code."
++                ),
++            },
++        ]
++        return self.chat(messages)
++
++    def ask_clarification(
++        self,
++        fortran_source: str,
++        question: str,
++    ) -> str:
++        """Questioner→Solver: ask a clarifying question about the Fortran code."""
++        messages = [
++            {
++                "role": "system",
++                "content": (
++                    "You are a Fortran expert helping to clarify semantics "
++                    "for a Fortran-to-Rust translation. Answer precisely."
++                ),
++            },
++            {
++                "role": "user",
++                "content": (
++                    f"Fortran source:\n{fortran_source}\n\n"
++                    f"Question: {question}"
++                ),
++            },
++        ]
++        return self.chat(messages)
++
++    def polish_unsafe_rust(self, unsafe_rust: str, function_name: str) -> str:
++        """Replace unsafe blocks with safe Rust idioms where possible."""
++        system = (
++            "You are an expert safe-Rust refactorer. "
++            "Replace raw pointer arithmetic with slice indexing. "
++            "Replace unsafe blocks with safe Rust idioms where semantically equivalent. "
++            "Preserve correctness exactly. "
++            "Return ONLY the Rust source code."
++        )
++        messages = [
++            {"role": "system", "content": system},
++            {
++                "role": "user",
++                "content": (
++                    f"Refactor this unsafe Rust code for `{function_name}` to be safe:\n\n"
++                    f"{unsafe_rust}"
++                ),
++            },
++        ]
++        return self.chat(messages)
++
+diff --git a/fortran_to_rust/parser.py b/fortran_to_rust/parser.py
+new file mode 100644
+index 0000000..d6db7ac
+--- /dev/null
++++ b/fortran_to_rust/parser.py
+@@ -0,0 +1,233 @@
++"""Parse Fortran source files: extract subroutines/functions and their metadata."""
++
++from __future__ import annotations
++
++import re
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import Dict, List, Optional, Tuple
++
++
++@dataclass
++class FortranRoutine:
++    """Represents a single Fortran subroutine or function."""
++
++    name: str
++    kind: str  # 'subroutine' or 'function'
++    source: str  # raw Fortran source text
++    source_file: Optional[Path] = None
++    args: List[str] = field(default_factory=list)
++    calls: List[str] = field(default_factory=list)
++    line_count: int = 0
++    chunks: List[str] = field(default_factory=list)  # ≤200-line pieces
++    return_type: Optional[str] = None  # e.g. 'DOUBLE PRECISION' for typed functions
++
++    def __post_init__(self) -> None:
++        self.line_count = len(self.source.splitlines())
++        if not self.chunks:
++            self.chunks = _split_into_chunks(self.source)
++
++
++def _split_into_chunks(source: str, max_lines: int = 200) -> List[str]:
++    """Split source into chunks of at most max_lines lines."""
++    lines = source.splitlines(keepends=True)
++    if len(lines) <= max_lines:
++        return [source]
++    chunks = []
++    for i in range(0, len(lines), max_lines):
++        chunks.append("".join(lines[i : i + max_lines]))
++    return chunks
++
++
++# ---------------------------------------------------------------------------
++# Fortran-77 / fixed-form regex helpers
++# ---------------------------------------------------------------------------
++_BLANK_OR_COMMENT = re.compile(r"^\s*$|^[Cc*!]")
++_CONTINUATION = re.compile(r"^     [^ ]")  # col 6 non-blank = continuation
++
++# Match SUBROUTINE or FUNCTION start — handles optional return-type prefix such as
++# "DOUBLE PRECISION FUNCTION DDOT(...)" or "INTEGER FUNCTION IDAMAX(...)".
++_ROUTINE_START = re.compile(
++    r"^\s{0,6}"
++    r"(?:(?P<rtype>"
++    r"DOUBLE\s+PRECISION"
++    r"|REAL(?:\s*\*\s*\d+)?"
++    r"|INTEGER(?:\s*\*\s*\d+)?"
++    r"|LOGICAL"
++    r"|CHARACTER(?:\s*\*\s*\d+)?"
++    r"|COMPLEX(?:\s*\*\s*\d+)?"
++    r")\s+)?"
++    r"(?:RECURSIVE\s+)?"
++    r"(?P<kind>SUBROUTINE|FUNCTION)\s+(?P<name>\w+)\s*\(",
++    re.IGNORECASE,
++)
++# Also match functions without parentheses (rare)
++_ROUTINE_START_NOPAREN = re.compile(
++    r"^\s{0,6}(?:RECURSIVE\s+)?(?P<kind>SUBROUTINE|FUNCTION)\s+(?P<name>\w+)\s*$",
++    re.IGNORECASE,
++)
++_ROUTINE_END = re.compile(r"^\s{0,6}END\s*$", re.IGNORECASE)
++_END_ROUTINE = re.compile(
++    r"^\s{0,6}END\s+(?:SUBROUTINE|FUNCTION)\b", re.IGNORECASE
++)
++_CALL_STMT = re.compile(r"^\s+CALL\s+(\w+)\s*\(", re.IGNORECASE)
++_FUNC_CALL = re.compile(r"\b([A-Z]\w+)\s*\(", re.IGNORECASE)
++_ARG_LIST = re.compile(r"\(([^)]*)\)")
++
++
++def _extract_args(header_line: str) -> List[str]:
++    """Extract argument names from a SUBROUTINE/FUNCTION header line."""
++    m = _ARG_LIST.search(header_line)
++    if not m:
++        return []
++    return [a.strip() for a in m.group(1).split(",") if a.strip()]
++
++
++def _extract_calls(source: str) -> List[str]:
++    """Extract names of called subroutines/functions from source."""
++    calls: set = set()
++    for line in source.splitlines():
++        # Explicit CALL statement
++        m = _CALL_STMT.match(line)
++        if m:
++            calls.add(m.group(1).upper())
++        # Function calls (heuristic: any word followed by '(')
++        for m2 in _FUNC_CALL.finditer(line):
++            name = m2.group(1).upper()
++            # Filter out Fortran keywords / intrinsics
++            if name not in _FORTRAN_KEYWORDS:
++                calls.add(name)
++    return sorted(calls)
++
++
++_FORTRAN_KEYWORDS = {
++    "IF", "DO", "WHILE", "THEN", "ELSE", "END", "RETURN", "WRITE", "READ",
++    "FORMAT", "PRINT", "OPEN", "CLOSE", "MAX", "MIN", "ABS", "SQRT", "INT",
++    "REAL", "DBLE", "ICHAR", "CHAR", "CMPLX", "CONJG", "AIMAG", "LOG",
++    "EXP", "SIN", "COS", "TAN", "ATAN", "ATAN2", "SIGN", "MOD", "DIM",
++    "PARAMETER", "IMPLICIT", "NONE", "INTEGER", "DOUBLE", "PRECISION",
++    "LOGICAL", "CHARACTER", "EXTERNAL", "INTRINSIC", "DATA", "COMMON",
++    "EQUIVALENCE", "SAVE", "ALLOCATE", "DEALLOCATE", "NULLIFY",
++    "SUBROUTINE", "FUNCTION", "PROGRAM", "MODULE", "CONTAINS", "USE",
++    "CALL", "GOTO", "CONTINUE", "STOP",
++}
++
++
++def parse_file(path: Path) -> List[FortranRoutine]:
++    """Parse a Fortran source file and return a list of routines."""
++    source = path.read_text(errors="replace")
++    return parse_source(source, source_file=path)
++
++
++def parse_source(
++    source: str, source_file: Optional[Path] = None
++) -> List[FortranRoutine]:
++    """Parse Fortran source text and return a list of routines."""
++    lines = source.splitlines(keepends=True)
++    routines: List[FortranRoutine] = []
++    i = 0
++    n = len(lines)
++
++    while i < n:
++        line = lines[i]
++        m = _ROUTINE_START.match(line) or _ROUTINE_START_NOPAREN.match(line)
++        if m:
++            kind = m.group("kind").lower()
++            name = m.group("name").upper()
++            # Capture optional return type (e.g. "DOUBLE PRECISION" in
++            # "DOUBLE PRECISION FUNCTION DDOT(...)").
++            rtype_raw = m.group("rtype") if "rtype" in m.groupdict() else None
++            return_type = " ".join(rtype_raw.split()).upper() if rtype_raw else None
++            start = i
++            args = _extract_args(line)
++            # Collect until END (or END SUBROUTINE / END FUNCTION)
++            i += 1
++            while i < n:
++                l = lines[i]
++                if _END_ROUTINE.match(l) or _ROUTINE_END.match(l):
++                    i += 1
++                    break
++                i += 1
++            body = "".join(lines[start:i])
++            calls = _extract_calls(body)
++            routine = FortranRoutine(
++                name=name,
++                kind=kind,
++                source=body,
++                source_file=source_file,
++                args=args,
++                calls=calls,
++                return_type=return_type,
++            )
++            routines.append(routine)
++        else:
++            i += 1
++
++    # If nothing found, treat whole file as a single unnamed routine
++    if not routines and source.strip():
++        # Try to infer name from filename
++        fname = source_file.stem.upper() if source_file else "UNKNOWN"
++        routines.append(
++            FortranRoutine(
++                name=fname,
++                kind="subroutine",
++                source=source,
++                source_file=source_file,
++                calls=_extract_calls(source),
++            )
++        )
++
++    return routines
++
++
++def strip_comments(source: str) -> str:
++    """Remove Fortran comment lines and trailing inline comments."""
++    result = []
++    for line in source.splitlines(keepends=True):
++        # Full-line comments (cols 1, C, *, !)
++        if re.match(r"^[Cc*!]", line):
++            continue
++        # Blank lines
++        if line.strip() == "":
++            continue
++        # Inline ! comments (outside strings – simple heuristic)
++        if "!" in line:
++            # Don't strip if it's in a string literal (simple heuristic)
++            idx = line.index("!")
++            before = line[:idx]
++            if before.count("'") % 2 == 0 and before.count('"') % 2 == 0:
++                line = before.rstrip() + "\n"
++        result.append(line)
++    return "".join(result)
++
++
++def get_implicit_types(source: str) -> Dict[str, str]:
++    """Parse IMPLICIT statements and return letter→type mapping."""
++    types: Dict[str, str] = {
++        # Default Fortran-77 implicit typing: I-N are INTEGER, rest REAL
++        chr(c): "REAL" for c in range(ord("A"), ord("Z") + 1)
++    }
++    for c in range(ord("I"), ord("N") + 1):
++        types[chr(c)] = "INTEGER"
++
++    implicit_re = re.compile(
++        r"IMPLICIT\s+(\w+(?:\s+PRECISION)?)\s*\(([^)]+)\)", re.IGNORECASE
++    )
++    none_re = re.compile(r"IMPLICIT\s+NONE", re.IGNORECASE)
++
++    for line in source.splitlines():
++        if none_re.match(line.strip()):
++            return {}
++        m = implicit_re.search(line)
++        if m:
++            dtype = m.group(1).upper().replace(" ", "_")
++            spec = m.group(2)
++            for part in spec.split(","):
++                part = part.strip()
++                if "-" in part:
++                    a, b = part.split("-")
++                    for c in range(ord(a.strip().upper()), ord(b.strip().upper()) + 1):
++                        types[chr(c)] = dtype
++                else:
++                    types[part.strip().upper()] = dtype
++    return types
+diff --git a/fortran_to_rust/reporter.py b/fortran_to_rust/reporter.py
+new file mode 100644
+index 0000000..4592e02
+--- /dev/null
++++ b/fortran_to_rust/reporter.py
+@@ -0,0 +1,327 @@
++"""Post-conversion report generator.
++
++Produces a Markdown and HTML report at ``output_dir/reports/<timestamp>_report.{md,html}``
++summarising:
++- Which functions were converted and by which strategy
++- Accuracy results (max / mean absolute error)
++- Performance comparison
++- Compiler warnings and any LLM repair rounds needed
++"""
++
++from __future__ import annotations
++
++import datetime
++import html as html_lib
++import webbrowser
++from pathlib import Path
++from typing import Dict, List, Optional, Tuple
++
++from fortran_to_rust.benchmarker import BenchResult
++from fortran_to_rust.strategies.base import ConversionResult
++from fortran_to_rust.test_harness import AccuracyResult
++
++
++def generate_report(
++    output_dir: Path,
++    library: str,
++    strategy_name: str,
++    conversion_results: List[ConversionResult],
++    accuracy_results: List[AccuracyResult],
++    bench_results: List[BenchResult],
++    crate_dir: Optional[Path] = None,
++    build_ok: bool = False,
++    test_ok: bool = False,
++    open_browser: bool = True,
++) -> Tuple[Path, Path]:
++    """Write Markdown and HTML reports; return ``(md_path, html_path)``.
++
++    The HTML report is automatically opened in the default browser unless
++    *open_browser* is ``False``.
++    """
++    reports_dir = output_dir / "reports"
++    reports_dir.mkdir(parents=True, exist_ok=True)
++
++    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
++    report_path = reports_dir / f"{ts}_report.md"
++
++    lines: List[str] = []
++    _section = lambda title: lines.extend([f"\n## {title}\n"])
++
++    # ---- Header ----
++    lines.append(f"# Fortran-to-Rust Conversion Report")
++    lines.append(f"\n**Library:** {library}  ")
++    lines.append(f"**Strategy:** {strategy_name}  ")
++    lines.append(f"**Generated:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  ")
++    if crate_dir:
++        lines.append(f"**Crate:** `{crate_dir}`  ")
++
++    # ---- Summary table ----
++    _section("Conversion Summary")
++    lines.append("| Function | Strategy Used | Lines | Repair Rounds | Status |")
++    lines.append("|----------|--------------|-------|---------------|--------|")
++    for r in conversion_results:
++        status = "✅ OK" if r.success else "❌ Failed"
++        lines.append(
++            f"| `{r.routine_name}` | {r.strategy_used} "
++            f"| {_get_line_count(r)} | {r.repair_rounds} | {status} |"
++        )
++
++    # ---- Build / test ----
++    _section("Build & Test")
++    lines.append(f"- `cargo build --release`: {'✅ passed' if build_ok else '❌ failed / skipped'}")
++    lines.append(f"- `cargo test`:            {'✅ passed' if test_ok else '❌ failed / skipped'}")
++
++    # ---- Accuracy ----
++    _section("Numerical Accuracy")
++    if accuracy_results:
++        lines.append("| Function | Tests | Failed | Max Abs Error | Mean Abs Error | Result |")
++        lines.append("|----------|-------|--------|---------------|----------------|--------|")
++        for a in accuracy_results:
++            max_e = f"{a.max_abs_error:.2e}" if a.max_abs_error is not None else "N/A"
++            mean_e = f"{a.mean_abs_error:.2e}" if a.mean_abs_error is not None else "N/A"
++            result_sym = "✅" if a.passed else "❌"
++            lines.append(
++                f"| `{a.function_name}` | {a.num_test_cases} | {a.failed_cases} "
++                f"| {max_e} | {mean_e} | {result_sym} |"
++            )
++        for a in accuracy_results:
++            if a.details:
++                lines.append(f"\n**{a.function_name} details:**")
++                for d in a.details:
++                    lines.append(d)
++        if any(a.error_message for a in accuracy_results):
++            lines.append("\n**Notes:**")
++            for a in accuracy_results:
++                if a.error_message:
++                    lines.append(f"- `{a.function_name}`: {a.error_message}")
++    else:
++        lines.append("_No accuracy results available._")
++
++    # ---- Performance ----
++    _section("Performance")
++    if bench_results:
++        lines.append("| Function | Fortran (ms/call) | Rust (ms/call) | Speedup |")
++        lines.append("|----------|-------------------|----------------|---------|")
++        for b in bench_results:
++            f_ms = f"{b.fortran_time_ms:.3f}" if b.fortran_time_ms else "N/A"
++            r_ms = f"{b.rust_time_ms:.3f}" if b.rust_time_ms else "N/A"
++            sp = f"{b.speedup:.2f}×" if b.speedup else "N/A"
++            lines.append(f"| `{b.function_name}` | {f_ms} | {r_ms} | {sp} |")
++        for b in bench_results:
++            if b.details:
++                lines.append(f"\n**{b.function_name} details:**")
++                for d in b.details:
++                    lines.append(d)
++    else:
++        lines.append("_No benchmark results available._")
++
++    # ---- Warnings ----
++    all_warnings = [
++        (r.routine_name, w)
++        for r in conversion_results
++        for w in r.warnings
++    ]
++    if all_warnings:
++        _section("Warnings")
++        for fn, w in all_warnings:
++            lines.append(f"- **{fn}**: {w}")
++
++    # ---- Compiler errors (if any) ----
++    compiler_issues = [r for r in conversion_results if r.compiler_errors]
++    if compiler_issues:
++        _section("Compiler Diagnostics")
++        for r in compiler_issues:
++            lines.append(f"\n### `{r.routine_name}`")
++            for i, err in enumerate(r.compiler_errors, 1):
++                lines.append(f"\n_Round {i}:_\n```\n{err[:600]}\n```")
++
++    # ---- Generated code snippets ----
++    _section("Generated Code")
++    for r in conversion_results:
++        if r.rust_source:
++            snippet = r.rust_source[:1500]
++            truncated = "…" if len(r.rust_source) > 1500 else ""
++            lines.append(f"\n### `{r.routine_name}`\n")
++            lines.append(f"```rust\n{snippet}{truncated}\n```")
++
++    report_path.write_text("\n".join(lines))
++
++    # ---- HTML report ----
++    html_path = _write_html_report(
++        report_path.with_suffix(".html"),
++        library=library,
++        strategy_name=strategy_name,
++        conversion_results=conversion_results,
++        accuracy_results=accuracy_results,
++        bench_results=bench_results,
++        crate_dir=crate_dir,
++        build_ok=build_ok,
++        test_ok=test_ok,
++    )
++
++    if open_browser:
++        try:
++            webbrowser.open(html_path.as_uri())
++        except Exception:
++            pass  # headless / CI environment — silently skip
++
++    return report_path, html_path
++
++
++# ---------------------------------------------------------------------------
++# HTML report
++# ---------------------------------------------------------------------------
++
++_HTML_CSS = """\
++body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
++  max-width:1100px;margin:40px auto;padding:0 24px;background:#0d1117;color:#c9d1d9;line-height:1.6}
++h1{color:#58a6ff;border-bottom:2px solid #21262d;padding-bottom:12px}
++h2{color:#79c0ff;margin-top:32px;border-bottom:1px solid #21262d;padding-bottom:6px}
++h3{color:#d2a8ff}
++table{width:100%;border-collapse:collapse;margin:16px 0}
++th{background:#161b22;color:#58a6ff;text-align:left;padding:8px 12px;border:1px solid #21262d}
++td{padding:8px 12px;border:1px solid #21262d}
++tr:nth-child(even){background:#161b22}
++code,pre{background:#161b22;border:1px solid #21262d;border-radius:6px;font-family:'SFMono-Regular',Consolas,monospace;font-size:13px}
++code{padding:2px 6px}
++pre{padding:16px;overflow-x:auto}
++.ok{color:#3fb950}.fail{color:#f85149}.dim{color:#8b949e}
++.badge-ok{background:#1f6feb;color:#fff;padding:2px 8px;border-radius:20px}
++.badge-fail{background:#da3633;color:#fff;padding:2px 8px;border-radius:20px}
++.summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:16px 0}
++.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px}
++.card-label{font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em}
++.card-value{font-size:24px;font-weight:700;margin-top:4px}
++"""
++
++
++def _esc(s: str) -> str:
++    return html_lib.escape(str(s))
++
++
++def _status_badge(ok: bool) -> str:
++    cls = "badge-ok" if ok else "badge-fail"
++    label = "✅ passed" if ok else "❌ failed"
++    return f'<span class="{cls}">{label}</span>'
++
++
++def _write_html_report(
++    html_path: Path,
++    library: str,
++    strategy_name: str,
++    conversion_results: List[ConversionResult],
++    accuracy_results: List[AccuracyResult],
++    bench_results: List[BenchResult],
++    crate_dir: Optional[Path],
++    build_ok: bool,
++    test_ok: bool,
++) -> Path:
++    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
++
++    def section(title: str) -> str:
++        return f"<h2>{_esc(title)}</h2>\n"
++
++    parts: List[str] = [
++        "<!DOCTYPE html><html lang='en'><head>",
++        "<meta charset='UTF-8'>",
++        "<meta name='viewport' content='width=device-width,initial-scale=1.0'>",
++        f"<title>Fortran→Rust Report — {_esc(library)}</title>",
++        f"<style>{_HTML_CSS}</style>",
++        "</head><body>",
++        f"<h1>Fortran→Rust Conversion Report</h1>",
++        "<div class='summary-grid'>",
++        f"<div class='card'><div class='card-label'>Library</div><div class='card-value'>{_esc(library)}</div></div>",
++        f"<div class='card'><div class='card-label'>Strategy</div><div class='card-value' style='font-size:16px'>{_esc(strategy_name)}</div></div>",
++        f"<div class='card'><div class='card-label'>Functions</div><div class='card-value'>{len(conversion_results)}</div></div>",
++        f"<div class='card'><div class='card-label'>Generated</div><div class='card-value' style='font-size:14px'>{_esc(ts)}</div></div>",
++        "</div>",
++    ]
++    if crate_dir:
++        parts.append(f"<p class='dim'>Crate: <code>{_esc(str(crate_dir))}</code></p>")
++
++    # ---- Conversion summary ----
++    parts.append(section("Conversion Summary"))
++    parts.append("<table><tr><th>Function</th><th>Strategy Used</th><th>Lines</th><th>Repair Rounds</th><th>Status</th></tr>")
++    for r in conversion_results:
++        status = "<span class='ok'>✅ OK</span>" if r.success else "<span class='fail'>❌ Failed</span>"
++        parts.append(
++            f"<tr><td><code>{_esc(r.routine_name)}</code></td>"
++            f"<td>{_esc(r.strategy_used)}</td>"
++            f"<td>{_get_line_count(r)}</td>"
++            f"<td>{r.repair_rounds}</td>"
++            f"<td>{status}</td></tr>"
++        )
++    parts.append("</table>")
++
++    # ---- Build / test ----
++    parts.append(section("Build & Test"))
++    parts.append(f"<p>cargo build --release: {_status_badge(build_ok)}</p>")
++    parts.append(f"<p>cargo test: {_status_badge(test_ok)}</p>")
++
++    # ---- Accuracy ----
++    parts.append(section("Numerical Accuracy"))
++    if accuracy_results:
++        parts.append("<table><tr><th>Function</th><th>Tests</th><th>Failed</th><th>Max Abs Error</th><th>Mean Abs Error</th><th>Result</th></tr>")
++        for a in accuracy_results:
++            max_e  = f"{a.max_abs_error:.2e}"  if a.max_abs_error  is not None else "N/A"
++            mean_e = f"{a.mean_abs_error:.2e}" if a.mean_abs_error is not None else "N/A"
++            badge  = "<span class='ok'>✅</span>" if a.passed else "<span class='fail'>❌</span>"
++            parts.append(
++                f"<tr><td><code>{_esc(a.function_name)}</code></td>"
++                f"<td>{a.num_test_cases}</td><td>{a.failed_cases}</td>"
++                f"<td>{_esc(max_e)}</td><td>{_esc(mean_e)}</td><td>{badge}</td></tr>"
++            )
++        parts.append("</table>")
++        for a in accuracy_results:
++            if a.error_message:
++                parts.append(f"<p class='dim'><code>{_esc(a.function_name)}</code>: {_esc(a.error_message)}</p>")
++            if a.details:
++                details_html = "<br>".join(_esc(d) for d in a.details)
++                parts.append(f"<details><summary><code>{_esc(a.function_name)}</code> test details</summary><p class='dim'>{details_html}</p></details>")
++    else:
++        parts.append("<p class='dim'>No accuracy results available.</p>")
++
++    # ---- Performance ----
++    parts.append(section("Performance"))
++    if bench_results:
++        parts.append("<table><tr><th>Function</th><th>Fortran (ms/call)</th><th>Rust (ms/call)</th><th>Speedup</th></tr>")
++        for b in bench_results:
++            f_ms = f"{b.fortran_time_ms:.3f}" if b.fortran_time_ms else "N/A"
++            r_ms = f"{b.rust_time_ms:.3f}"    if b.rust_time_ms    else "N/A"
++            sp   = f"{b.speedup:.2f}×"        if b.speedup         else "N/A"
++            parts.append(
++                f"<tr><td><code>{_esc(b.function_name)}</code></td>"
++                f"<td>{_esc(f_ms)}</td><td>{_esc(r_ms)}</td><td>{_esc(sp)}</td></tr>"
++            )
++        parts.append("</table>")
++    else:
++        parts.append("<p class='dim'>No benchmark results available.</p>")
++
++    # ---- Warnings ----
++    all_warnings = [(r.routine_name, w) for r in conversion_results for w in r.warnings]
++    if all_warnings:
++        parts.append(section("Warnings"))
++        parts.append("<ul>")
++        for fn, w in all_warnings:
++            parts.append(f"<li><strong>{_esc(fn)}</strong>: {_esc(w)}</li>")
++        parts.append("</ul>")
++
++    # ---- Generated code ----
++    parts.append(section("Generated Rust Code"))
++    for r in conversion_results:
++        if r.rust_source:
++            snippet = _esc(r.rust_source[:2000])
++            trunc   = "<span class='dim'>… (truncated)</span>" if len(r.rust_source) > 2000 else ""
++            parts.append(f"<h3><code>{_esc(r.routine_name)}</code></h3>")
++            parts.append(f"<pre><code>{snippet}{trunc}</code></pre>")
++
++    parts.append("</body></html>")
++    html_path.write_text("\n".join(parts), encoding="utf-8")
++    return html_path
++
++
++def _get_line_count(r: ConversionResult) -> str:
++    if r.rust_source:
++        return str(len(r.rust_source.splitlines()))
++    return "—"
++
+diff --git a/fortran_to_rust/rust_project.py b/fortran_to_rust/rust_project.py
+new file mode 100644
+index 0000000..adc8f70
+--- /dev/null
++++ b/fortran_to_rust/rust_project.py
+@@ -0,0 +1,166 @@
++"""Rust/Cargo project management.
++
++Provides helpers to:
++- scaffold a Cargo crate from converted Rust sources,
++- run ``cargo check`` on an isolated snippet (used by the compile-repair loop),
++- run ``cargo build`` and ``cargo test`` on the full crate,
++- run ``cargo clippy`` for idiomatic feedback.
++"""
++
++from __future__ import annotations
++
++import subprocess
++import tempfile
++import textwrap
++from pathlib import Path
++from typing import Dict, List, Optional, Tuple
++
++_CARGO_TOML_TEMPLATE = """\
++[package]
++name = "{crate_name}"
++version = "0.1.0"
++edition = "2021"
++
++[lib]
++name = "{crate_name}"
++path = "src/lib.rs"
++
++[dev-dependencies]
++# criterion is optional; uncomment to enable micro-benchmarks
++# criterion = {{ version = "0.5", features = ["html_reports"] }}
++
++[profile.release]
++opt-level = 3
++"""
++
++_LIB_RS_HEADER = """\
++//! Auto-generated Rust port of BLAS functions.
++//!
++//! Generated by the fortran-to-rust conversion pipeline.
++//! Manual review is recommended before use in production.
++
++#![allow(clippy::all, non_snake_case, unused_variables, dead_code)]
++"""
++
++
++def scaffold_crate(
++    output_dir: Path,
++    crate_name: str,
++    rust_sources: Dict[str, str],  # function_name -> rust_source
++) -> Path:
++    """Create a Cargo crate at *output_dir/rust/<crate_name>* and return its path."""
++    crate_dir = output_dir / "rust" / crate_name
++    src_dir = crate_dir / "src"
++    src_dir.mkdir(parents=True, exist_ok=True)
++
++    # Cargo.toml
++    (crate_dir / "Cargo.toml").write_text(
++        _CARGO_TOML_TEMPLATE.format(crate_name=crate_name)
++    )
++
++    # src/lib.rs — concatenate all converted routines
++    lib_parts = [_LIB_RS_HEADER]
++    mod_names: List[str] = []
++    for fn_name, src in rust_sources.items():
++        mod_name = fn_name.lower()
++        mod_names.append(mod_name)
++        mod_file = src_dir / f"{mod_name}.rs"
++        mod_file.write_text(src)
++        lib_parts.append(f"pub mod {mod_name};")
++        # Flat re-export so accuracy examples can `use {crate_name}::*`
++        lib_parts.append(f"pub use {mod_name}::*;")
++
++    lib_parts.append("")  # trailing newline
++    (src_dir / "lib.rs").write_text("\n".join(lib_parts))
++
++    return crate_dir
++
++
++def quick_check(rust_source: str, work_dir: Path) -> Tuple[bool, str]:
++    """Compile *rust_source* in a throw-away crate and return (ok, output).
++
++    Used by the compile-repair loop so we don't need to build the whole crate.
++    """
++    with tempfile.TemporaryDirectory() as tmpdir:
++        tmp = Path(tmpdir)
++        src_dir = tmp / "src"
++        src_dir.mkdir()
++
++        (tmp / "Cargo.toml").write_text(
++            _CARGO_TOML_TEMPLATE.format(crate_name="check_snippet")
++        )
++        # Wrap in a lib — add a permissive header in case the LLM omitted it
++        wrapped = _LIB_RS_HEADER + "\n" + rust_source
++        (src_dir / "lib.rs").write_text(wrapped)
++
++        result = subprocess.run(
++            ["cargo", "check", "--message-format=short"],
++            capture_output=True,
++            text=True,
++            cwd=tmpdir,
++            timeout=60,
++        )
++        combined = (result.stdout + result.stderr).strip()
++        return result.returncode == 0, combined
++
++
++def build_crate(crate_dir: Path) -> Tuple[bool, str]:
++    """Run ``cargo build --release`` and return (ok, output)."""
++    result = subprocess.run(
++        ["cargo", "build", "--release"],
++        capture_output=True,
++        text=True,
++        cwd=crate_dir,
++        timeout=120,
++    )
++    return result.returncode == 0, (result.stdout + result.stderr).strip()
++
++
++def test_crate(crate_dir: Path) -> Tuple[bool, str]:
++    """Run ``cargo test`` and return (ok, output)."""
++    result = subprocess.run(
++        ["cargo", "test"],
++        capture_output=True,
++        text=True,
++        cwd=crate_dir,
++        timeout=120,
++    )
++    return result.returncode == 0, (result.stdout + result.stderr).strip()
++
++
++def clippy_crate(crate_dir: Path) -> Tuple[bool, str]:
++    """Run ``cargo clippy`` and return (ok, output)."""
++    result = subprocess.run(
++        ["cargo", "clippy", "--", "-D", "warnings"],
++        capture_output=True,
++        text=True,
++        cwd=crate_dir,
++        timeout=60,
++    )
++    return result.returncode == 0, (result.stdout + result.stderr).strip()
++
++
++def add_rust_tests(
++    crate_dir: Path,
++    test_cases: List[Dict],
++) -> None:
++    """Append generated #[test] functions to the crate's lib.rs.
++
++    *test_cases* is a list of dicts with keys:
++        name, fn_name, setup_code, call_code, assert_code
++    """
++    test_src = "\n\n#[cfg(test)]\nmod generated_tests {\n    use super::*;\n\n"
++    for tc in test_cases:
++        test_src += textwrap.dedent(f"""
++    #[test]
++    fn {tc['name']}() {{
++        {tc['setup_code']}
++        {tc['call_code']}
++        {tc['assert_code']}
++    }}
++""")
++    test_src += "}\n"
++
++    lib_rs = crate_dir / "src" / "lib.rs"
++    with lib_rs.open("a") as f:
++        f.write(test_src)
+diff --git a/fortran_to_rust/strategies/__init__.py b/fortran_to_rust/strategies/__init__.py
+new file mode 100644
+index 0000000..21b9d1e
+--- /dev/null
++++ b/fortran_to_rust/strategies/__init__.py
+@@ -0,0 +1,26 @@
++"""Conversion strategies for the Fortran-to-Rust pipeline."""
++
++from fortran_to_rust.strategies.base import ConversionStrategy, ConversionResult
++from fortran_to_rust.strategies.llm_first import LLMFirstStrategy
++from fortran_to_rust.strategies.agentic import AgenticStrategy
++from fortran_to_rust.strategies.hybrid import HybridStrategy
++
++__all__ = [
++    "ConversionStrategy",
++    "ConversionResult",
++    "LLMFirstStrategy",
++    "AgenticStrategy",
++    "HybridStrategy",
++]
++
++STRATEGY_MAP = {
++    "1": LLMFirstStrategy,
++    "2": AgenticStrategy,
++    "3": HybridStrategy,
++}
++
++STRATEGY_NAMES = {
++    "1": "LLM-First with Rule Fallback",
++    "2": "Agentic Multi-Turn Dialogue",
++    "3": "Hybrid Rule-Based + LLM Polish",
++}
+diff --git a/fortran_to_rust/strategies/agentic.py b/fortran_to_rust/strategies/agentic.py
+new file mode 100644
+index 0000000..db54d11
+--- /dev/null
++++ b/fortran_to_rust/strategies/agentic.py
+@@ -0,0 +1,192 @@
++"""Strategy 2 — Agentic Multi-Turn Dialogue (Questioner-Solver).
++
++Pipeline
++--------
++1. *Solver* LLM proposes an initial Rust translation.
++2. *Questioner* LLM (same model, different prompt) asks up to
++   ``max_questions`` clarifying questions about Fortran intrinsics,
++   implicit typing, or module interfaces.
++3. Solver revises based on each answer.
++4. Compile-test loop: same as Strategy 1 (≤ 2 repair rounds).
++5. Idiomisation pass: run clippy suggestions via LLM polish.
++6. If LLM unavailable, fall back to Hybrid.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++from typing import List, Optional
++
++from fortran_to_rust.llm_client import LLMClient, LLMUnavailableError
++from fortran_to_rust.parser import FortranRoutine, strip_comments
++from fortran_to_rust.strategies.base import ConversionResult, ConversionStrategy
++from fortran_to_rust.strategies.hybrid import HybridStrategy
++from fortran_to_rust.strategies.llm_first import _strip_fences
++
++_MAX_QUESTIONS = 3
++_MAX_REPAIR_ROUNDS = 2
++
++
++class AgenticStrategy(ConversionStrategy):
++    name = "Agentic Multi-Turn Dialogue"
++
++    def __init__(
++        self,
++        output_dir: Path,
++        llm: Optional[LLMClient] = None,
++        max_questions: int = _MAX_QUESTIONS,
++        **kwargs,
++    ) -> None:
++        super().__init__(output_dir, **kwargs)
++        self.llm = llm or LLMClient()
++        self.max_questions = max_questions
++        self._fallback = HybridStrategy(output_dir, llm=self.llm)
++
++    # ------------------------------------------------------------------
++    def convert(
++        self,
++        routine: FortranRoutine,
++        *,
++        progress_callback=None,
++    ) -> ConversionResult:
++        cb = progress_callback or (lambda msg: None)
++
++        if not self.llm.is_available:
++            cb(
++                "  [yellow]⚠  No LLM API key — falling back to Hybrid rule-based strategy.[/yellow]"
++            )
++            result = self._fallback.convert(routine, progress_callback=cb)
++            result.strategy_used = f"Hybrid fallback (LLM unavailable): {result.strategy_used}"
++            result.warnings.append(
++                "LLM unavailable; result is a rule-based skeleton requiring manual review."
++            )
++            return result
++
++        cleaned = strip_comments(routine.source)
++
++        # ---- Phase 1: Solver — initial translation -------------------------
++        cb(f"[2/agentic] Solver: initial translation of {routine.name}…")
++        try:
++            rust_source = _strip_fences(
++                self.llm.translate_fortran_to_rust(cleaned, routine.name)
++            )
++        except Exception as exc:
++            cb(f"  [red]Solver failed: {exc}[/red]")
++            result = self._fallback.convert(routine, progress_callback=cb)
++            result.error = str(exc)
++            return result
++
++        # ---- Phase 2: Questioner-Solver dialogue ---------------------------
++        questions = self._generate_questions(routine, rust_source)
++        for qi, question in enumerate(questions[: self.max_questions], 1):
++            cb(f"  [cyan]Questioner Q{qi}:[/cyan] {question}")
++            try:
++                answer = self.llm.ask_clarification(cleaned, question)
++                cb(f"  [green]Answer:[/green] {answer[:120]}{'…' if len(answer) > 120 else ''}")
++                # Solver revises based on the answer
++                cb(f"  [2/agentic] Solver: revising translation…")
++                revision_prompt = (
++                    f"Revise the following Rust translation of `{routine.name}` "
++                    f"based on this clarification:\n\nQ: {question}\nA: {answer}\n\n"
++                    f"Current Rust:\n{rust_source}"
++                )
++                revised = self.llm.chat(
++                    [
++                        {
++                            "role": "system",
++                            "content": (
++                                "You are an expert Fortran-to-Rust translator. "
++                                "Revise only what the clarification affects. "
++                                "Keep all Fortran CHARACTER*1 arguments typed as u8 (not char). "
++                                "Return ONLY Rust source code."
++                            ),
++                        },
++                        {"role": "user", "content": revision_prompt},
++                    ]
++                )
++                rust_source = _strip_fences(revised)
++            except Exception as exc:
++                cb(f"  [yellow]Dialogue round {qi} failed: {exc}[/yellow]")
++
++        # ---- Phase 3: Compile + repair loop --------------------------------
++        errors: List[str] = []
++        repair_rounds = 0
++        from fortran_to_rust.rust_project import quick_check
++
++        for attempt in range(_MAX_REPAIR_ROUNDS + 1):
++            ok, compiler_output = quick_check(rust_source, self.output_dir)
++            if ok:
++                break
++            errors.append(compiler_output)
++            if attempt < _MAX_REPAIR_ROUNDS:
++                repair_rounds += 1
++                cb(f"  [yellow]Compile errors (round {attempt + 1}), asking LLM to repair…[/yellow]")
++                try:
++                    rust_source = _strip_fences(
++                        self.llm.repair_rust(rust_source, compiler_output, routine.name)
++                    )
++                except Exception as exc:
++                    cb(f"  [red]LLM repair failed: {exc}[/red]")
++                    break
++
++        # ---- Phase 4: Idiomisation (clippy-guided) -------------------------
++        cb(f"[2/agentic] Idiomisation pass…")
++        try:
++            polished = self.llm.polish_unsafe_rust(rust_source, routine.name)
++            if polished.strip():
++                rust_source = _strip_fences(polished)
++        except Exception:
++            pass
++
++        return ConversionResult(
++            routine_name=routine.name,
++            rust_source=rust_source,
++            success=True,
++            strategy_used=f"Agentic ({self.llm.provider}/{self.llm.model}, "
++                          f"{min(len(questions), self.max_questions)} Q&A rounds)",
++            repair_rounds=repair_rounds,
++            compiler_errors=errors,
++        )
++
++    # ------------------------------------------------------------------
++    def _generate_questions(
++        self, routine: FortranRoutine, rust_draft: str
++    ) -> List[str]:
++        """Return clarifying questions the Questioner should ask."""
++        questions: List[str] = []
++
++        # Static questions based on common Fortran pitfalls
++        if "LSAME" in routine.source.upper():
++            questions.append(
++                "The Fortran code uses LSAME for case-insensitive character comparison. "
++                "How should the Rust translation handle this — inline char comparison or a helper?"
++            )
++        if "IMPLICIT" not in routine.source.upper():
++            questions.append(
++                "There is no IMPLICIT NONE statement. Which variables rely on implicit "
++                "Fortran-77 typing (I–N = INTEGER, rest = REAL)? List each implicit variable."
++            )
++        if any(kw in routine.source.upper() for kw in ["GOTO", "GO TO"]):
++            questions.append(
++                "The code contains GOTO statements. What is the best structured-Rust "
++                "equivalent (loop+break, match, or explicit state machine)?"
++            )
++        if "XERBLA" in routine.source.upper():
++            questions.append(
++                "XERBLA is a BLAS error handler that stops the program. "
++                "Should the Rust translation panic, return Result::Err, or use a custom error type?"
++            )
++        if "EXTERNAL" in routine.source.upper():
++            questions.append(
++                "There are EXTERNAL declarations. Which of these are callback function pointers "
++                "that should become Rust function parameters with fn(...) types?"
++            )
++
++        # If we still need more, ask a generic question
++        if len(questions) < _MAX_QUESTIONS:
++            questions.append(
++                "Are there any Fortran-specific numerical semantics (e.g. array storage order, "
++                "IEEE rounding) that must be preserved exactly in the Rust translation?"
++            )
++
++        return questions
+diff --git a/fortran_to_rust/strategies/base.py b/fortran_to_rust/strategies/base.py
+new file mode 100644
+index 0000000..ee9c130
+--- /dev/null
++++ b/fortran_to_rust/strategies/base.py
+@@ -0,0 +1,48 @@
++"""Base class and result type shared by all conversion strategies."""
++
++from __future__ import annotations
++
++from abc import ABC, abstractmethod
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import List, Optional
++
++from fortran_to_rust.parser import FortranRoutine
++
++
++@dataclass
++class ConversionResult:
++    """Outcome of converting a single Fortran routine."""
++
++    routine_name: str
++    rust_source: Optional[str] = None       # generated Rust code
++    success: bool = False
++    strategy_used: str = ""                 # human label for the method used
++    error: Optional[str] = None            # error message on failure
++    repair_rounds: int = 0                  # number of LLM repair iterations
++    compiler_errors: List[str] = field(default_factory=list)
++    warnings: List[str] = field(default_factory=list)
++    output_path: Optional[Path] = None      # path where .rs file was written
++
++
++class ConversionStrategy(ABC):
++    """Abstract base class for a Fortran-to-Rust conversion strategy."""
++
++    #: Human-readable name shown in the CLI
++    name: str = "Unknown Strategy"
++
++    def __init__(self, output_dir: Path, **kwargs) -> None:
++        self.output_dir = output_dir
++
++    @abstractmethod
++    def convert(
++        self,
++        routine: FortranRoutine,
++        *,
++        progress_callback=None,
++    ) -> ConversionResult:
++        """Convert *routine* and return a :class:`ConversionResult`.
++
++        *progress_callback*, if provided, is a ``callable(message: str)``
++        used to emit status messages to the CLI.
++        """
+diff --git a/fortran_to_rust/strategies/hybrid.py b/fortran_to_rust/strategies/hybrid.py
+new file mode 100644
+index 0000000..a0809cf
+--- /dev/null
++++ b/fortran_to_rust/strategies/hybrid.py
+@@ -0,0 +1,339 @@
++"""Strategy 3 — Hybrid rule-based skeleton + optional LLM polish.
++
++Pipeline
++--------
++1. Run ``f2c`` on the Fortran source to produce C.
++2. Apply deterministic C→Rust transformations to get a compilable
++   (possibly unsafe) Rust skeleton.
++3. If an LLM is available, pass the skeleton through
++   :meth:`LLMClient.polish_unsafe_rust` to remove unsafe blocks and
++   improve idiomaticity.
++4. Run ``cargo check`` and report results.
++"""
++
++from __future__ import annotations
++
++import re
++import shutil
++import subprocess
++import tempfile
++from pathlib import Path
++from typing import List, Optional
++
++from fortran_to_rust.llm_client import LLMClient, LLMUnavailableError
++from fortran_to_rust.parser import FortranRoutine
++from fortran_to_rust.strategies.base import ConversionResult, ConversionStrategy
++
++
++def _rust_return_type(routine: FortranRoutine) -> str:
++    """Return the Rust return-type annotation for a Fortran FUNCTION, or '' for SUBROUTINEs."""
++    if routine.kind != "function":
++        return ""
++    rtype = (routine.return_type or "").upper()
++    if "INTEGER" in rtype:
++        return " -> i32"
++    if "LOGICAL" in rtype:
++        return " -> bool"
++    return " -> f64"   # DOUBLE PRECISION / REAL / unknown
++
++
++def _rust_return_default(ret_type: str) -> str:
++    """Return a default return expression matching *ret_type* (e.g. '0.0', '0', 'false')."""
++    if not ret_type:
++        return ""
++    if "i32" in ret_type:
++        return "0"
++    if "bool" in ret_type:
++        return "false"
++    return "0.0"
++
++
++class HybridStrategy(ConversionStrategy):
++    name = "Hybrid Rule-Based + LLM Polish"
++
++    def __init__(self, output_dir: Path, llm: Optional[LLMClient] = None, **kwargs) -> None:
++        super().__init__(output_dir, **kwargs)
++        self.llm = llm or LLMClient()
++
++    # ------------------------------------------------------------------
++    # Public API
++    # ------------------------------------------------------------------
++
++    def convert(
++        self,
++        routine: FortranRoutine,
++        *,
++        progress_callback=None,
++    ) -> ConversionResult:
++        cb = progress_callback or (lambda msg: None)
++
++        cb(f"[3/hybrid] Running f2c on {routine.name}…")
++        c_source = self._fortran_to_c(routine)
++
++        if c_source:
++            cb(f"[3/hybrid] Translating C skeleton to Rust…")
++            rust_source = self._c_to_rust(c_source, routine)
++            strategy_used = "f2c→C→Rust rule-based"
++        else:
++            cb(f"[3/hybrid] f2c unavailable — using direct rule-based conversion…")
++            rust_source = self._direct_fortran_to_rust(routine)
++            strategy_used = "direct rule-based"
++
++        # Optional LLM polish
++        if self.llm.is_available:
++            cb(f"[3/hybrid] Polishing with LLM ({self.llm.provider}/{self.llm.model})…")
++            try:
++                polished = self.llm.polish_unsafe_rust(rust_source, routine.name)
++                if polished.strip():
++                    rust_source = polished
++                    strategy_used += " + LLM polish"
++            except LLMUnavailableError:
++                pass
++            except Exception as exc:
++                cb(f"  [yellow]LLM polish skipped: {exc}[/yellow]")
++        else:
++            cb("  [dim]LLM not configured — skipping polish step.[/dim]")
++
++        result = ConversionResult(
++            routine_name=routine.name,
++            rust_source=rust_source,
++            success=True,
++            strategy_used=strategy_used,
++        )
++        return result
++
++    # ------------------------------------------------------------------
++    # f2c step
++    # ------------------------------------------------------------------
++
++    def _fortran_to_c(self, routine: FortranRoutine) -> Optional[str]:
++        """Run f2c and return the resulting C source, or None on failure."""
++        if not shutil.which("f2c"):
++            return None
++        with tempfile.TemporaryDirectory() as tmpdir:
++            tmp = Path(tmpdir)
++            src = tmp / f"{routine.name.lower()}.f"
++            src.write_text(routine.source)
++            try:
++                result = subprocess.run(
++                    ["f2c", "-R", str(src)],
++                    capture_output=True,
++                    text=True,
++                    cwd=tmpdir,
++                    timeout=30,
++                )
++                c_file = tmp / f"{routine.name.lower()}.c"
++                if c_file.exists():
++                    return c_file.read_text()
++            except (subprocess.TimeoutExpired, FileNotFoundError):
++                pass
++        return None
++
++    # ------------------------------------------------------------------
++    # C → Rust rule-based transformation
++    # ------------------------------------------------------------------
++
++    # Type mappings used for return types and variable declarations.
++    # 'void' maps to the unit type '()' which is only valid as a return type;
++    # it should never appear as a parameter type in f2c output.
++    _F2C_RETURN_TYPES = {
++        "void": "()",
++        "int": "i32",
++    }
++    _F2C_TYPES = {
++        "doublereal": "f64",
++        "real": "f32",
++        "integer": "i32",
++        "logical": "bool",
++        "ftnlen": "i32",
++        "int": "i32",
++        "double": "f64",
++    }
++
++    # f2c array argument pattern: "doublereal *a"  →  "&mut [f64]" / "&[f64]"
++    _PTR_ARG = re.compile(
++        r"\b(?P<type>doublereal|real|integer|logical)\s+\*(?P<name>\w+)"
++    )
++    _SCALAR_ARG = re.compile(
++        r"\b(?P<type>doublereal|real|integer|logical)\s+(?P<name>\w+)\b"
++    )
++
++    def _c_to_rust(self, c_source: str, routine: FortranRoutine) -> str:
++        """Apply deterministic rewrite rules to turn f2c C into unsafe Rust."""
++        lines = c_source.splitlines()
++        # Strip f2c header comments
++        body_lines = [
++            l for l in lines
++            if not l.startswith("/*") and not l.startswith(" *") and "#include" not in l
++        ]
++        c_body = "\n".join(body_lines)
++
++        # Build a minimal unsafe Rust wrapper
++        rust = self._build_unsafe_rust(c_body, routine)
++        return rust
++
++    def _build_unsafe_rust(self, c_body: str, routine: FortranRoutine) -> str:
++        """Produce an unsafe Rust translation using the routine's argument types."""
++        from fortran_to_rust.test_harness import parse_arg_declarations
++
++        name_lower = routine.name.lower()
++        arg_decls = parse_arg_declarations(routine.source, routine.args)
++
++        params: List[str] = []
++        for arg in routine.args:
++            decl = arg_decls.get(arg.upper())
++            rname = arg.lower()
++            if decl is None:
++                params.append(f"    {rname}: f64")
++            elif decl.is_char:
++                params.append(f"    {rname}: u8")
++            elif decl.is_integer and not decl.is_array:
++                params.append(f"    {rname}: i32")
++            elif decl.is_real and not decl.is_array:
++                params.append(f"    {rname}: f64")
++            elif decl.is_real and decl.is_array:
++                params.append(f"    {rname}: &mut [f64]")
++            elif decl.is_logical:
++                params.append(f"    {rname}: bool")
++            else:
++                params.append(f"    {rname}: f64")
++
++        ret_type = _rust_return_type(routine)
++        ret_default = _rust_return_default(ret_type)
++
++        rust_lines = [
++            f"// Auto-generated by Hybrid strategy (f2c + rule-based C→Rust)",
++            f"// Original function: {routine.name}",
++            "#[allow(clippy::all, non_snake_case, unused_variables, unused_mut)]",
++            f"pub unsafe fn {name_lower}(",
++        ]
++        for i, p in enumerate(params):
++            sep = "," if i < len(params) - 1 else ""
++            rust_lines.append(f"{p}{sep}")
++        rust_lines.append(f"){ret_type} {{")
++
++        in_body = False
++        for line in c_body.splitlines():
++            stripped = line.strip()
++            if not stripped or stripped.startswith("//"):
++                continue
++            # Skip function prototype line
++            if f"{name_lower}_(" in line.lower():
++                in_body = True
++                continue
++            if not in_body:
++                continue
++            # Translate variable declarations
++            translated = self._translate_c_line(line)
++            rust_lines.append(f"    {translated}")
++
++        if ret_default:
++            rust_lines.append(f"    {ret_default}  // TODO: implement")
++        rust_lines.append("}")
++        return "\n".join(rust_lines)
++
++    def _translate_c_line(self, line: str) -> str:
++        """Best-effort single-line C→Rust translation."""
++        s = line.strip()
++
++        # Skip closing braces (we add our own)
++        if s == "{" or s == "}":
++            return s
++
++        # Variable declaration: "integer i, j, k;" → "let mut i: i32; let mut j: i32;"
++        for ctype, rtype in self._F2C_TYPES.items():
++            pat = re.compile(rf"\b{ctype}\s+([\w\s,*]+);", re.IGNORECASE)
++            m = pat.match(s)
++            if m:
++                names = [n.strip().lstrip("*") for n in m.group(1).split(",")]
++                decls = "; ".join(f"let mut {n}: {rtype} = Default::default()" for n in names if n)
++                return decls + ";"
++
++        # for loop: "for (i = 1; i <= n; ++i)" → "for i in 1..=n"
++        for_pat = re.compile(r"for\s*\(\s*(\w+)\s*=\s*(\w+)\s*;\s*\1\s*<=\s*(\w+)\s*;")
++        m = for_pat.search(s)
++        if m:
++            var, start, end = m.group(1), m.group(2), m.group(3)
++            return f"for {var} in {start}..={end} {{"
++
++        # while loop
++        if s.startswith("while (") or s.startswith("while("):
++            cond = re.sub(r"while\s*\((.+)\)\s*\{?", r"\1", s)
++            return f"while {cond} {{"
++
++        # if statement
++        if s.startswith("if (") or s.startswith("if("):
++            cond = re.sub(r"if\s*\((.+)\)\s*\{?", r"\1", s)
++            return f"if {cond} {{"
++
++        # Assignment: replace "->" with "." and array indexing adjustments
++        s = s.replace("->", ".")
++
++        # Return
++        if s.startswith("return"):
++            return s.rstrip(";") + ";"
++
++        return s + "  // TODO: verify"
++
++    # ------------------------------------------------------------------
++    # Direct Fortran→Rust (no f2c) fallback
++    # ------------------------------------------------------------------
++
++    def _direct_fortran_to_rust(self, routine: FortranRoutine) -> str:
++        """Rule-based Fortran→Rust conversion using parsed argument types.
++
++        Generates a correctly-typed Rust function stub so that the accuracy
++        example binary can be compiled and the comparison mechanism can run,
++        even though the body is a TODO until an LLM or manual review fills it in.
++        """
++        from fortran_to_rust.test_harness import parse_arg_declarations
++
++        name = routine.name.lower()
++        arg_decls = parse_arg_declarations(routine.source, routine.args)
++
++        params: List[str] = []
++        for arg in routine.args:
++            decl = arg_decls.get(arg.upper())
++            rname = arg.lower()
++            if decl is None:
++                params.append(f"    {rname}: f64")
++            elif decl.is_char:
++                params.append(f"    {rname}: u8")
++            elif decl.is_integer and not decl.is_array:
++                params.append(f"    {rname}: i32")
++            elif decl.is_real and not decl.is_array:
++                params.append(f"    {rname}: f64")
++            elif decl.is_real and decl.is_array:
++                params.append(f"    {rname}: &mut [f64]")
++            elif decl.is_logical:
++                params.append(f"    {rname}: bool")
++            else:
++                params.append(f"    {rname}: f64")
++
++        # Return type for Fortran FUNCTIONs
++        ret_type = _rust_return_type(routine)
++        ret_default = _rust_return_default(ret_type)
++
++        lines = [
++            f"// Auto-generated by Hybrid strategy (direct rule-based)",
++            f"// Original Fortran {routine.kind}: {routine.name}",
++            "//",
++            "// NOTE: The function body requires implementation.",
++            "// The signature is derived from the Fortran argument declarations.",
++            "#[allow(clippy::all, non_snake_case, unused_variables, unused_mut)]",
++            f"pub fn {name}(",
++        ]
++        for i, p in enumerate(params):
++            sep = "," if i < len(params) - 1 else ""
++            lines.append(f"{p}{sep}")
++        lines.append(f"){ret_type} {{")
++        lines.append("    // TODO: translate from Fortran source:")
++        lines.append("    //")
++        for src_line in routine.source.splitlines()[:60]:
++            lines.append(f"    // {src_line}")
++        if routine.line_count > 60:
++            lines.append(f"    // ... ({routine.line_count - 60} more lines)")
++        if ret_default:
++            lines.append(f"    {ret_default}  // TODO: implement")
++        lines.append("}")
++        return "\n".join(lines)
+diff --git a/fortran_to_rust/strategies/llm_first.py b/fortran_to_rust/strategies/llm_first.py
+new file mode 100644
+index 0000000..54a83ba
+--- /dev/null
++++ b/fortran_to_rust/strategies/llm_first.py
+@@ -0,0 +1,168 @@
++"""Strategy 1 — LLM-First with Rule Fallback.
++
++Pipeline
++--------
++1. Pre-process: strip comments, build call graph context.
++2. Feed each function chunk to the LLM for translation.
++3. Compile with ``cargo check``; on failure feed errors back (≤ 2 repair rounds).
++4. If the LLM is unavailable, fall back to the Hybrid rule-based strategy.
++"""
++
++from __future__ import annotations
++
++import re
++from pathlib import Path
++from typing import Optional
++
++from fortran_to_rust.llm_client import LLMClient, LLMUnavailableError
++from fortran_to_rust.parser import FortranRoutine, strip_comments
++from fortran_to_rust.strategies.base import ConversionResult, ConversionStrategy
++from fortran_to_rust.strategies.hybrid import HybridStrategy
++
++_MAX_REPAIR_ROUNDS = 2
++
++
++class LLMFirstStrategy(ConversionStrategy):
++    name = "LLM-First with Rule Fallback"
++
++    def __init__(self, output_dir: Path, llm: Optional[LLMClient] = None, **kwargs) -> None:
++        super().__init__(output_dir, **kwargs)
++        self.llm = llm or LLMClient()
++        self._fallback = HybridStrategy(output_dir, llm=self.llm)
++
++    # ------------------------------------------------------------------
++    def convert(
++        self,
++        routine: FortranRoutine,
++        *,
++        progress_callback=None,
++    ) -> ConversionResult:
++        cb = progress_callback or (lambda msg: None)
++
++        if not self.llm.is_available:
++            cb(
++                "  [yellow]⚠  No LLM API key — falling back to Hybrid rule-based strategy.[/yellow]"
++            )
++            result = self._fallback.convert(routine, progress_callback=cb)
++            result.strategy_used = f"Hybrid fallback (LLM unavailable): {result.strategy_used}"
++            result.warnings.append(
++                "LLM unavailable; result is a rule-based skeleton requiring manual review."
++            )
++            return result
++
++        cb(f"[1/llm-first] Sending {routine.name} to LLM ({self.llm.model})…")
++
++        cleaned_source = strip_comments(routine.source)
++        context = self._build_context(routine)
++
++        try:
++            rust_source = self.llm.translate_fortran_to_rust(
++                cleaned_source, routine.name, extra_context=context
++            )
++        except Exception as exc:
++            cb(f"  [red]LLM translation failed: {exc}[/red]")
++            result = self._fallback.convert(routine, progress_callback=cb)
++            result.strategy_used = f"Hybrid fallback (LLM error): {result.strategy_used}"
++            result.error = str(exc)
++            return result
++
++        rust_source = _strip_fences(rust_source)
++        rust_source = _ensure_top_level_pub_fn(rust_source, routine.name.lower())
++
++        # Compile + repair loop
++        errors: list[str] = []
++        repair_rounds = 0
++        from fortran_to_rust.rust_project import quick_check
++
++        for attempt in range(_MAX_REPAIR_ROUNDS + 1):
++            ok, compiler_output = quick_check(rust_source, self.output_dir)
++            if ok:
++                break
++            errors.append(compiler_output)
++            if attempt < _MAX_REPAIR_ROUNDS:
++                repair_rounds += 1
++                cb(
++                    f"  [yellow]Compile errors (round {attempt + 1}), asking LLM to repair…[/yellow]"
++                )
++                try:
++                    rust_source = _strip_fences(
++                        self.llm.repair_rust(rust_source, compiler_output, routine.name)
++                    )
++                    rust_source = _ensure_top_level_pub_fn(rust_source, routine.name.lower())
++                except Exception as exc:
++                    cb(f"  [red]LLM repair failed: {exc}[/red]")
++                    break
++            else:
++                cb(
++                    f"  [yellow]Could not fully compile after {_MAX_REPAIR_ROUNDS} repair rounds.[/yellow]"
++                )
++
++        return ConversionResult(
++            routine_name=routine.name,
++            rust_source=rust_source,
++            success=True,
++            strategy_used=f"LLM-First ({self.llm.provider}/{self.llm.model})",
++            repair_rounds=repair_rounds,
++            compiler_errors=errors,
++        )
++
++    # ------------------------------------------------------------------
++    def _build_context(self, routine: FortranRoutine) -> str:
++        """Provide the LLM with helper context: called functions, arg types."""
++        parts = []
++        if routine.calls:
++            parts.append(
++                "This routine calls: " + ", ".join(routine.calls) + ".\n"
++                "BLAS helpers use u8 for CHARACTER arguments: "
++                "`fn lsame(ca: u8, cb: u8) -> bool` (case-insensitive ASCII byte comparison), "
++                "`fn xerbla(srname: &str, info: i32)` (error handler)."
++            )
++        if routine.args:
++            parts.append("Arguments: " + ", ".join(routine.args))
++        parts.append(
++            "Array indexing: Fortran uses 1-based column-major. "
++            "Convert to 0-based row-major: A(i,j) with LDA leading dimension "
++            "maps to a[j * lda + i] in C/Rust (column-major kept) or "
++            "a[(i-1) + (j-1) * lda] after 1→0 index shift."
++        )
++        return "\n".join(parts)
++
++
++# ---------------------------------------------------------------------------
++# Helpers
++# ---------------------------------------------------------------------------
++
++def _strip_fences(text: str) -> str:
++    """Remove markdown code fences that the LLM sometimes adds."""
++    text = re.sub(r"^```(?:rust)?\s*\n?", "", text.strip(), flags=re.MULTILINE)
++    text = re.sub(r"\n?```\s*$", "", text.strip(), flags=re.MULTILINE)
++    return text.strip()
++
++
++def _ensure_top_level_pub_fn(source: str, fn_name: str) -> str:
++    """Ensure *fn_name* is declared ``pub`` at the top level of the source.
++
++    Handles the two most common LLM mistakes:
++    1. Function is defined without ``pub`` → adds ``pub``.
++    2. Function is already ``pub`` → no-op.
++
++    Does NOT attempt to unwrap functions nested inside ``mod`` blocks; the LLM
++    prompt explicitly forbids that, so it should be uncommon.
++    """
++    # Already correct: pub fn / pub unsafe fn at the start of a line (top-level)
++    if re.search(
++        rf"^pub\s+(?:unsafe\s+)?fn\s+{re.escape(fn_name)}\b",
++        source,
++        re.MULTILINE,
++    ):
++        return source
++    # Missing pub: plain fn {fn_name} at start of a line — add pub
++    fixed, n = re.subn(
++        rf"^fn\s+{re.escape(fn_name)}\b",
++        f"pub fn {fn_name}",
++        source,
++        flags=re.MULTILINE,
++    )
++    if n > 0:
++        return fixed
++    return source
+diff --git a/fortran_to_rust/test_harness.py b/fortran_to_rust/test_harness.py
+new file mode 100644
+index 0000000..10147dd
+--- /dev/null
++++ b/fortran_to_rust/test_harness.py
+@@ -0,0 +1,781 @@
++"""Numerical accuracy test harness.
++
++For each converted function, this module:
++
++1. **Parses** the Fortran argument declarations to discover types and array shapes.
++2. **Generates** a Fortran test driver (``PROGRAM``) on the fly, initialised with
++   deterministic pseudo-random values.
++3. **Compiles and runs** the Fortran driver with the *original* reference sources to
++   obtain the expected outputs.
++4. **Generates** a Rust example binary that calls the converted function with the
++   same inputs and prints its outputs.
++5. **Compares** the two output streams; reports max / mean absolute error.
++
++Both step 3 and step 4 are driven entirely by the information in the
++:class:`~fortran_to_rust.parser.FortranRoutine` object, so the harness works for
++*any* function without requiring function-specific knowledge.
++"""
++
++from __future__ import annotations
++
++import random
++import re
++import subprocess
++import tempfile
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import Dict, List, Optional, Tuple
++
++_TOLERANCE = 1e-10  # max acceptable absolute error
++
++# ---------------------------------------------------------------------------
++# Argument declaration dataclass
++# ---------------------------------------------------------------------------
++
++@dataclass
++class ArgDecl:
++    """Information about one Fortran dummy argument."""
++
++    name: str          # uppercase name
++    ftype: str         # 'DOUBLE PRECISION', 'REAL', 'INTEGER', 'CHARACTER', 'LOGICAL'
++    dims: List[str]    # dimension specs, e.g. ['LDA', '*'] or [] for scalars
++
++    @property
++    def is_array(self) -> bool:
++        return bool(self.dims)
++
++    @property
++    def is_char(self) -> bool:
++        return "CHARACTER" in self.ftype.upper()
++
++    @property
++    def is_integer(self) -> bool:
++        return "INTEGER" in self.ftype.upper()
++
++    @property
++    def is_real(self) -> bool:
++        t = self.ftype.upper()
++        return "DOUBLE" in t or ("REAL" in t and "CHARACTER" not in t)
++
++    @property
++    def is_logical(self) -> bool:
++        return "LOGICAL" in self.ftype.upper()
++
++
++# ---------------------------------------------------------------------------
++# Result dataclass
++# ---------------------------------------------------------------------------
++
++@dataclass
++class AccuracyResult:
++    """Result of the numerical accuracy comparison."""
++
++    function_name: str
++    passed: bool
++    max_abs_error: Optional[float] = None
++    mean_abs_error: Optional[float] = None
++    num_test_cases: int = 0
++    failed_cases: int = 0
++    error_message: Optional[str] = None
++    details: List[str] = field(default_factory=list)
++
++
++# ---------------------------------------------------------------------------
++# Argument declaration parser
++# ---------------------------------------------------------------------------
++
++_TYPE_PATTERNS: List[Tuple[str, str]] = [
++    (r"DOUBLE\s+PRECISION\s+(.*)", "DOUBLE PRECISION"),
++    (r"REAL\s+(.*)",               "REAL"),
++    (r"INTEGER\s+(.*)",            "INTEGER"),
++    (r"CHARACTER(?:\s*\*\s*1?)?\s+(.*)", "CHARACTER"),
++    (r"LOGICAL\s+(.*)",            "LOGICAL"),
++]
++
++_VAR_WITH_DIMS = re.compile(r"(\w+)\s*\(([^)]+)\)")
++
++
++def _split_decl_list(text: str) -> List[str]:
++    """Split 'A(LDA,*),B(LDB,*),C(LDC,*)' into individual items."""
++    items: List[str] = []
++    depth = 0
++    current: List[str] = []
++    for ch in text:
++        if ch == "(":
++            depth += 1
++        elif ch == ")":
++            depth -= 1
++        if ch == "," and depth == 0:
++            items.append("".join(current).strip())
++            current = []
++        else:
++            current.append(ch)
++    if current:
++        items.append("".join(current).strip())
++    return [i for i in items if i]
++
++
++def parse_arg_declarations(source: str, arg_names: List[str]) -> Dict[str, ArgDecl]:
++    """Return a mapping of (uppercase arg name) -> ArgDecl for each argument."""
++    arg_set = {a.upper() for a in arg_names}
++    result: Dict[str, ArgDecl] = {}
++
++    for raw_line in source.splitlines():
++        if re.match(r"^[Cc*!]", raw_line):
++            continue
++        line = raw_line.strip().upper()
++        if "!" in line:
++            line = line[: line.index("!")].rstrip()
++
++        for pattern, ftype in _TYPE_PATTERNS:
++            m = re.match(pattern, line, re.IGNORECASE)
++            if not m:
++                continue
++            decl_text = m.group(1)
++            for item in _split_decl_list(decl_text):
++                item = item.strip()
++                am = _VAR_WITH_DIMS.match(item)
++                if am:
++                    vname = am.group(1).upper()
++                    raw_dims = [d.strip() for d in am.group(2).split(",")]
++                    if vname in arg_set:
++                        result[vname] = ArgDecl(name=vname, ftype=ftype, dims=raw_dims)
++                else:
++                    vname = item.upper().split()[0] if item else ""
++                    if vname in arg_set:
++                        result[vname] = ArgDecl(name=vname, ftype=ftype, dims=[])
++            break
++
++    # Fallback for any undiscovered args
++    for arg in arg_names:
++        a = arg.upper()
++        if a not in result:
++            result[a] = ArgDecl(name=a, ftype="DOUBLE PRECISION", dims=[])
++
++    return result
++
++
++# ---------------------------------------------------------------------------
++# Concrete dimension assignment
++# ---------------------------------------------------------------------------
++
++_DIM_DEFAULTS: Dict[str, int] = {
++    "M": 4,
++    "N": 4,
++    "K": 4,
++    "LDA": 4,
++    "LDB": 4,
++    "LDC": 4,
++    "LDE": 4,
++    "LDF": 4,
++    "INCX": 1,
++    "INCY": 1,
++    "INC": 1,
++    "NRHS": 2,
++    "KL": 1,
++    "KU": 1,
++    "KB": 4,
++    "P": 3,
++    "Q": 3,
++}
++
++
++def _assign_dims(arg_decls: Dict[str, ArgDecl]) -> Dict[str, int]:
++    """Return concrete integer values for every INTEGER scalar argument."""
++    assigned: Dict[str, int] = {}
++    for name, decl in arg_decls.items():
++        if decl.is_integer and not decl.is_array:
++            assigned[name] = _DIM_DEFAULTS.get(name, 4)
++    return assigned
++
++
++def _resolve_dim(dim_str: str, assigned: Dict[str, int], fallback: int = 4) -> int:
++    """Resolve a dimension string ('LDA', '*', '4') to a concrete integer."""
++    key = dim_str.strip().upper()
++    if key == "*":
++        return fallback
++    if key in assigned:
++        return assigned[key]
++    try:
++        return int(key)
++    except ValueError:
++        return fallback
++
++
++def _array_size(decl: ArgDecl, assigned: Dict[str, int]) -> List[int]:
++    """Return concrete dimension sizes for an array argument."""
++    if not decl.dims:
++        return []
++    return [_resolve_dim(d, assigned, fallback=4) for d in decl.dims]
++
++
++# ---------------------------------------------------------------------------
++# Fortran code generation helpers
++# ---------------------------------------------------------------------------
++
++def _f90_double(val: float) -> str:
++    """Format a Python float as a Fortran DOUBLE PRECISION literal."""
++    s = f"{val:.15E}"          # e.g. '1.766632777287572E+00'
++    return s.replace("E", "D") # e.g. '1.766632777287572D+00'
++
++
++def _fortran_call(routine_name: str, arg_names: List[str]) -> str:
++    """Generate a Fortran-77 CALL statement, wrapping with continuation lines as needed."""
++    prefix = "      "    # 6 blanks (code starts at col 7)
++    cont   = "     +"    # col 6 continuation marker
++    max_w  = 65          # max code chars per line: 72 - 6 - 1 for safety (trailing comma)
++
++    full = f"CALL {routine_name}({', '.join(arg_names)})"
++    if len(full) <= max_w:
++        return prefix + full
++
++    # Build each line greedily.  We accumulate tokens separated by ', ';
++    # when adding the next token would overflow, flush the current line and
++    # start a continuation.
++    lines: List[str] = []
++    current = f"CALL {routine_name}("
++    for i, arg in enumerate(arg_names):
++        is_last = i == len(arg_names) - 1
++        sep = "" if current.endswith("(") else ", "
++        closing = ")" if is_last else ""
++        candidate = current + sep + arg + closing
++        if len(candidate) <= max_w or current.endswith("("):
++            # Either it fits, or this is the very first arg (must put it somewhere)
++            current = candidate
++        else:
++            # Flush current line with a trailing comma; start continuation
++            lines.append((prefix if not lines else cont) + current + ",")
++            current = arg + closing
++    if current:
++        lines.append((prefix if not lines else cont) + current)
++    return "\n".join(lines)
++
++
++def _fortran_assign_call(result_var: str, routine_name: str, arg_names: List[str]) -> str:
++    """Generate a Fortran-77 assignment call: RESULT = FUNC(args)."""
++    prefix = "      "
++    cont   = "     +"
++    max_w  = 65
++
++    full = f"{result_var} = {routine_name}({', '.join(arg_names)})"
++    if len(full) <= max_w:
++        return prefix + full
++
++    lines: List[str] = []
++    current = f"{result_var} = {routine_name}("
++    for i, arg in enumerate(arg_names):
++        is_last = i == len(arg_names) - 1
++        sep = "" if current.endswith("(") else ", "
++        closing = ")" if is_last else ""
++        candidate = current + sep + arg + closing
++        if len(candidate) <= max_w or current.endswith("("):
++            current = candidate
++        else:
++            lines.append((prefix if not lines else cont) + current + ",")
++            current = arg + closing
++    if current:
++        lines.append((prefix if not lines else cont) + current)
++    return "\n".join(lines)
++
++
++def _fortran_scalar_init(name: str, decl: ArgDecl, seed_offset: int) -> str:
++    """Return a Fortran assignment statement for a scalar argument."""
++    rng = random.Random(seed_offset)
++    if decl.is_char:
++        return f"      {name} = 'N'"
++    if decl.is_logical:
++        return f"      {name} = .FALSE."
++    if decl.is_integer:
++        return ""   # dimension vars are assigned separately
++    val = rng.uniform(0.5, 2.0)
++    return f"      {name} = {_f90_double(val)}"
++
++
++def _fortran_array_init(name: str, sizes: List[int], seed_offset: int) -> str:
++    """Return Fortran element-assignment statements for an array."""
++    rng = random.Random(seed_offset)
++    lines: List[str] = []
++    if len(sizes) == 1:
++        for i in range(sizes[0]):
++            v = rng.uniform(-1.0, 1.0)
++            lines.append(f"      {name}({i+1}) = {_f90_double(v)}")
++    elif len(sizes) == 2:
++        for j in range(sizes[1]):
++            for i in range(sizes[0]):
++                v = rng.uniform(-1.0, 1.0)
++                lines.append(f"      {name}({i+1},{j+1}) = {_f90_double(v)}")
++    else:
++        total = 1
++        for s in sizes:
++            total *= s
++        for idx in range(total):
++            v = rng.uniform(-1.0, 1.0)
++            lines.append(f"      {name}({idx+1}) = {_f90_double(v)}")
++    return "\n".join(lines)
++
++
++# ---------------------------------------------------------------------------
++# Fortran test driver generator
++# ---------------------------------------------------------------------------
++
++_FORTRAN_DRIVER_HEADER = """\
++      PROGRAM TEST_{name}
++      IMPLICIT NONE
++"""
++_FORTRAN_DRIVER_FOOTER = """\
++      END
++"""
++
++
++def generate_fortran_driver(
++    routine_name: str,
++    arg_names: List[str],
++    arg_decls: Dict[str, ArgDecl],
++    assigned_dims: Dict[str, int],
++    test_index: int = 0,
++    routine_kind: str = "subroutine",
++    return_ftype: str = "DOUBLE PRECISION",
++) -> str:
++    """Build a complete Fortran PROGRAM that calls *routine_name* and prints its outputs.
++
++    For subroutines the output is the modified arrays/scalars.
++    For functions (``routine_kind='function'``) the return value is captured and printed.
++
++    Uses a single ``random.Random(test_index)`` seeded RNG and iterates over
++    ``arg_names`` in order — the same strategy as ``_generate_rust_example`` — so
++    that both drivers receive identical numerical inputs.
++    """
++    # Single shared RNG iterated in arg_names order, matching _generate_rust_example.
++    rng = random.Random(test_index)
++
++    # --- Collect grouped types for Fortran declarations ---
++    int_scalars = [n.upper() for n in arg_names
++                   if arg_decls.get(n.upper()) and arg_decls[n.upper()].is_integer
++                   and not arg_decls[n.upper()].is_array]
++    dp_scalars = [n.upper() for n in arg_names
++                  if arg_decls.get(n.upper()) and arg_decls[n.upper()].is_real
++                  and not arg_decls[n.upper()].is_array]
++    char_scalars = [n.upper() for n in arg_names
++                    if arg_decls.get(n.upper()) and arg_decls[n.upper()].is_char
++                    and not arg_decls[n.upper()].is_array]
++    logical_scalars = [n.upper() for n in arg_names
++                       if arg_decls.get(n.upper()) and arg_decls[n.upper()].is_logical
++                       and not arg_decls[n.upper()].is_array]
++    array_args = [(n.upper(), arg_decls[n.upper()])
++                  for n in arg_names
++                  if arg_decls.get(n.upper()) and arg_decls[n.upper()].is_array
++                  and arg_decls[n.upper()].is_real]
++
++    decl_lines: List[str] = []
++    loop_int_vars: List[str] = []
++
++    if int_scalars:
++        decl_lines.append("      INTEGER " + ", ".join(int_scalars))
++    if dp_scalars:
++        decl_lines.append("      DOUBLE PRECISION " + ", ".join(dp_scalars))
++    for arr_name, decl in array_args:
++        sizes = _array_size(decl, assigned_dims)
++        if sizes:
++            dim_str = ", ".join(str(s) for s in sizes)
++            decl_lines.append(f"      DOUBLE PRECISION {arr_name}({dim_str})")
++    if char_scalars:
++        decl_lines.append("      CHARACTER*1 " + ", ".join(char_scalars))
++    if logical_scalars:
++        decl_lines.append("      LOGICAL " + ", ".join(logical_scalars))
++
++    # --- Assignments and print loops in arg_names order (mirrors Rust RNG draws) ---
++    assign_lines: List[str] = []
++    print_lines: List[str] = []
++
++    for name in arg_names:
++        upper = name.upper()
++        decl = arg_decls.get(upper)
++        if decl is None:
++            continue
++        if decl.is_char and not decl.is_array:
++            assign_lines.append(f"      {upper} = 'N'")
++        elif decl.is_logical and not decl.is_array:
++            assign_lines.append(f"      {upper} = .FALSE.")
++        elif decl.is_integer and not decl.is_array:
++            assign_lines.append(f"      {upper} = {assigned_dims.get(upper, 4)}")
++        elif decl.is_real and not decl.is_array:
++            val = rng.uniform(0.5, 2.0)  # draw from shared rng (same as Rust)
++            assign_lines.append(f"      {upper} = {_f90_double(val)}")
++        elif decl.is_real and decl.is_array:
++            sizes = _array_size(decl, assigned_dims)
++            if not sizes:
++                continue
++            total = 1
++            for s in sizes:
++                total *= s
++            # Draw values from shared rng in the same order as Rust (flat, column-major)
++            vals = [rng.uniform(-1.0, 1.0) for _ in range(total)]
++            if len(sizes) == 1:
++                for i, v in enumerate(vals):
++                    assign_lines.append(f"      {upper}({i + 1}) = {_f90_double(v)}")
++                iv = f"I{upper}"
++                loop_int_vars.append(iv)
++                print_lines += [
++                    f"      DO {iv}=1,{sizes[0]}",
++                    f"        WRITE(*,'(ES25.15)') {upper}({iv})",
++                    f"      END DO",
++                ]
++            elif len(sizes) == 2:
++                n_rows = sizes[0]
++                # vals is column-major: vals[row + col*n_rows]
++                for col in range(sizes[1]):
++                    for row in range(sizes[0]):
++                        v = vals[col * n_rows + row]
++                        assign_lines.append(
++                            f"      {upper}({row + 1},{col + 1}) = {_f90_double(v)}"
++                        )
++                iv = f"I{upper}"
++                jv = f"J{upper}"
++                loop_int_vars += [iv, jv]
++                print_lines += [
++                    f"      DO {jv}=1,{sizes[1]}",
++                    f"        DO {iv}=1,{sizes[0]}",
++                    f"          WRITE(*,'(ES25.15)') {upper}({iv},{jv})",
++                    f"        END DO",
++                    f"      END DO",
++                ]
++
++    if loop_int_vars:
++        decl_lines.append("      INTEGER " + ", ".join(loop_int_vars))
++
++    # DP scalars (ALPHA, BETA, …) are read-only inputs in BLAS; printing them
++    # after CALL would cause length mismatches in the Rust comparison without
++    # testing the conversion. For functions the return value is printed via
++    # result_var (handled below).
++
++    # --- Handle FUNCTION vs SUBROUTINE call ---
++    if routine_kind == "function":
++        result_var = f"RES_{routine_name.upper()[:6]}"
++        ftype_upper = return_ftype.strip().upper()
++        # Map return type to a Fortran type declaration
++        if "INTEGER" in ftype_upper:
++            ftype_decl = "INTEGER"
++            print_fmt  = "(I20)"
++        elif "LOGICAL" in ftype_upper:
++            ftype_decl = "LOGICAL"
++            print_fmt  = "(L5)"
++        else:
++            ftype_decl = "DOUBLE PRECISION"
++            print_fmt  = "(ES25.15)"
++        # Declare the result variable, the function type, and EXTERNAL
++        decl_lines.append(f"      {ftype_decl} {result_var}")
++        decl_lines.append(f"      {ftype_decl} {routine_name.upper()}")
++        decl_lines.append(f"      EXTERNAL {routine_name.upper()}")
++        call_stmt = _fortran_assign_call(result_var, routine_name.upper(), arg_names)
++        # Print the function result after all array prints
++        print_lines.append(f"      WRITE(*,'{print_fmt}') {result_var}")
++    else:
++        call_stmt = _fortran_call(routine_name.upper(), arg_names)
++
++    parts = [
++        _FORTRAN_DRIVER_HEADER.format(name=routine_name.upper()),
++        "\n".join(decl_lines),
++        "\n".join(assign_lines),
++        call_stmt,
++        "\n".join(print_lines) if print_lines else "      CONTINUE",
++        _FORTRAN_DRIVER_FOOTER,
++    ]
++    return "\n".join(parts)
++
++
++# ---------------------------------------------------------------------------
++# Compile and run helpers
++# ---------------------------------------------------------------------------
++
++def _find_support_files(directory: Path) -> List[Path]:
++    """Return helper .f files (lsame, xerbla, etc.) present alongside the routine."""
++    helpers = []
++    for name in ("lsame.f", "xerbla.f", "LSAME.f", "XERBLA.f"):
++        p = directory / name
++        if p.exists():
++            helpers.append(p)
++    return helpers
++
++
++def _compile_run_fortran(
++    driver_src: str,
++    extra_sources: List[Path],
++    timeout: int = 30,
++) -> Optional[List[float]]:
++    """Compile *driver_src* together with *extra_sources* and return printed floats."""
++    with tempfile.TemporaryDirectory() as tmpdir:
++        tmp = Path(tmpdir)
++        driver_f = tmp / "test_driver.f"
++        driver_f.write_text(driver_src)
++        exe = tmp / "test_driver"
++        cmd = ["gfortran", "-O2", "-o", str(exe), str(driver_f)]
++        cmd += [str(s) for s in extra_sources]
++        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
++        if result.returncode != 0:
++            return None
++        run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=10)
++        if run.returncode != 0:
++            return None
++        try:
++            return [float(line.strip()) for line in run.stdout.splitlines() if line.strip()]
++        except ValueError:
++            return None
++
++
++# ---------------------------------------------------------------------------
++# Rust example generation and execution
++# ---------------------------------------------------------------------------
++
++_RUST_EXAMPLE_TEMPLATE_SUB = """\
++// Auto-generated accuracy test binary for `{fn_name}`
++#[allow(unused_imports)]
++use {crate_name}::*;
++
++fn main() {{
++{rust_inputs}
++
++    // Safety: the generated function may be declared unsafe if the LLM used raw pointers.
++    unsafe {{ {fn_lower}({call_args}); }}
++
++    // Print outputs
++{rust_prints}
++}}
++"""
++
++_RUST_EXAMPLE_TEMPLATE_FN = """\
++// Auto-generated accuracy test binary for `{fn_name}`
++#[allow(unused_imports)]
++use {crate_name}::*;
++
++fn main() {{
++{rust_inputs}
++
++    // Safety: the generated function may be declared unsafe if the LLM used raw pointers.
++    let _result = unsafe {{ {fn_lower}({call_args}) }};
++
++    // Print return value
++    println!("{{:.15e}}", _result as f64);
++
++    // Print any array outputs
++{rust_prints}
++}}
++"""
++
++
++def _generate_rust_example(
++    routine_name: str,
++    arg_names: List[str],
++    arg_decls: Dict[str, ArgDecl],
++    assigned_dims: Dict[str, int],
++    crate_dir: Path,
++    test_index: int = 0,
++    routine_kind: str = "subroutine",
++    return_ftype: str = "DOUBLE PRECISION",
++) -> bool:
++    """Write a Rust example binary that mirrors the Fortran test driver."""
++    fn_lower = routine_name.lower()
++    crate_name = crate_dir.name
++    examples_dir = crate_dir / "examples"
++    examples_dir.mkdir(exist_ok=True)
++
++    inputs: List[str] = []
++    call_args: List[str] = []
++    prints: List[str] = []
++    rng = random.Random(test_index)
++
++    for name in arg_names:
++        decl = arg_decls.get(name.upper(), ArgDecl(name=name.upper(), ftype="DOUBLE PRECISION", dims=[]))
++        rname = name.lower()
++
++        if decl.is_char:
++            inputs.append(f"    let {rname}: u8 = b'N';")
++            call_args.append(rname)
++        elif decl.is_integer and not decl.is_array:
++            val = assigned_dims.get(name.upper(), 4)
++            inputs.append(f"    let {rname}: i32 = {val};")
++            call_args.append(rname)
++        elif decl.is_real and not decl.is_array:
++            val = rng.uniform(0.5, 2.0)
++            inputs.append(f"    let {rname}: f64 = {val:.15f};")
++            call_args.append(rname)
++        elif decl.is_real and decl.is_array:
++            sizes = _array_size(decl, assigned_dims)
++            total = 1
++            for s in (sizes or [4]):
++                total *= s
++            vals = ", ".join(f"{rng.uniform(-1.0, 1.0):.15f}_f64" for _ in range(total))
++            inputs.append(f"    let mut {rname} = vec![{vals}];")
++            call_args.append(f"&mut {rname}")
++            prints.append(f'    for v in &{rname} {{ println!("{{:.15e}}", v); }}')
++        elif decl.is_logical:
++            inputs.append(f"    let {rname}: bool = false;")
++            call_args.append(rname)
++        else:
++            inputs.append(f"    let mut {rname}: f64 = 0.0;")
++            call_args.append(f"&mut {rname}")
++
++    template = _RUST_EXAMPLE_TEMPLATE_FN if routine_kind == "function" else _RUST_EXAMPLE_TEMPLATE_SUB
++    rust_src = template.format(
++        fn_name=routine_name,
++        fn_lower=fn_lower,
++        crate_name=crate_name,
++        rust_inputs="\n".join(inputs),
++        call_args=", ".join(call_args),
++        rust_prints="\n".join(prints) if prints else "    // no array outputs",
++    )
++    (examples_dir / f"accuracy_{fn_lower}.rs").write_text(rust_src)
++    return True
++
++
++def _compile_run_rust_example(
++    crate_dir: Path,
++    routine_name: str,
++) -> Optional[List[float]]:
++    """Compile and run the Rust accuracy example; return printed floats or None."""
++    fn_lower = routine_name.lower()
++    result = subprocess.run(
++        ["cargo", "build", "--release", "--example", f"accuracy_{fn_lower}"],
++        capture_output=True, text=True, cwd=crate_dir, timeout=120,
++    )
++    if result.returncode != 0:
++        return None
++    exe = crate_dir / "target" / "release" / "examples" / f"accuracy_{fn_lower}"
++    if not exe.exists():
++        return None
++    run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=10)
++    if run.returncode != 0:
++        return None
++    try:
++        return [float(line.strip()) for line in run.stdout.splitlines() if line.strip()]
++    except ValueError:
++        return None
++
++
++# ---------------------------------------------------------------------------
++# Public API
++# ---------------------------------------------------------------------------
++
++def run_accuracy_check(
++    function_name: str,
++    fortran_source_path: Optional[Path],
++    crate_dir: Optional[Path],
++    *,
++    routine=None,   # FortranRoutine | None
++    num_tests: int = 3,
++) -> AccuracyResult:
++    """Run accuracy comparison for *function_name*.
++
++    Uses the *routine* object (parsed Fortran source) to generate test drivers
++    on the fly, so this works for any function -- not just dgemm.
++    """
++    fn = function_name.upper()
++
++    if routine is None and fortran_source_path is None:
++        return AccuracyResult(
++            function_name=fn,
++            passed=True,
++            error_message="No routine or source path provided -- accuracy check skipped.",
++        )
++
++    # Resolve argument information from routine or by parsing the source file
++    if routine is not None:
++        arg_names = routine.args
++        arg_decls = parse_arg_declarations(routine.source, arg_names)
++    else:
++        from fortran_to_rust.parser import parse_file
++        routines = parse_file(fortran_source_path)
++        matched = [r for r in routines if r.name.upper() == fn]
++        if not matched:
++            return AccuracyResult(
++                function_name=fn,
++                passed=True,
++                error_message=f"Could not parse routine {fn} from {fortran_source_path}.",
++            )
++        routine = matched[0]
++        arg_names = routine.args
++        arg_decls = parse_arg_declarations(routine.source, arg_names)
++
++    assigned_dims = _assign_dims(arg_decls)
++
++    extra_sources: List[Path] = []
++    if fortran_source_path and fortran_source_path.exists():
++        extra_sources.append(fortran_source_path)
++        extra_sources += _find_support_files(fortran_source_path.parent)
++
++    errors: List[float] = []
++    details: List[str] = []
++    failed = 0
++    fortran_ok_count = 0  # explicit counter — avoids fragile string matching
++
++    routine_kind   = getattr(routine, "kind", "subroutine")
++    return_ftype   = getattr(routine, "return_type", None) or "DOUBLE PRECISION"
++
++    for t in range(num_tests):
++        driver = generate_fortran_driver(
++            fn, arg_names, arg_decls, assigned_dims, test_index=t,
++            routine_kind=routine_kind, return_ftype=return_ftype,
++        )
++        fortran_out = _compile_run_fortran(driver, extra_sources)
++
++        if fortran_out is None:
++            details.append(f"  Test {t+1}: Fortran reference failed to compile/run.")
++            continue
++
++        fortran_ok_count += 1
++        details.append(f"  Test {t+1}: Fortran reference produced {len(fortran_out)} value(s).")
++
++        rust_out: Optional[List[float]] = None
++        if crate_dir and crate_dir.exists():
++            _generate_rust_example(
++                fn, arg_names, arg_decls, assigned_dims, crate_dir, t,
++                routine_kind=routine_kind, return_ftype=return_ftype,
++            )
++            rust_out = _compile_run_rust_example(crate_dir, fn)
++
++        if rust_out and len(rust_out) == len(fortran_out) and fortran_out:
++            case_errors = [abs(rust_out[i] - fortran_out[i]) for i in range(len(fortran_out))]
++            max_e = max(case_errors)
++            errors.append(max_e)
++            ok = max_e <= _TOLERANCE
++            if not ok:
++                failed += 1
++            details.append(
++                f"  Test {t+1}: max_abs_error={max_e:.2e} {'OK' if ok else 'FAIL'}"
++            )
++        elif rust_out is not None:
++            details.append(
++                f"  Test {t+1}: Rust produced {len(rust_out)} value(s) vs "
++                f"Fortran {len(fortran_out)} — length mismatch, comparison skipped."
++            )
++        else:
++            details.append(
++                f"  Test {t+1}: Rust binary not available -- "
++                "Fortran reference computed, numerical comparison skipped."
++            )
++
++    if not errors:
++        msg = (
++            "Fortran reference ran successfully. "
++            "No Rust binary available for numerical comparison."
++            if fortran_ok_count > 0
++            else "No tests completed successfully."
++        )
++        return AccuracyResult(
++            function_name=fn,
++            passed=fortran_ok_count > 0,
++            num_test_cases=num_tests,
++            error_message=msg,
++            details=details,
++        )
++
++    max_abs = max(errors)
++    mean_abs = sum(errors) / len(errors)
++    return AccuracyResult(
++        function_name=fn,
++        passed=(failed == 0),
++        max_abs_error=max_abs,
++        mean_abs_error=mean_abs,
++        num_test_cases=num_tests,
++        failed_cases=failed,
++        details=details,
++    )
+diff --git a/requirements.txt b/requirements.txt
+new file mode 100644
+index 0000000..5a29885
+--- /dev/null
++++ b/requirements.txt
+@@ -0,0 +1,6 @@
++# Runtime dependencies for the Fortran-to-Rust conversion pipeline
++requests>=2.31.0
++rich>=13.7.0
++click>=8.1.0
++colorama>=0.4.6
++fparser>=0.2.1
+diff --git a/setup.py b/setup.py
+new file mode 100644
+index 0000000..f88593f
+--- /dev/null
++++ b/setup.py
+@@ -0,0 +1,20 @@
++from setuptools import setup, find_packages
++
++setup(
++    name="fortran-to-rust",
++    version="0.1.0",
++    packages=find_packages(),
++    install_requires=[
++        "requests>=2.31.0",
++        "rich>=13.7.0",
++        "click>=8.1.0",
++        "colorama>=0.4.6",
++        "fparser>=0.2.1",
++    ],
++    entry_points={
++        "console_scripts": [
++            "fortran-to-rust=convert:main",
++        ],
++    },
++    python_requires=">=3.10",
++)

@@ -1,0 +1,1 @@
+{"Insufficient locking scope - The mutex lock has been narrowed to only protect the cache assignment, but the entire BuildIndex function should remain locked to prevent concurrent builds for the same index key. This can result in duplicate index creation, resource waste, and potential conflicts or errors for file-based indices.": 0.8777922987937927}

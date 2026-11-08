@@ -1,0 +1,1 @@
+{"get_monitor_environment_context() copies and mutates config[\"schedule_type\"] to a display value but returns monitor_environment.monitor.config instead of the modified config variable, so the transformation is never applied to the occurrence context payload": 0.5702593326568604}

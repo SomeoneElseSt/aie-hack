@@ -1,0 +1,1 @@
+{"teamIds is always non-empty (includes orgId), so the code will fail when passed an empty org with no teams because ANY(${[]}) creates invalid SQL": 0.057996608316898346}

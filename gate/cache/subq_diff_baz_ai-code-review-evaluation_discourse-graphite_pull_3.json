@@ -1,0 +1,1 @@
+{"BlockedEmail.should_block? does a case-sensitive lookup using raw email while User.email preserves original casing, so blocking 'foo@example.com' won't catch 'Foo@example.com' - need to normalize/downcase both sides when storing/looking up blocked emails": 0.9526950716972351}

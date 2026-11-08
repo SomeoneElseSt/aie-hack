@@ -1,0 +1,1 @@
+{"santizeAnchors() only iterates translation anchors and doesn't ensure every <a> in englishValue appears in the translation, failing to detect and report missing anchors from the English source": 0.26164528727531433}

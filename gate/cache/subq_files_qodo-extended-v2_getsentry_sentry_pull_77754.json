@@ -1,0 +1,1 @@
+{"AssignmentSource.queued is initialized with timezone.now() at class definition time, so every AssignmentSource created without an explicit queued value will share the same timestamp (typically worker import time) instead of the event time. Should use field(default_factory=timezone.now) instead.": 0.9418472647666931}

@@ -1,0 +1,1 @@
+{"Denial cache key uses raw request UserUID but permission cache key uses resolved userIdentifiers.UID, causing mismatch when numeric IDs are used - if subject is passed as 'user:123', checkReq.UserUID is '123' but userIdentifiers.UID could be a different string (the actual UID), resulting in different key spaces for the same user": 0.6857234239578247}

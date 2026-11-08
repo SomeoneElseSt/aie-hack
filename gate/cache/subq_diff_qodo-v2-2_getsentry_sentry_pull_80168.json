@@ -1,0 +1,1 @@
+{"MetricAlertDetectorHandler subclasses StatefulDetectorHandler without implementing its abstract methods (counter_names, get_dedupe_value, get_group_key_values, build_occurrence_and_event_data), causing TypeError when instantiating it via Detector.detector_handler and breaking process_detectors for detectors of type 'metric_alert_fire'": 0.9213253259658813}

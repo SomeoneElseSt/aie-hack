@@ -1,0 +1,741 @@
+Martian reused candidate assignments 3256 new PR request groups 46
+Martian PR groups completed 1 / 46 failed 1
+Martian PR groups completed 2 / 46 failed 2
+Martian PR groups completed 3 / 46 failed 3
+Martian PR groups completed 4 / 46 failed 4
+Martian PR groups completed 5 / 46 failed 5
+Martian PR groups completed 6 / 46 failed 6
+Martian PR groups completed 7 / 46 failed 7
+Martian PR groups completed 8 / 46 failed 8
+Martian PR groups completed 9 / 46 failed 9
+Martian PR groups completed 10 / 46 failed 10
+Martian PR groups completed 11 / 46 failed 11
+Martian PR groups completed 12 / 46 failed 12
+Martian PR groups completed 13 / 46 failed 13
+Martian PR groups completed 14 / 46 failed 14
+Martian PR groups completed 15 / 46 failed 15
+Martian PR groups completed 16 / 46 failed 16
+Martian PR groups completed 17 / 46 failed 17
+Martian PR groups completed 18 / 46 failed 18
+Martian PR groups completed 19 / 46 failed 19
+Martian PR groups completed 20 / 46 failed 20
+Martian PR groups completed 21 / 46 failed 21
+Martian PR groups completed 22 / 46 failed 22
+Martian PR groups completed 23 / 46 failed 23
+Martian PR groups completed 24 / 46 failed 24
+Martian PR groups completed 25 / 46 failed 25
+Martian PR groups completed 26 / 46 failed 26
+Martian PR groups completed 27 / 46 failed 27
+Martian PR groups completed 28 / 46 failed 28
+Martian PR groups completed 29 / 46 failed 29
+Martian PR groups completed 30 / 46 failed 30
+Martian PR groups completed 31 / 46 failed 31
+Martian PR groups completed 32 / 46 failed 32
+Martian PR groups completed 33 / 46 failed 33
+Martian PR groups completed 34 / 46 failed 34
+Martian PR groups completed 35 / 46 failed 35
+Martian PR groups completed 36 / 46 failed 36
+Martian PR groups completed 37 / 46 failed 37
+Martian PR groups completed 38 / 46 failed 38
+Martian PR groups completed 39 / 46 failed 39
+Martian PR groups completed 40 / 46 failed 40
+Martian PR groups completed 41 / 46 failed 41
+Martian PR groups completed 42 / 46 failed 42
+Martian PR groups completed 43 / 46 failed 43
+Martian PR groups completed 44 / 46 failed 44
+Martian PR groups completed 45 / 46 failed 45
+Martian PR groups completed 46 / 46 failed 46
+{
+  "rows": [
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "augment",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "baz",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "bito",
+      "baseline_f1": 0,
+      "heldout_gain": 0.0,
+      "fold_gains": [
+        0,
+        0
+      ],
+      "strict_positives": 0
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "bugbot",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "claude",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "claude-code",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "codeant",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "codeant-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "coderabbit",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "copilot",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "copilot-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "cubic-dev",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "cubic-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "devin",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "entelligence",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "gemini",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "gemini-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "gitar",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "gitlab",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "graphite",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "greptile",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "greptile-v4",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "greptile-v4-1",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "greptile-v5",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "kg",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "kodus",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "kodus-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "linearb",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "macroscope",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mergemonkey",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mesa",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mra-a",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mra-b",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mra-claude",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mra-max",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mra-mix",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mra-nano",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mra-openai",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "mra-ultra",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "propel",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "propel-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "qodo",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "qodo-extended",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "qodo-extended-summary",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "qodo-extended-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "qodo-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "qodo-v2-2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "qodo-v22",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "anthropic_claude-sonnet-4-5-20250929",
+      "tool": "sourcery",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "augment",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "baz",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "bito",
+      "baseline_f1": 0,
+      "heldout_gain": 0.0,
+      "fold_gains": [
+        0,
+        0
+      ],
+      "strict_positives": 0
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "bugbot",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "claude",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "claude-code",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "codeant",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "codeant-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "coderabbit",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "copilot",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "copilot-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "cubic-dev",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "cubic-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "devin",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "entelligence",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "gemini",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "gemini-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "gitar",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "gitlab",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "graphite",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "greptile",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "greptile-v4",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "greptile-v4-1",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "greptile-v5",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "kg",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "kodus",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "kodus-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "linearb",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "macroscope",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mergemonkey",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mesa",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mra-a",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mra-b",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mra-claude",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mra-max",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mra-mix",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mra-nano",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mra-openai",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "mra-ultra",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "propel",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "propel-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "qodo",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "qodo-extended",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "qodo-extended-summary",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "qodo-extended-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "qodo-v2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "qodo-v2-2",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "qodo-v22",
+      "error": "Missing API probabilities"
+    },
+    {
+      "judge": "openai_gpt-5.2",
+      "tool": "sourcery",
+      "error": "Missing API probabilities"
+    }
+  ],
+  "failures": [
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/5",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/6",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/7",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/9",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/10600",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/10967",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/11059",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/14740",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/14943",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/22345",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/22532",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/7232",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/8087",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/calcom/cal.com/pull/8330",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/getsentry/sentry/pull/67876",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/getsentry/sentry/pull/77754",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/getsentry/sentry/pull/80168",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/getsentry/sentry/pull/80528",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/getsentry/sentry/pull/93824",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/getsentry/sentry/pull/95633",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/103633",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/106778",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/107534",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/76186",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/79265",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/80329",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/90045",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/90939",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/94942",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/grafana/grafana/pull/97529",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/32918",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/33832",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/36880",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/36882",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/37038",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/37429",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/37634",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/38446",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    },
+    {
+      "pr": "https://github.com/keycloak/keycloak/pull/40940",
+      "error": "HTTP 422: {\"detail\":{\"error_type\":\"validation_error\",\"message\":\"questions: must have at most 128 questions\"}}"
+    }
+  ],
+  "reused_candidate_assignments": 3256,
+  "new_request_groups": 46
+}

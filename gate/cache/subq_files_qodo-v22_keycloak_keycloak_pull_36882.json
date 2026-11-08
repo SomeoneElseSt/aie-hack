@@ -1,0 +1,1 @@
+{"Exit code contract break: RECREATE_UPGRADE_EXIT_CODE was changed from 4 to 3, which changes the observable contract that automation relies on for deciding rolling vs recreate upgrades. Existing scripts/pipelines that interpret exit code 4 as 'recreate required' will mis-handle results after this change.": 0.7187395691871643}

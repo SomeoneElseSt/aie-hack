@@ -1,0 +1,1 @@
+{"Remove the builtins import and use the built-in type generic with 'from __future__ import annotations' to write 'def group_type(self) -> type[GroupType] | None:' instead of 'builtins.type[GroupType]'": 0.06446532905101776}

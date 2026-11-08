@@ -1,0 +1,1 @@
+{"TestLogger.FromContext returns a new disconnected TestLogger instance instead of returning the receiver, causing any code path that calls logger.FromContext(ctx).Info(...) to record logs on a throwaway instance rather than the TestLogger the test holds a reference to, making tests silently pass even when logging behavior is wrong": 0.9843011498451233}

@@ -1,0 +1,1 @@
+{"The example Keycloak CR uses an invalid YAML value `Recreate|<not set>` for the `strategy` field, which will cause parsing failures if users copy it as-is; the example should show a single valid value like `Recreate` instead": 0.07477089762687683}

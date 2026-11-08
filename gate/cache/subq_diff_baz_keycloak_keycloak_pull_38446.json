@@ -1,0 +1,1 @@
+{"Duplicated try/catch blocks for deserializing myUser.recoveryCodes.getCredentialData() in validateCredential and getCredentials methods - should extract a helper method that returns the parsed List<String> and encapsulates the try/catch/logging": 0.14071336388587952}

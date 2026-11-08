@@ -1,0 +1,1 @@
+{"Background thread is never joined before the assertion on line 157, causing potential race condition where exceptions caught in the thread's final iteration may be missed by the assertion on caughtExceptions": 0.8603335022926331}

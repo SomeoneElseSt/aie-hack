@@ -1,0 +1,1 @@
+{"When the forum and website are equal-depth hosts under a shared suffix, the code treats them as the same domain incorrectly. For example, `alice.github.io` displaying `http://bob.github.io/private/path` returns `bob.github.io/private/path`, even though the website is unrelated to the forum domain.": 0.9458885788917542}

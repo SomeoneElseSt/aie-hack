@@ -1,0 +1,1 @@
+{"Loop variable `id` shadows the built-in `id()` function - should be renamed to something more specific like `event_id`": 0.049007948487997055}

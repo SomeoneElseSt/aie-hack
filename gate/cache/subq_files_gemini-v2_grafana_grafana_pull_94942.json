@@ -1,0 +1,1 @@
+{"The logic in enableSqlExpressions is redundant and confusing - it performs a feature flag check but returns false in all code paths": 0.8827475905418396, "The variable 'enabled' is assigned the negation of the flag's state, which is counter-intuitive": 0.6933750510215759}

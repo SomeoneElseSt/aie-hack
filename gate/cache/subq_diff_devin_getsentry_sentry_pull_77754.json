@@ -1,0 +1,1 @@
+{"Mutable default: `timezone.now()` is evaluated once at class definition time, not per-instance. The `queued` field default will be the module load timestamp for all instances that don't explicitly pass a `queued` value, rather than the actual creation time. Should use `field(default_factory=timezone.now)` instead.": 0.9688491821289062}

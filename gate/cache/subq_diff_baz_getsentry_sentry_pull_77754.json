@@ -1,0 +1,1 @@
+{"queued field in AssignmentSource dataclass is defaulted to timezone.now() at import time, causing all instances to share the same timestamp instead of recording when each assignment was actually queued - should use field(default_factory=timezone.now) instead": 0.9443309307098389}

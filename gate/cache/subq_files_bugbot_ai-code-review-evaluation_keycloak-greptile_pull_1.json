@@ -1,0 +1,1 @@
+{"The auth note checking logic for USER_SET_BEFORE_USERNAME_PASSWORD_AUTH is duplicated between AbstractUsernameFormAuthenticator.isUserAlreadySetBeforeUsernamePasswordAuth() and AuthenticatorUtils.setupReauthenticationInUsernamePasswordFormError(), creating maintenance burden and risk of inconsistency if the auth note name or parsing logic changes": 0.13364583253860474}

@@ -1,0 +1,1 @@
+{"Data race risk in GetWebAssets due to unsynchronized access to a global cache that holds web asset manifest data - the patch introduces a mutex (entryPointAssetsCacheMu) and guards both reads and writes to entryPointAssetsCache": 0.22870396077632904, "Typo in error message in assets manifest parsing": 0.055329013615846634}

@@ -1,0 +1,1 @@
+{"Direct install/provider-initiated GitHub install path can bypass OAuth user-mismatch validation when no pipeline or Integration row exists yet, leaving a security bypass during the direct-install/webhook-lag flow": 0.6461138129234314}

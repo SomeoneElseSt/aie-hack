@@ -1,0 +1,1 @@
+{"Completing offsets in `finally` marks messages as processed even when `result_processor` raises, which can silently drop events. Only mark offsets complete on successful processing; on exceptions, leave them outstanding or explicitly route to a failure path.": 0.9274775981903076}

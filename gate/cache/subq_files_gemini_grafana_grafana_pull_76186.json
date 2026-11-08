@@ -1,0 +1,1 @@
+{"SubscribeStream and RunStream methods are not being instrumented with a contextual logger even though they have access to PluginContext, which means logs generated during stream operations won't contain useful contextual information like pluginId": 0.7396340370178223, "Test function name should be renamed to align with the file rename": 0.08995862305164337}

@@ -1,0 +1,1 @@
+{"Case-sensitive email matching in BlockedEmail.where(email: email).first allows users to bypass blocks by using different cases (e.g., 'Bad@spam.com' vs 'bad@spam.com'). Should use where('lower(email) = ?', email.downcase) and store emails in lowercase.": 0.9683791995048523}

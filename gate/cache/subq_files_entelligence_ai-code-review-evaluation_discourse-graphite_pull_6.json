@@ -1,0 +1,1 @@
+{"Adding `website_name` to serialized attributes makes it visible to all viewers, but it is not covered by `untrusted_attributes` and there's no `include_website_name?` guard, which can leak a user's website host to anonymous/TL0 users even when `website` is hidden": 0.7846496105194092}

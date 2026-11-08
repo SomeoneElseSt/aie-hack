@@ -1,0 +1,1 @@
+{"The second OR branch `{ retryCount: { gt: 1 } }` has no `method` constraint, so the `deleteMany` will delete any `WorkflowReminder` record across all methods (email, WhatsApp, etc.) where `retryCount > 1` \u2014 not just SMS reminders. This is a data-loss bug for other reminder types.": 0.9860332608222961}

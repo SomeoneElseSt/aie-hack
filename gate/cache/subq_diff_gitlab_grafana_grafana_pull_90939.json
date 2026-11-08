@@ -1,0 +1,1 @@
+{"Double-checked locking pattern is incomplete - after acquiring the write lock, the code doesn't re-check entryPointAssetsCache, causing multiple goroutines that observed ret == nil under the read lock to each recompute the assets (potentially making file or HTTP I/O calls) and overwrite the cache sequentially": 0.9122258424758911}

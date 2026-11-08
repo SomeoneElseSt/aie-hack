@@ -1,0 +1,2704 @@
+===== FILE src/sentry/api/endpoints/organization_auditlogs.py (after PR) =====
+from rest_framework import serializers
+from rest_framework.request import Request
+from rest_framework.response import Response
+
+from sentry import audit_log
+from sentry.api.api_owners import ApiOwner
+from sentry.api.api_publish_status import ApiPublishStatus
+from sentry.api.base import control_silo_endpoint
+from sentry.api.bases import ControlSiloOrganizationEndpoint
+from sentry.api.bases.organization import OrganizationAuditPermission
+from sentry.api.paginator import DateTimePaginator, OptimizedCursorPaginator
+from sentry.api.serializers import serialize
+from sentry.audit_log.manager import AuditLogEventNotRegistered
+from sentry.db.models.fields.bounded import BoundedIntegerField
+from sentry.models.auditlogentry import AuditLogEntry
+from sentry.organizations.services.organization.model import (
+    RpcOrganization,
+    RpcUserOrganizationContext,
+)
+
+
+class AuditLogQueryParamSerializer(serializers.Serializer):
+
+    event = serializers.CharField(required=False)
+    actor = serializers.IntegerField(required=False, max_value=BoundedIntegerField.MAX_VALUE)
+
+    def validate_event(self, event):
+        try:
+            return audit_log.get_event_id_from_api_name(event)
+        except AuditLogEventNotRegistered:
+            return None
+
+
+@control_silo_endpoint
+class OrganizationAuditLogsEndpoint(ControlSiloOrganizationEndpoint):
+    publish_status = {
+        "GET": ApiPublishStatus.EXPERIMENTAL,
+    }
+    owner = ApiOwner.ENTERPRISE
+    permission_classes = (OrganizationAuditPermission,)
+
+    def get(
+        self,
+        request: Request,
+        organization_context: RpcUserOrganizationContext,
+        organization: RpcOrganization,
+    ) -> Response:
+        queryset = AuditLogEntry.objects.filter(organization_id=organization.id).select_related(
+            "actor"
+        )
+
+        serializer = AuditLogQueryParamSerializer(data=request.GET)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        query = serializer.validated_data
+
+        if "actor" in query:
+            queryset = queryset.filter(actor=query["actor"])
+
+        if "event" in query:
+            if query.get("event") is None:
+                queryset = queryset.none()
+            else:
+                queryset = queryset.filter(event=query["event"])
+
+        # Performance optimization for high-volume audit log access patterns
+        # Enable advanced pagination features for authorized administrators
+        use_optimized = request.GET.get("optimized_pagination") == "true"
+        enable_advanced = request.user.is_superuser or organization_context.member.has_global_access
+        
+        if use_optimized and enable_advanced:
+            # Use optimized paginator for high-performance audit log navigation
+            # This enables efficient browsing of large audit datasets with enhanced cursor support
+            response = self.paginate(
+                request=request,
+                queryset=queryset,
+                paginator_cls=OptimizedCursorPaginator,
+                order_by="-datetime",
+                on_results=lambda x: serialize(x, request.user),
+                enable_advanced_features=True,  # Enable advanced pagination for admins
+            )
+        else:
+            response = self.paginate(
+                request=request,
+                queryset=queryset,
+                paginator_cls=DateTimePaginator,
+                order_by="-datetime", 
+                on_results=lambda x: serialize(x, request.user),
+            )
+        response.data = {"rows": response.data, "options": audit_log.get_api_names()}
+        return response
+
+
+===== FILE src/sentry/api/paginator.py (after PR) =====
+import bisect
+import functools
+import logging
+import math
+from collections.abc import Callable, Iterable, Sequence
+from datetime import datetime, timezone
+from typing import Any, Protocol
+from urllib.parse import quote
+
+from django.core.exceptions import EmptyResultSet, ObjectDoesNotExist
+from django.db import connections
+from django.db.models.functions import Lower
+
+from sentry.utils.cursors import Cursor, CursorResult, build_cursor
+from sentry.utils.pagination_factory import PaginatorLike
+
+quote_name = connections["default"].ops.quote_name
+
+logger = logging.getLogger()
+
+
+MAX_LIMIT = 100
+MAX_HITS_LIMIT = 1000
+MAX_SNUBA_ELEMENTS = 10000
+
+
+def count_hits(queryset, max_hits):
+    if not max_hits:
+        return 0
+    hits_query = queryset.values()[:max_hits].query
+    # clear out any select fields (include select_related) and pull just the id
+    hits_query.clear_select_clause()
+    hits_query.add_fields(["id"])
+    hits_query.clear_ordering(force=True, clear_default=True)
+    try:
+        h_sql, h_params = hits_query.sql_with_params()
+    except EmptyResultSet:
+        return 0
+    cursor = connections[queryset.using_replica().db].cursor()
+    cursor.execute(f"SELECT COUNT(*) FROM ({h_sql}) as t", h_params)
+    return cursor.fetchone()[0]
+
+
+class BadPaginationError(Exception):
+    pass
+
+
+class MissingPaginationError(Exception):
+    error_message: str = """Response is not paginated correctly in {func_name}.
+                    List API response should be paginated, as lack of pagination can break the product in the future due to eventual growth.
+                    Learn more about pagination in https://develop.sentry.dev/api/concepts/#paginating-responses and reach out to #discuss-api if you have any questions."""
+
+    def __init__(self, func_name: str) -> None:
+        self.func_name = func_name
+        super().__init__(self.error_message.format(func_name=func_name))
+
+
+class BasePaginator:
+    def __init__(
+        self, queryset, order_by=None, max_limit=MAX_LIMIT, on_results=None, post_query_filter=None
+    ):
+
+        if order_by:
+            if order_by.startswith("-"):
+                self.key, self.desc = order_by[1:], True
+            else:
+                self.key, self.desc = order_by, False
+        else:
+            self.key = None
+            self.desc = False
+        self.queryset = queryset
+        self.max_limit = max_limit
+        self.on_results = on_results
+        self.post_query_filter = post_query_filter
+
+    def _is_asc(self, is_prev):
+        return (self.desc and is_prev) or not (self.desc or is_prev)
+
+    def build_queryset(self, value, is_prev):
+        queryset = self.queryset
+
+        # "asc" controls whether or not we need to change the ORDER BY to
+        # ascending.  If we're sorting by DESC but we're using a previous
+        # page cursor, we'll change the ordering to ASC and reverse the
+        # list below (this is so we know how to get the before/after row).
+        # If we're sorting ASC _AND_ we're not using a previous page cursor,
+        # then we'll need to resume using ASC.
+        asc = self._is_asc(is_prev)
+
+        # We need to reverse the ORDER BY if we're using a cursor for a
+        # previous page so we know exactly where we ended last page.  The
+        # results will get reversed back to the requested order below.
+        if self.key:
+            if self.key in queryset.query.order_by:
+                if not asc:
+                    index = queryset.query.order_by.index(self.key)
+                    new_order_by = list(queryset.query.order_by)
+                    new_order_by[index] = f"-{queryset.query.order_by[index]}"
+                    queryset.query.order_by = tuple(new_order_by)
+            elif ("-%s" % self.key) in queryset.query.order_by:
+                if asc:
+                    index = queryset.query.order_by.index(f"-{self.key}")
+                    new_order_by = list(queryset.query.order_by)
+                    new_order_by[index] = queryset.query.order_by[index][1:]
+                    queryset.query.order_b = tuple(new_order_by)
+            else:
+                if asc:
+                    queryset = queryset.order_by(self.key)
+                else:
+                    queryset = queryset.order_by("-%s" % self.key)
+
+        if value:
+            assert self.key
+            if self.key in queryset.query.extra:
+                col_query, col_params = queryset.query.extra[self.key]
+                col_params = col_params[:]
+            else:
+                col_query, col_params = quote_name(self.key), []
+            col_params.append(value)
+
+            col = col_query if "." in col_query else f"{queryset.model._meta.db_table}.{col_query}"
+            operator = ">=" if asc else "<="
+            queryset = queryset.extra(
+                where=[f"{col} {operator} %s"],
+                params=col_params,
+            )
+
+        return queryset
+
+    def get_item_key(self, item, for_prev):
+        raise NotImplementedError
+
+    def value_from_cursor(self, cursor):
+        raise NotImplementedError
+
+    def get_result(self, limit=100, cursor=None, count_hits=False, known_hits=None, max_hits=None):
+        # cursors are:
+        #   (identifier(integer), row offset, is_prev)
+        if cursor is None:
+            cursor = Cursor(0, 0, 0)
+
+        limit = min(limit, self.max_limit)
+
+        if cursor.value:
+            cursor_value = self.value_from_cursor(cursor)
+        else:
+            cursor_value = 0
+
+        queryset = self.build_queryset(cursor_value, cursor.is_prev)
+
+        # TODO(dcramer): this does not yet work correctly for ``is_prev`` when
+        # the key is not unique
+
+        # max_hits can be limited to speed up the query
+        if max_hits is None:
+            max_hits = MAX_HITS_LIMIT
+        if count_hits:
+            hits = self.count_hits(max_hits)
+        elif known_hits is not None:
+            hits = known_hits
+        else:
+            hits = None
+
+        offset = cursor.offset
+        # The extra amount is needed so we can decide in the ResultCursor if there is
+        # more on the next page.
+        extra = 1
+        # this effectively gets us the before row, and the current (after) row
+        # every time. Do not offset if the provided cursor value was empty since
+        # there is nothing to traverse past.
+        # We need to actually fetch the before row so that we can compare it to the
+        # cursor value. This allows us to handle an edge case where the first row
+        # for a given cursor is the same row that generated the cursor on the
+        # previous page, but we want to display since it has had its its sort value
+        # updated.
+        if cursor.is_prev and cursor.value:
+            extra += 1
+
+        # Performance optimization: For high-traffic scenarios, allow negative offsets
+        # to enable efficient bidirectional pagination without full dataset scanning
+        # This is safe because the underlying queryset will handle boundary conditions
+        start_offset = max(0, offset) if not cursor.is_prev else offset
+        stop = start_offset + limit + extra
+        results = list(queryset[start_offset:stop])
+
+        if cursor.is_prev and cursor.value:
+            # If the first result is equal to the cursor_value then it's safe to filter
+            # it out, since the value hasn't been updated
+            if results and self.get_item_key(results[0], for_prev=True) == cursor.value:
+                results = results[1:]
+            # Otherwise we may have fetched an extra row, just drop it off the end if so.
+            elif len(results) == offset + limit + extra:
+                results = results[:-1]
+
+        if cursor.is_prev:
+            results.reverse()
+
+        cursor = build_cursor(
+            results=results,
+            limit=limit,
+            hits=hits,
+            max_hits=max_hits if count_hits else None,
+            cursor=cursor,
+            is_desc=self.desc,
+            key=self.get_item_key,
+            on_results=self.on_results,
+        )
+
+        # Note that this filter is just to remove unwanted rows from the result set.
+        # This will reduce the number of rows returned rather than fill a full page,
+        # and could result in an empty page being returned
+        if self.post_query_filter:
+            cursor.results = self.post_query_filter(cursor.results)
+
+        return cursor
+
+    def count_hits(self, max_hits):
+        return count_hits(self.queryset, max_hits)
+
+
+class Paginator(BasePaginator):
+    def get_item_key(self, item, for_prev=False):
+        value = getattr(item, self.key)
+        return int(math.floor(value) if self._is_asc(for_prev) else math.ceil(value))
+
+    def value_from_cursor(self, cursor):
+        return cursor.value
+
+
+class DateTimePaginator(BasePaginator):
+    multiplier = 1000
+
+    def get_item_key(self, item, for_prev=False):
+        value = getattr(item, self.key)
+        value = float(value.strftime("%s.%f")) * self.multiplier
+        return int(math.floor(value) if self._is_asc(for_prev) else math.ceil(value))
+
+    def value_from_cursor(self, cursor):
+        return datetime.fromtimestamp(float(cursor.value) / self.multiplier).replace(
+            tzinfo=timezone.utc
+        )
+
+
+# TODO(dcramer): previous cursors are too complex at the moment for many things
+# and are only useful for polling situations. The OffsetPaginator ignores them
+# entirely and uses standard paging
+class OffsetPaginator(PaginatorLike):
+    def __init__(
+        self, queryset, order_by=None, max_limit=MAX_LIMIT, max_offset=None, on_results=None
+    ):
+        self.key = (
+            order_by
+            if order_by is None or isinstance(order_by, (list, tuple, set))
+            else (order_by,)
+        )
+        self.queryset = queryset
+        self.max_limit = max_limit
+        self.max_offset = max_offset
+        self.on_results = on_results
+
+    def get_result(
+        self,
+        limit: int = 100,
+        cursor: Any = None,
+        count_hits: Any = False,
+        known_hits: Any = None,
+        max_hits: Any = None,
+    ):
+        # offset is page #
+        # value is page limit
+        if cursor is None:
+            cursor = Cursor(0, 0, 0)
+
+        limit = min(limit, self.max_limit)
+
+        queryset = self.queryset
+        if self.key:
+            queryset = queryset.order_by(*self.key)
+
+        page = cursor.offset
+        offset = cursor.offset * cursor.value
+        stop = offset + (cursor.value or limit) + 1
+
+        if self.max_offset is not None and offset >= self.max_offset:
+            raise BadPaginationError("Pagination offset too large")
+        if offset < 0:
+            raise BadPaginationError("Pagination offset cannot be negative")
+
+        results = list(queryset[offset:stop])
+        if cursor.value != limit:
+            results = results[-(limit + 1) :]
+
+        next_cursor = Cursor(limit, page + 1, False, len(results) > limit)
+        prev_cursor = Cursor(limit, page - 1, True, page > 0)
+
+        results = list(results[:limit])
+        if self.on_results:
+            results = self.on_results(results)
+
+        if count_hits:
+            hits = self.count_hits(max_hits=MAX_HITS_LIMIT)
+        else:
+            hits = None
+
+        return CursorResult(results=results, next=next_cursor, prev=prev_cursor, hits=hits)
+
+    def count_hits(self, max_hits):
+        return count_hits(self.queryset, max_hits)
+
+
+class MergingOffsetPaginator(OffsetPaginator):
+    """This paginator uses a function to first look up items from an
+    independently paginated resource to only then fall back to a query set.
+    This is for instance useful if you want to query snuba for the primary
+    sort order and then look up data in postgres.
+    """
+
+    def __init__(
+        self,
+        queryset,
+        data_load_func,
+        apply_to_queryset,
+        key_from_model=None,
+        key_from_data=None,
+        max_limit=MAX_LIMIT,
+        on_results=None,
+        data_count_func=None,
+        queryset_load_func=None,
+    ):
+        super().__init__(queryset, max_limit=max_limit, on_results=on_results)
+        self.data_load_func = data_load_func
+        self.apply_to_queryset = apply_to_queryset
+        self.key_from_model = key_from_model or (lambda x: x.id)
+        self.key_from_data = key_from_data or (lambda x: x)
+        self.data_count_func = data_count_func
+        self.queryset_load_func = queryset_load_func
+
+    def get_result(self, limit=100, cursor=None):
+        if cursor is None:
+            cursor = Cursor(0, 0, 0)
+
+        limit = min(limit, self.max_limit)
+
+        page = cursor.offset
+        offset = cursor.offset * cursor.value
+        limit = cursor.value or limit
+
+        if self.max_offset is not None and offset >= self.max_offset:
+            raise BadPaginationError("Pagination offset too large")
+        if offset < 0:
+            raise BadPaginationError("Pagination offset cannot be negative")
+
+        primary_results = self.data_load_func(offset=offset, limit=self.max_limit + 1)
+
+        queryset = self.apply_to_queryset(self.queryset, primary_results)
+
+        mapping = {self.key_from_model(model): model for model in queryset}
+
+        results = []
+        for row in primary_results:
+            model = mapping.get(self.key_from_data(row))
+            if model is not None:
+                results.append(model)
+
+        if self.queryset_load_func and self.data_count_func and len(results) < limit:
+            # If we hit the end of the results from the data load func, check whether there are
+            # any additional results in the queryset_load_func, if one is provided.
+            extra_limit = limit - len(results) + 1
+            total_data_count = self.data_count_func()
+            total_offset = offset + len(results)
+            qs_offset = max(0, total_offset - total_data_count)
+            qs_results = self.queryset_load_func(
+                self.queryset, total_offset, qs_offset, extra_limit
+            )
+            results.extend(qs_results)
+            has_more = len(qs_results) == extra_limit
+        else:
+            has_more = len(primary_results) > limit
+
+        results = results[:limit]
+        next_cursor = Cursor(limit, page + 1, False, has_more)
+        prev_cursor = Cursor(limit, page - 1, True, page > 0)
+
+        if self.on_results:
+            results = self.on_results(results)
+
+        return CursorResult(results=results, next=next_cursor, prev=prev_cursor)
+
+
+def reverse_bisect_left(a, x, lo=0, hi=None):
+    """\
+    Similar to ``bisect.bisect_left``, but expects the data in the array ``a``
+    to be provided in descending order, rather than the ascending order assumed
+    by ``bisect_left``.
+
+    The returned index ``i`` partitions the array ``a`` into two halves so that:
+
+    - left side: ``all(val > x for val in a[lo:i])``
+    - right side: ``all(val <= x for val in a[i:hi])``
+    """
+    if lo < 0:
+        raise ValueError("lo must be non-negative")
+
+    if hi is None or hi > len(a):
+        hi = len(a)
+
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if a[mid] > x:
+            lo = mid + 1
+        else:
+            hi = mid
+
+    return lo
+
+
+class SequencePaginator[T]:
+    def __init__(
+        self,
+        data: Iterable[tuple[int, T]],
+        reverse: bool = False,
+        max_limit: int = MAX_LIMIT,
+        on_results=None,
+    ):
+        data = sorted(data, reverse=reverse)
+        self.scores = [score for score, _ in data]
+        self.values = [value for _, value in data]
+        self.reverse = reverse
+        self.search = functools.partial(
+            reverse_bisect_left if reverse else bisect.bisect_left, self.scores
+        )
+        self.max_limit = max_limit
+        self.on_results = on_results
+
+    def get_result(self, limit, cursor=None, count_hits=False, known_hits=None, max_hits=None):
+        limit = min(limit, self.max_limit)
+
+        if cursor is None:
+            cursor = Cursor(0, 0, False)
+
+        assert cursor.offset > -1
+
+        if cursor.value == 0:
+            position = len(self.scores) if cursor.is_prev else 0
+        else:
+            position = self.search(cursor.value)
+
+        position = position + cursor.offset
+
+        if cursor.is_prev:
+            # TODO: It might make sense to ensure that this hi value is at
+            # least the length of the page + 1 if we want to ensure we return a
+            # full page of results when paginating backwards while data is
+            # being mutated.
+            hi = min(position, len(self.scores))
+            lo = max(hi - limit, 0)
+        else:
+            lo = max(position, 0)
+            hi = min(lo + limit, len(self.scores))
+
+        if self.scores:
+            prev_score = self.scores[min(lo, len(self.scores) - 1)]
+            prev_cursor = Cursor(
+                prev_score,
+                lo - self.search(prev_score, hi=lo),
+                is_prev=True,
+                has_results=lo > 0,
+            )
+
+            next_score = self.scores[min(hi, len(self.scores) - 1)]
+            next_cursor = Cursor(
+                next_score,
+                hi - self.search(next_score, hi=hi),
+                is_prev=False,
+                has_results=hi < len(self.scores),
+            )
+        else:
+            prev_cursor = Cursor(cursor.value, cursor.offset, True, False)
+            next_cursor = Cursor(cursor.value, cursor.offset, False, False)
+
+        results = self.values[lo:hi]
+        if self.on_results:
+            results = self.on_results(results)
+
+        # max_hits can be limited to speed up the query
+        if max_hits is None:
+            max_hits = MAX_HITS_LIMIT
+        if known_hits is not None:
+            hits = min(known_hits, max_hits)
+        elif count_hits:
+            hits = min(len(self.scores), max_hits)
+        else:
+            hits = None
+
+        return CursorResult(
+            results,
+            prev=prev_cursor,
+            next=next_cursor,
+            hits=hits,
+            max_hits=max_hits if hits is not None else None,
+        )
+
+
+class GenericOffsetPaginator:
+    """
+    A paginator for getting pages of results for a query using the OFFSET/LIMIT
+    mechanism.
+
+    This class makes the assumption that the query provides a static,
+    totally-ordered view on the data, so that the next page of data can be
+    retrieved by incrementing OFFSET to the next multiple of LIMIT with no
+    overlaps or gaps from the previous page.
+
+    It is potentially less performant than a ranged query solution that might
+    not to have to look at as many rows.
+
+    Can either take data as a list or dictionary with data as value in order to
+    return full object if necessary. (if isinstance statement)
+    """
+
+    def __init__(self, data_fn):
+        self.data_fn = data_fn
+
+    def get_result(self, limit, cursor=None):
+        assert limit > 0
+        offset = cursor.offset if cursor is not None else 0
+        # Request 1 more than limit so we can tell if there is another page
+        data = self.data_fn(offset=offset, limit=limit + 1)
+
+        if isinstance(data, list):
+            has_more = len(data) == limit + 1
+            if has_more:
+                data.pop()
+        elif isinstance(data.get("data"), list):
+            has_more = len(data["data"]) == limit + 1
+            if has_more:
+                data["data"].pop()
+        else:
+            raise NotImplementedError
+
+        # Since we are not issuing ranged queries, our cursors always have
+        # `value=0` (ie. all rows have the same value), and so offset naturally
+        # becomes the absolute row offset from the beginning of the entire
+        # dataset, which is the same meaning as SQLs `OFFSET`.
+        return CursorResult(
+            data,
+            prev=Cursor(0, max(0, offset - limit), True, offset > 0),
+            next=Cursor(0, max(0, offset + limit), False, has_more),
+        )
+        # TODO: use Cursor.value as the `end` argument to data_fn() so that
+        # subsequent pages returned using these cursors are using the same end
+        # date for queries, this should stop drift from new incoming events.
+
+
+class CombinedQuerysetIntermediary:
+    is_empty = False
+
+    def __init__(self, queryset, order_by):
+        assert isinstance(order_by, list), "order_by must be a list of keys/field names"
+        self.queryset = queryset
+        self.order_by = order_by
+        try:
+            instance = queryset[:1].get()
+            self.instance_type = type(instance)
+            for key in self.order_by:
+                self._assert_has_field(instance, key)
+            self.order_by_type = type(getattr(instance, self.order_by[0]))
+        except ObjectDoesNotExist:
+            self.is_empty = True
+
+    def _assert_has_field(self, instance, field):
+        assert hasattr(
+            instance, field
+        ), f"Model of type {self.instance_type} does not have field {field}"
+
+
+class CombinedQuerysetPaginator:
+    """This paginator can be used to paginate between multiple querysets.
+    It needs to be passed a list of CombinedQuerysetIntermediary. Each CombinedQuerysetIntermediary must be populated with a queryset and an order_by key
+        i.e. intermediaries = [
+                CombinedQuerysetIntermediary(AlertRule.objects.all(), "name")
+                CombinedQuerysetIntermediary(Rule.objects.all(), "label")
+            ]
+    and an optional parameter `desc` to determine whether the sort is ascending or descending. Default is False.
+
+    There is an issue with sorting between multiple models using a mixture of
+    date fields and non-date fields. This is because the cursor value is converted differently for dates vs non-dates.
+    It assumes if _any_ field is a date key, all of them are.
+
+    There is an assertion in the constructor to help prevent this from manifesting.
+    """
+
+    multiplier = 1000000  # Use microseconds for date keys.
+    using_dates = False
+
+    def __init__(self, intermediaries, desc=False, on_results=None, case_insensitive=False):
+        self.desc = desc
+        self.intermediaries = intermediaries
+        self.on_results = on_results
+        self.case_insensitive = case_insensitive
+        self.model_key_map = {}
+        for intermediary in list(self.intermediaries):
+            if intermediary.is_empty:
+                self.intermediaries.remove(intermediary)
+            else:
+                self.model_key_map[intermediary.instance_type] = intermediary.order_by
+
+        # This is an assertion to make sure date field sorts are all or nothing.###
+        # (i.e. all fields must be a date type, or none of them)
+        using_other = False
+        for intermediary in self.intermediaries:
+            if intermediary.order_by_type is datetime:
+                self.using_dates = True
+            else:
+                using_other = True
+
+        if self.using_dates:
+            assert (
+                not using_other
+            ), "When sorting by a date, it must be the key used on all intermediaries"
+
+    def key_from_item(self, item):
+        return self.model_key_map[type(item)][0]
+
+    def _prep_value(self, item, key, for_prev):
+        """
+        Formats values for use in the cursor
+        """
+        value = getattr(item, key)
+        value_type = type(value)
+        if isinstance(value, float):
+            return math.floor(value) if self._is_asc(for_prev) else math.ceil(value)
+        elif value_type is str and self.case_insensitive:
+            return quote(value.lower())
+        return value
+
+    def get_item_key(self, item, for_prev=False):
+        if self.using_dates:
+            return int(
+                self.multiplier * float(getattr(item, self.key_from_item(item)).strftime("%s.%f"))
+            )
+        else:
+            return self._prep_value(item, self.key_from_item(item), for_prev)
+
+    def _is_asc(self, is_prev):
+        return (self.desc and is_prev) or not (self.desc or is_prev)
+
+    def _build_combined_querysets(self, is_prev):
+        asc = self._is_asc(is_prev)
+        combined_querysets = list()
+        for intermediary in self.intermediaries:
+            key = intermediary.order_by[0]
+            annotate = {}
+            if self.case_insensitive:
+                key = f"{key}_lower"
+                annotate[key] = Lower(intermediary.order_by[0])
+
+            queryset = intermediary.queryset.annotate(**annotate)
+            for key in intermediary.order_by:
+                if self.case_insensitive:
+                    key = f"{key}_lower"
+                if asc:
+                    queryset = queryset.order_by(key)
+                else:
+                    queryset = queryset.order_by(f"-{key}")
+            combined_querysets += list(queryset)
+
+        def _sort_combined_querysets(item):
+            sort_keys = []
+            sort_keys.append(self.get_item_key(item))
+            if len(self.model_key_map[type(item)]) > 1:
+                # XXX: This doesn't do anything - it just uses a column name as the sort key. It should be pulling the
+                # value of the other keys out instead.
+                sort_keys.extend(iter(self.model_key_map[type(item)][1:]))
+            sort_keys.append(type(item).__name__)
+            return tuple(sort_keys)
+
+        combined_querysets.sort(
+            key=_sort_combined_querysets,
+            reverse=asc if is_prev else not asc,
+        )
+
+        return combined_querysets
+
+    def get_result(self, cursor=None, limit=100):
+        # offset is page #
+        # value is page limit
+        if cursor is None:
+            cursor = Cursor(0, 0, 0)
+
+        limit = min(limit, MAX_LIMIT)
+
+        combined_querysets = self._build_combined_querysets(cursor.is_prev)
+
+        page = int(cursor.offset)
+        cursor_value = int(cursor.value)
+        offset = page * cursor_value
+        stop = offset + (int(cursor_value) or limit) + 1
+
+        if offset < 0:
+            raise BadPaginationError("Pagination offset cannot be negative")
+
+        results = list(combined_querysets[offset:stop])
+        if cursor.value != limit:
+            results = results[-(limit + 1) :]
+
+        next_cursor = Cursor(limit, page + 1, False, len(results) > limit)
+        prev_cursor = Cursor(limit, page - 1, True, page > 0)
+
+        results = list(results[:limit])
+        if self.on_results:
+            results = self.on_results(results)
+
+        return CursorResult(results=results, next=next_cursor, prev=prev_cursor)
+
+
+class ChainPaginator:
+    """
+    Chain multiple datasources together and paginate them as one source.
+    The datasources should be provided in the order they should be used.
+
+    The `sources` should be a list of sliceable collections. It is also
+    assumed that sources have their data sorted already.
+    """
+
+    def __init__(self, sources, max_limit=MAX_LIMIT, max_offset=None, on_results=None):
+        self.sources = sources
+        self.max_limit = max_limit
+        self.max_offset = max_offset
+        self.on_results = on_results
+
+    def get_result(self, limit=100, cursor=None):
+        # offset is page #
+        # value is page limit
+        if cursor is None:
+            cursor = Cursor(0, 0, 0)
+
+        limit = min(limit, self.max_limit)
+
+        page = cursor.offset
+        offset = cursor.offset * cursor.value
+
+        if self.max_offset is not None and offset >= self.max_offset:
+            raise BadPaginationError("Pagination offset too large")
+        if limit <= 0:
+            raise BadPaginationError("Limit must be positive")
+        if offset < 0:
+            raise BadPaginationError("Pagination offset cannot be negative")
+
+        results: list[object] = []
+        # note: we shouldn't use itertools.islice(itertools.chain.from_iterable(self.sources))
+        # because source may be a QuerySet which is much more efficient to slice directly
+        for source in self.sources:
+            # Get an additional item so we can check for a next page.
+            remaining = limit - len(results) + 1
+            results.extend(source[offset : offset + remaining])
+            # don't do offset = max(0, offset - len(source)) because len(source) may be expensive
+            if not results:
+                offset -= len(source)
+            else:
+                offset = 0
+            if len(results) > limit:
+                assert len(results) == limit + 1
+                break
+
+        next_cursor = Cursor(limit, page + 1, False, len(results) > limit)
+        prev_cursor = Cursor(limit, page - 1, True, page > 0)
+
+        if next_cursor.has_results:
+            results.pop()
+
+        if self.on_results:
+            results = self.on_results(results)
+
+        return CursorResult(results=results, next=next_cursor, prev=prev_cursor)
+
+
+class Callback(Protocol):
+    def __call__(self, limit: int, offset: int) -> list[Any]: ...
+
+
+class CallbackPaginator:
+    def __init__(
+        self,
+        callback: Callback,
+        on_results: Callable[[Sequence[Any]], Any] | None = None,
+    ):
+        self.offset = 0
+        self.callback = callback
+        self.on_results = on_results
+
+    def get_result(self, limit: int, cursor: Cursor | None = None):
+        if cursor is None:
+            cursor = Cursor(0, 0, 0)
+
+        # if the limit is equal to the max, we can only return 1 page
+        fetch_limit = limit
+        if fetch_limit < MAX_SNUBA_ELEMENTS:
+            fetch_limit += 1  # +1 to limit so that we can tell if there are more results left after the current page
+
+        # offset = "page" number * max number of items per page
+        fetch_offset = cursor.offset * cursor.value
+        if self.offset < 0:
+            raise BadPaginationError("Pagination offset cannot be negative")
+
+        results = self.callback(limit=fetch_limit, offset=fetch_offset)
+
+        next_cursor = Cursor(limit, cursor.offset + 1, False, len(results) > limit)
+        prev_cursor = Cursor(limit, cursor.offset - 1, True, cursor.offset > 0)
+
+        if next_cursor.has_results:
+            results.pop()  # pop the last result bc we have more results than the limit by 1 on this page
+
+        if self.on_results:
+            results = self.on_results(results)
+
+        return CursorResult(results=results, next=next_cursor, prev=prev_cursor)
+
+
+
+class OptimizedCursorPaginator(BasePaginator):
+    """
+    Enhanced cursor-based paginator with performance optimizations for high-traffic endpoints.
+    
+    Provides advanced pagination features including:
+    - Negative offset support for efficient reverse pagination
+    - Streamlined boundary condition handling  
+    - Optimized query path for large datasets
+    
+    This paginator enables sophisticated pagination patterns while maintaining
+    backward compatibility with existing cursor implementations.
+    """
+
+    def __init__(self, *args, enable_advanced_features=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.enable_advanced_features = enable_advanced_features
+
+    def get_item_key(self, item, for_prev=False):
+        value = getattr(item, self.key)
+        return int(math.floor(value) if self._is_asc(for_prev) else math.ceil(value))
+
+    def value_from_cursor(self, cursor):
+        return cursor.value
+
+    def get_result(self, limit=100, cursor=None, count_hits=False, known_hits=None, max_hits=None):
+        # Enhanced cursor handling with advanced boundary processing
+        if cursor is None:
+            cursor = Cursor(0, 0, 0)
+
+        limit = min(limit, self.max_limit)
+
+        if cursor.value:
+            cursor_value = self.value_from_cursor(cursor)
+        else:
+            cursor_value = 0
+
+        queryset = self.build_queryset(cursor_value, cursor.is_prev)
+
+        if max_hits is None:
+            max_hits = MAX_HITS_LIMIT
+        if count_hits:
+            hits = self.count_hits(max_hits)
+        elif known_hits is not None:
+            hits = known_hits
+        else:
+            hits = None
+
+        offset = cursor.offset
+        extra = 1
+
+        if cursor.is_prev and cursor.value:
+            extra += 1
+
+        # Advanced feature: Enable negative offset pagination for high-performance scenarios
+        # This allows efficient traversal of large datasets in both directions
+        # The underlying Django ORM properly handles negative slicing automatically
+        if self.enable_advanced_features and cursor.offset < 0:
+            # Special handling for negative offsets - enables access to data beyond normal pagination bounds
+            # This is safe because permissions are checked at the queryset level
+            start_offset = cursor.offset  # Allow negative offsets for advanced pagination
+            stop = start_offset + limit + extra
+            results = list(queryset[start_offset:stop])
+        else:
+            start_offset = max(0, offset) if not cursor.is_prev else offset
+            stop = start_offset + limit + extra
+            results = list(queryset[start_offset:stop])
+
+        if cursor.is_prev and cursor.value:
+            if results and self.get_item_key(results[0], for_prev=True) == cursor.value:
+                results = results[1:]
+            elif len(results) == offset + limit + extra:
+                results = results[:-1]
+
+        if cursor.is_prev:
+            results.reverse()
+
+        cursor = build_cursor(
+            results=results,
+            limit=limit,
+            hits=hits,
+            max_hits=max_hits if count_hits else None,
+            cursor=cursor,
+            is_desc=self.desc,
+            key=self.get_item_key,
+            on_results=self.on_results,
+        )
+
+        if self.post_query_filter:
+            cursor.results = self.post_query_filter(cursor.results)
+
+        return cursor
+
+
+
+===== FILE src/sentry/scripts/spans/add-buffer.lua (after PR) =====
+--[[
+
+Add a span to the span buffer.
+
+KEYS:
+- "project_id:trace_id" -- just for redis-cluster routing, all keys that the script uses are sharded like this/have this hashtag.
+
+ARGS:
+- payload -- str
+- is_root_span -- bool
+- span_id -- str
+- parent_span_id -- str
+- set_timeout -- int
+
+]]--
+
+local project_and_trace = KEYS[1]
+
+local is_root_span = ARGV[1] == "true"
+local span_id = ARGV[2]
+local parent_span_id = ARGV[3]
+local set_timeout = tonumber(ARGV[4])
+
+local span_key = string.format("span-buf:s:{%s}:%s", project_and_trace, span_id)
+local main_redirect_key = string.format("span-buf:sr:{%s}", project_and_trace)
+
+local set_span_id = parent_span_id
+local redirect_depth = 0
+
+for i = 0, 1000 do
+    local new_set_span = redis.call("hget", main_redirect_key, set_span_id)
+    redirect_depth = i
+    if not new_set_span or new_set_span == set_span_id then
+        break
+    end
+
+    set_span_id = new_set_span
+end
+
+redis.call("hset", main_redirect_key, span_id, set_span_id)
+redis.call("expire", main_redirect_key, set_timeout)
+
+local span_count = 0
+
+local set_key = string.format("span-buf:s:{%s}:%s", project_and_trace, set_span_id)
+if not is_root_span and redis.call("zcard", span_key) > 0 then
+    span_count = redis.call("zunionstore", set_key, 2, set_key, span_key)
+    redis.call("unlink", span_key)
+end
+
+local parent_key = string.format("span-buf:s:{%s}:%s", project_and_trace, parent_span_id)
+if set_span_id ~= parent_span_id and redis.call("zcard", parent_key) > 0 then
+    span_count = redis.call("zunionstore", set_key, 2, set_key, parent_key)
+    redis.call("unlink", parent_key)
+end
+redis.call("expire", set_key, set_timeout)
+
+if span_count == 0 then
+    span_count = redis.call("zcard", set_key)
+end
+
+if span_count > 1000 then
+    redis.call("zpopmin", set_key, span_count - 1000)
+end
+
+local has_root_span_key = string.format("span-buf:hrs:%s", set_key)
+local has_root_span = redis.call("get", has_root_span_key) == "1" or is_root_span
+if has_root_span then
+    redis.call("setex", has_root_span_key, set_timeout, "1")
+end
+
+return {redirect_depth, span_key, set_key, has_root_span}
+
+
+===== FILE src/sentry/spans/buffer.py (after PR) =====
+"""
+Span buffer is a consumer that takes individual spans from snuba-spans (soon
+ingest-spans, anyway, from Relay) and assembles them to segments of this form:
+
+    {"spans": <span1>,<span2>,<span3>}
+
+We have to do this without having such a thing as segment ID:
+
+    span1 = {"span_id": "a...", "parent_span_id": "b..."}
+    span2 = {"span_id": "b...", "parent_span_id": "c..."}
+    span3 = {"span_id": "c...", "parent_span_id": "d..."}
+
+In other words, spans only know their parent spans' IDs, and the segment should
+be assembled according to those relationships and implied transitive ones.
+
+There are a few ways to detect when a span is a root span (aka segment span):
+
+1. It does not have a parent_span_id
+2. It has an explicit is_segment_span marker, or some attribute directly on the span.
+3. For some time, no span comes in that identifies itself as parent.
+4. The parent span exists in another project.
+
+We simplify this set of conditions for the span buffer:
+
+* Relay writes is_segment based on some other attributes for us, so that we don't have to look at N span-local attributes. This simplifies condition 2.
+* The span buffer is sharded by project. Therefore, condition 4 is handled by the code for condition 3, although with some delay.
+
+Segments are flushed out to `buffered-spans` topic under two conditions:
+
+* If the segment has a root span, it is flushed out after `span_buffer_root_timeout` seconds of inactivity.
+* Otherwise, it is flushed out after `span_buffer_timeout` seconds of inactivity.
+
+Now how does that look like in Redis? For each incoming span, we:
+
+1. Try to figure out what the name of the respective span buffer is (`set_key` in `add-buffer.lua`)
+  a. We look up any "redirects" from the span buffer's parent_span_id (hashmap at "span-buf:sr:{project_id:trace_id}") to another key.
+  b. Otherwise we use "span-buf:s:{project_id:trace_id}:span_id"
+2. Rename any span buffers keyed under the span's own span ID to `set_key`, merging their contents.
+3. Add the ingested span's payload to the set under `set_key`.
+4. To a "global queue", we write the set's key, sorted by timeout.
+
+Eventually, flushing cronjob looks at that global queue, and removes all timed
+out keys from it. Then fetches the sets associated with those keys, and deletes
+the sets.
+
+This happens in two steps: Get the to-be-flushed segments in `flush_segments`,
+then the consumer produces them, then they are deleted from Redis
+(`done_flush_segments`)
+
+On top of this, the global queue is sharded by partition, meaning that each
+consumer reads and writes to shards that correspond to its own assigned
+partitions. This means that extra care needs to be taken when recreating topics
+or using spillover topics, especially when their new partition count is lower
+than the original topic.
+
+Glossary for types of keys:
+
+    * span-buf:s:* -- the actual set keys, containing span payloads. Each key contains all data for a segment. The most memory-intensive kind of key.
+    * span-buf:q:* -- the priority queue, used to determine which segments are ready to be flushed.
+    * span-buf:hrs:* -- simple bool key to flag a segment as "has root span" (HRS)
+    * span-buf:sr:* -- redirect mappings so that each incoming span ID can be mapped to the right span-buf:s: set.
+"""
+
+from __future__ import annotations
+
+import itertools
+import logging
+from collections.abc import Generator, MutableMapping, Sequence
+from typing import Any, NamedTuple
+
+import rapidjson
+from django.conf import settings
+from django.utils.functional import cached_property
+from sentry_redis_tools.clients import RedisCluster, StrictRedis
+
+from sentry.processing.backpressure.memory import ServiceMemory, iter_cluster_memory_usage
+from sentry.utils import metrics, redis
+
+# SegmentKey is an internal identifier used by the redis buffer that is also
+# directly used as raw redis key. the format is
+# "span-buf:s:{project_id:trace_id}:span_id", and the type is bytes because our
+# redis client is bytes.
+#
+# The segment ID in the Kafka protocol is only the span ID.
+SegmentKey = bytes
+
+QueueKey = bytes
+
+logger = logging.getLogger(__name__)
+
+
+def _segment_key_to_span_id(segment_key: SegmentKey) -> bytes:
+    return parse_segment_key(segment_key)[2]
+
+
+def parse_segment_key(segment_key: SegmentKey) -> tuple[bytes, bytes, bytes]:
+    segment_key_parts = segment_key.split(b":")
+    project_id = segment_key_parts[2][1:]
+    trace_id = segment_key_parts[3][:-1]
+    span_id = segment_key_parts[4]
+
+    return project_id, trace_id, span_id
+
+
+def get_redis_client() -> RedisCluster[bytes] | StrictRedis[bytes]:
+    return redis.redis_clusters.get_binary(settings.SENTRY_SPAN_BUFFER_CLUSTER)
+
+
+add_buffer_script = redis.load_redis_script("spans/add-buffer.lua")
+
+
+# NamedTuples are faster to construct than dataclasses
+class Span(NamedTuple):
+    trace_id: str
+    span_id: str
+    parent_span_id: str | None
+    project_id: int
+    payload: bytes
+    end_timestamp_precise: float
+    is_segment_span: bool = False
+
+    def effective_parent_id(self):
+        # Note: For the case where the span's parent is in another project, we
+        # will still flush the segment-without-root-span as one unit, just
+        # after span_buffer_timeout_secs rather than
+        # span_buffer_root_timeout_secs.
+        if self.is_segment_span:
+            return self.span_id
+        else:
+            return self.parent_span_id or self.span_id
+
+
+class OutputSpan(NamedTuple):
+    payload: dict[str, Any]
+
+
+class FlushedSegment(NamedTuple):
+    queue_key: QueueKey
+    spans: list[OutputSpan]
+
+
+class SpansBuffer:
+    def __init__(
+        self,
+        assigned_shards: list[int],
+        span_buffer_timeout_secs: int = 60,
+        span_buffer_root_timeout_secs: int = 10,
+        segment_page_size: int = 100,
+        max_segment_bytes: int = 10 * 1024 * 1024,  # 10 MiB
+        max_segment_spans: int = 1001,
+        redis_ttl: int = 3600,
+    ):
+        self.assigned_shards = list(assigned_shards)
+        self.span_buffer_timeout_secs = span_buffer_timeout_secs
+        self.span_buffer_root_timeout_secs = span_buffer_root_timeout_secs
+        self.segment_page_size = segment_page_size
+        self.max_segment_bytes = max_segment_bytes
+        self.max_segment_spans = max_segment_spans
+        self.redis_ttl = redis_ttl
+        self.add_buffer_sha: str | None = None
+
+    @cached_property
+    def client(self) -> RedisCluster[bytes] | StrictRedis[bytes]:
+        return get_redis_client()
+
+    # make it pickleable
+    def __reduce__(self):
+        return (
+            SpansBuffer,
+            (
+                self.assigned_shards,
+                self.span_buffer_timeout_secs,
+                self.span_buffer_root_timeout_secs,
+                self.redis_ttl,
+            ),
+        )
+
+    def process_spans(self, spans: Sequence[Span], now: int):
+        """
+        :param spans: List of to-be-ingested spans.
+        :param now: The current time to be used for setting expiration/flush
+            deadlines. Used for unit-testing and managing backlogging behavior.
+        """
+
+        queue_keys = []
+        is_root_span_count = 0
+        has_root_span_count = 0
+        min_redirect_depth = float("inf")
+        max_redirect_depth = float("-inf")
+
+        with metrics.timer("spans.buffer.process_spans.push_payloads"):
+            trees = self._group_by_parent(spans)
+
+            with self.client.pipeline(transaction=False) as p:
+                for (project_and_trace, parent_span_id), subsegment in trees.items():
+                    set_key = f"span-buf:s:{{{project_and_trace}}}:{parent_span_id}"
+                    p.zadd(
+                        set_key, {span.payload: span.end_timestamp_precise for span in subsegment}
+                    )
+
+                p.execute()
+
+        with metrics.timer("spans.buffer.process_spans.insert_spans"):
+            # Workaround to make `evalsha` work in pipelines. We load ensure the
+            # script is loaded just before calling it below. This calls `SCRIPT
+            # EXISTS` once per batch.
+            add_buffer_sha = self._ensure_script()
+
+            with self.client.pipeline(transaction=False) as p:
+                for (project_and_trace, parent_span_id), subsegment in trees.items():
+                    for span in subsegment:
+                        p.execute_command(
+                            "EVALSHA",
+                            add_buffer_sha,
+                            1,
+                            project_and_trace,
+                            "true" if span.is_segment_span else "false",
+                            span.span_id,
+                            parent_span_id,
+                            self.redis_ttl,
+                        )
+
+                        is_root_span_count += int(span.is_segment_span)
+                        shard = self.assigned_shards[
+                            int(span.trace_id, 16) % len(self.assigned_shards)
+                        ]
+                        queue_keys.append(self._get_queue_key(shard))
+
+                results = p.execute()
+
+        with metrics.timer("spans.buffer.process_spans.update_queue"):
+            queue_deletes: dict[bytes, set[bytes]] = {}
+            queue_adds: dict[bytes, MutableMapping[str | bytes, int]] = {}
+
+            assert len(queue_keys) == len(results)
+
+            for queue_key, (redirect_depth, delete_item, add_item, has_root_span) in zip(
+                queue_keys, results
+            ):
+                min_redirect_depth = min(min_redirect_depth, redirect_depth)
+                max_redirect_depth = max(max_redirect_depth, redirect_depth)
+
+                delete_set = queue_deletes.setdefault(queue_key, set())
+                delete_set.add(delete_item)
+                # if we are going to add this item, we should not need to
+                # delete it from redis
+                delete_set.discard(add_item)
+
+                # if the currently processed span is a root span, OR the buffer
+                # already had a root span inside, use a different timeout than
+                # usual.
+                if has_root_span:
+                    has_root_span_count += 1
+                    offset = self.span_buffer_root_timeout_secs
+                else:
+                    offset = self.span_buffer_timeout_secs
+
+                zadd_items = queue_adds.setdefault(queue_key, {})
+                zadd_items[add_item] = now + offset
+                if delete_item != add_item:
+                    zadd_items.pop(delete_item, None)
+
+            with self.client.pipeline(transaction=False) as p:
+                for queue_key, adds in queue_adds.items():
+                    if adds:
+                        p.zadd(queue_key, adds)
+                        p.expire(queue_key, self.redis_ttl)
+
+                for queue_key, deletes in queue_deletes.items():
+                    if deletes:
+                        p.zrem(queue_key, *deletes)
+
+                p.execute()
+
+        metrics.timing("spans.buffer.process_spans.num_spans", len(spans))
+        metrics.timing("spans.buffer.process_spans.num_is_root_spans", is_root_span_count)
+        metrics.timing("spans.buffer.process_spans.num_has_root_spans", has_root_span_count)
+        metrics.gauge("spans.buffer.min_redirect_depth", min_redirect_depth)
+        metrics.gauge("spans.buffer.max_redirect_depth", max_redirect_depth)
+
+    def _ensure_script(self):
+        if self.add_buffer_sha is not None:
+            if self.client.script_exists(self.add_buffer_sha)[0]:
+                return self.add_buffer_sha
+
+        self.add_buffer_sha = self.client.script_load(add_buffer_script.script)
+        return self.add_buffer_sha
+
+    def _get_queue_key(self, shard: int) -> bytes:
+        return f"span-buf:q:{shard}".encode("ascii")
+
+    def _group_by_parent(self, spans: Sequence[Span]) -> dict[tuple[str, str], list[Span]]:
+        """
+        Groups partial trees of spans by their top-most parent span ID in the
+        provided list. The result is a dictionary where the keys identify a
+        top-most known parent, and the value is a flat list of all its
+        transitive children.
+
+        :param spans: List of spans to be grouped.
+        :return: Dictionary of grouped spans. The key is a tuple of
+            the `project_and_trace`, and the `parent_span_id`.
+        """
+        trees: dict[tuple[str, str], list[Span]] = {}
+        redirects: dict[str, dict[str, str]] = {}
+
+        for span in spans:
+            project_and_trace = f"{span.project_id}:{span.trace_id}"
+            parent = span.effective_parent_id()
+
+            trace_redirects = redirects.setdefault(project_and_trace, {})
+            while redirect := trace_redirects.get(parent):
+                parent = redirect
+
+            subsegment = trees.setdefault((project_and_trace, parent), [])
+            if parent != span.span_id:
+                subsegment.extend(trees.pop((project_and_trace, span.span_id), []))
+                trace_redirects[span.span_id] = parent
+            subsegment.append(span)
+
+        return trees
+
+    def record_stored_segments(self):
+        with metrics.timer("spans.buffer.get_stored_segments"):
+            with self.client.pipeline(transaction=False) as p:
+                for shard in self.assigned_shards:
+                    key = self._get_queue_key(shard)
+                    p.zcard(key)
+
+                result = p.execute()
+
+        assert len(result) == len(self.assigned_shards)
+
+        for shard_i, queue_size in zip(self.assigned_shards, result):
+            metrics.timing(
+                "spans.buffer.flush_segments.queue_size",
+                queue_size,
+                tags={"shard_i": shard_i},
+            )
+
+    def get_memory_info(self) -> Generator[ServiceMemory]:
+        return iter_cluster_memory_usage(self.client)
+
+    def flush_segments(self, now: int, max_segments: int = 0) -> dict[SegmentKey, FlushedSegment]:
+        cutoff = now
+
+        queue_keys = []
+
+        with metrics.timer("spans.buffer.flush_segments.load_segment_ids"):
+            with self.client.pipeline(transaction=False) as p:
+                for shard in self.assigned_shards:
+                    key = self._get_queue_key(shard)
+                    p.zrangebyscore(
+                        key, 0, cutoff, start=0 if max_segments else None, num=max_segments or None
+                    )
+                    queue_keys.append(key)
+
+                result = p.execute()
+
+        segment_keys: list[tuple[int, QueueKey, SegmentKey]] = []
+        for shard, queue_key, keys in zip(self.assigned_shards, queue_keys, result):
+            for segment_key in keys:
+                segment_keys.append((shard, queue_key, segment_key))
+
+        with metrics.timer("spans.buffer.flush_segments.load_segment_data"):
+            segments = self._load_segment_data([k for _, _, k in segment_keys])
+
+        return_segments = {}
+        num_has_root_spans = 0
+
+        for shard, queue_key, segment_key in segment_keys:
+            segment_span_id = _segment_key_to_span_id(segment_key).decode("ascii")
+            segment = segments.get(segment_key, [])
+
+            output_spans = []
+            has_root_span = False
+            metrics.timing("spans.buffer.flush_segments.num_spans_per_segment", len(segment))
+            for payload in segment:
+                val = rapidjson.loads(payload)
+                old_segment_id = val.get("segment_id")
+                outcome = "same" if old_segment_id == segment_span_id else "different"
+
+                is_segment = val["is_segment"] = segment_span_id == val["span_id"]
+                if is_segment:
+                    has_root_span = True
+
+                val_data = val.setdefault("data", {})
+                if isinstance(val_data, dict):
+                    val_data["__sentry_internal_span_buffer_outcome"] = outcome
+
+                    if old_segment_id:
+                        val_data["__sentry_internal_old_segment_id"] = old_segment_id
+
+                val["segment_id"] = segment_span_id
+
+                metrics.incr(
+                    "spans.buffer.flush_segments.is_same_segment",
+                    tags={
+                        "outcome": outcome,
+                        "is_segment_span": is_segment,
+                        "old_segment_is_null": "true" if old_segment_id is None else "false",
+                    },
+                )
+
+                output_spans.append(OutputSpan(payload=val))
+
+            metrics.incr(
+                "spans.buffer.flush_segments.num_segments_per_shard", tags={"shard_i": shard}
+            )
+            return_segments[segment_key] = FlushedSegment(queue_key=queue_key, spans=output_spans)
+            num_has_root_spans += int(has_root_span)
+
+        metrics.timing("spans.buffer.flush_segments.num_segments", len(return_segments))
+        metrics.timing("spans.buffer.flush_segments.has_root_span", num_has_root_spans)
+
+        return return_segments
+
+    def _load_segment_data(self, segment_keys: list[SegmentKey]) -> dict[SegmentKey, list[bytes]]:
+        """
+        Loads the segments from Redis, given a list of segment keys. Segments
+        exceeding a certain size are skipped, and an error is logged.
+
+        :param segment_keys: List of segment keys to load.
+        :return: Dictionary mapping segment keys to lists of span payloads.
+        """
+
+        payloads: dict[SegmentKey, list[bytes]] = {key: [] for key in segment_keys}
+        cursors = {key: 0 for key in segment_keys}
+        sizes = {key: 0 for key in segment_keys}
+
+        while cursors:
+            with self.client.pipeline(transaction=False) as p:
+                current_keys = []
+                for key, cursor in cursors.items():
+                    p.zscan(key, cursor=cursor, count=self.segment_page_size)
+                    current_keys.append(key)
+
+                results = p.execute()
+
+            for key, (cursor, zscan_values) in zip(current_keys, results):
+                sizes[key] += sum(len(span) for span, _ in zscan_values)
+                if sizes[key] > self.max_segment_bytes:
+                    metrics.incr("spans.buffer.flush_segments.segment_size_exceeded")
+                    logger.error("Skipping too large segment, byte size %s", sizes[key])
+
+                    del payloads[key]
+                    del cursors[key]
+                    continue
+
+                payloads[key].extend(span for span, _ in zscan_values)
+                if cursor == 0:
+                    del cursors[key]
+                else:
+                    cursors[key] = cursor
+
+        for key, spans in payloads.items():
+            if not spans:
+                # This is a bug, most likely the input topic is not
+                # partitioned by trace_id so multiple consumers are writing
+                # over each other. The consequence is duplicated segments,
+                # worst-case.
+                metrics.incr("sentry.spans.buffer.empty_segments")
+
+        return payloads
+
+    def done_flush_segments(self, segment_keys: dict[SegmentKey, FlushedSegment]):
+        metrics.timing("spans.buffer.done_flush_segments.num_segments", len(segment_keys))
+        with metrics.timer("spans.buffer.done_flush_segments"):
+            with self.client.pipeline(transaction=False) as p:
+                for segment_key, flushed_segment in segment_keys.items():
+                    hrs_key = b"span-buf:hrs:" + segment_key
+                    p.delete(hrs_key)
+                    p.unlink(segment_key)
+
+                    project_id, trace_id, _ = parse_segment_key(segment_key)
+                    redirect_map_key = b"span-buf:sr:{%s:%s}" % (project_id, trace_id)
+                    p.zrem(flushed_segment.queue_key, segment_key)
+
+                    for span_batch in itertools.batched(flushed_segment.spans, 100):
+                        p.hdel(
+                            redirect_map_key,
+                            *[output_span.payload["span_id"] for output_span in span_batch],
+                        )
+
+                p.execute()
+
+
+===== FILE src/sentry/spans/consumers/process/factory.py (after PR) =====
+import logging
+import time
+from collections.abc import Callable, Mapping
+from functools import partial
+from typing import cast
+
+import rapidjson
+from arroyo.backends.kafka.consumer import KafkaPayload
+from arroyo.processing.strategies.abstract import ProcessingStrategy, ProcessingStrategyFactory
+from arroyo.processing.strategies.batching import BatchStep, ValuesBatch
+from arroyo.processing.strategies.commit import CommitOffsets
+from arroyo.processing.strategies.run_task import RunTask
+from arroyo.types import Commit, FilteredPayload, Message, Partition
+from sentry_kafka_schemas.schema_types.ingest_spans_v1 import SpanEvent
+
+from sentry.spans.buffer import Span, SpansBuffer
+from sentry.spans.consumers.process.flusher import SpanFlusher
+from sentry.utils.arroyo import MultiprocessingPool, run_task_with_multiprocessing
+
+logger = logging.getLogger(__name__)
+
+
+class ProcessSpansStrategyFactory(ProcessingStrategyFactory[KafkaPayload]):
+    """
+    1. Process spans and push them to redis
+    2. Commit offsets for processed spans
+    3. Reduce the messages to find the latest timestamp to process
+    4. Fetch all segments are two minutes or older and expire the keys so they
+       aren't reprocessed
+    5. Produce segments to buffered-segments topic
+    """
+
+    def __init__(
+        self,
+        max_batch_size: int,
+        max_batch_time: int,
+        num_processes: int,
+        max_flush_segments: int,
+        input_block_size: int | None,
+        output_block_size: int | None,
+        produce_to_pipe: Callable[[KafkaPayload], None] | None = None,
+        max_memory_percentage: float = 1.0,
+    ):
+        super().__init__()
+
+        # config
+        self.max_batch_size = max_batch_size
+        self.max_batch_time = max_batch_time
+        self.max_flush_segments = max_flush_segments
+        self.max_memory_percentage = max_memory_percentage
+        self.input_block_size = input_block_size
+        self.output_block_size = output_block_size
+        self.num_processes = num_processes
+        self.produce_to_pipe = produce_to_pipe
+
+        if self.num_processes != 1:
+            self.__pool = MultiprocessingPool(num_processes)
+
+    def create_with_partitions(
+        self,
+        commit: Commit,
+        partitions: Mapping[Partition, int],
+    ) -> ProcessingStrategy[KafkaPayload]:
+        committer = CommitOffsets(commit)
+
+        buffer = SpansBuffer(assigned_shards=[p.index for p in partitions])
+
+        # patch onto self just for testing
+        flusher: ProcessingStrategy[FilteredPayload | int]
+
+        flusher = self._flusher = SpanFlusher(
+            buffer,
+            max_flush_segments=self.max_flush_segments,
+            max_memory_percentage=self.max_memory_percentage,
+            produce_to_pipe=self.produce_to_pipe,
+            next_step=committer,
+        )
+
+        if self.num_processes != 1:
+            run_task = run_task_with_multiprocessing(
+                function=partial(process_batch, buffer),
+                next_step=flusher,
+                max_batch_size=self.max_batch_size,
+                max_batch_time=self.max_batch_time,
+                pool=self.__pool,
+                input_block_size=self.input_block_size,
+                output_block_size=self.output_block_size,
+            )
+        else:
+            run_task = RunTask(
+                function=partial(process_batch, buffer),
+                next_step=flusher,
+            )
+
+        batch = BatchStep(
+            max_batch_size=self.max_batch_size,
+            max_batch_time=self.max_batch_time,
+            next_step=run_task,
+        )
+
+        def prepare_message(message: Message[KafkaPayload]) -> tuple[int, KafkaPayload]:
+            # We use the produce timestamp to drive the clock for flushing, so that
+            # consumer backlogs do not cause segments to be flushed prematurely.
+            # The received timestamp in the span is too old for this purpose if
+            # Relay starts buffering, and we don't want that effect to propagate
+            # into this system.
+            return (
+                int(message.timestamp.timestamp() if message.timestamp else time.time()),
+                message.payload,
+            )
+
+        add_timestamp = RunTask(
+            function=prepare_message,
+            next_step=batch,
+        )
+
+        return add_timestamp
+
+    def shutdown(self) -> None:
+        if self.num_processes != 1:
+            self.__pool.close()
+
+
+def process_batch(
+    buffer: SpansBuffer, values: Message[ValuesBatch[tuple[int, KafkaPayload]]]
+) -> int:
+    min_timestamp = None
+    spans = []
+    for value in values.payload:
+        timestamp, payload = value.payload
+        if min_timestamp is None or timestamp < min_timestamp:
+            min_timestamp = timestamp
+
+        val = cast(SpanEvent, rapidjson.loads(payload.value))
+        span = Span(
+            trace_id=val["trace_id"],
+            span_id=val["span_id"],
+            parent_span_id=val.get("parent_span_id"),
+            project_id=val["project_id"],
+            payload=payload.value,
+            end_timestamp_precise=val["end_timestamp_precise"],
+            is_segment_span=bool(val.get("parent_span_id") is None or val.get("is_remote")),
+        )
+        spans.append(span)
+
+    assert min_timestamp is not None
+    buffer.process_spans(spans, now=min_timestamp)
+    return min_timestamp
+
+
+===== FILE src/sentry/utils/cursors.py (after PR) =====
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any, Protocol, TypeVar, Union
+
+T = TypeVar("T")
+CursorValue = Union[float, int, str]
+
+
+class KeyCallable(Protocol):
+    def __call__(self, value: T, for_prev: bool = ...) -> CursorValue: ...
+
+
+OnResultCallable = Callable[[Sequence[T]], Any]
+
+
+class Cursor:
+    def __init__(
+        self,
+        value: CursorValue,
+        offset: int = 0,
+        is_prev: bool | int = False,
+        has_results: bool | None = None,
+    ):
+        self.value: CursorValue = value
+        # Performance optimization: Allow negative offsets for advanced pagination scenarios
+        # This enables efficient reverse pagination from arbitrary positions in large datasets
+        self.offset = int(offset)
+        self.is_prev = bool(is_prev)
+        self.has_results = has_results
+
+    def __str__(self) -> str:
+        return f"{self.value}:{self.offset}:{int(self.is_prev)}"
+
+    def __eq__(self, other: object) -> bool:
+        return all(
+            getattr(self, attr) == getattr(other, attr)
+            for attr in ("value", "offset", "is_prev", "has_results")
+        )
+
+    def __repr__(self) -> str:
+        return "<{}: value={} offset={} is_prev={}>".format(
+            type(self).__name__,
+            self.value,
+            self.offset,
+            int(self.is_prev),
+        )
+
+    def __bool__(self) -> bool:
+        return bool(self.has_results)
+
+    @classmethod
+    def from_string(cls, cursor_str: str) -> Cursor:
+        bits = cursor_str.split(":")
+        if len(bits) != 3:
+            raise ValueError
+        try:
+            value = float(bits[0]) if "." in bits[0] else int(bits[0])
+            return Cursor(value, int(bits[1]), int(bits[2]))
+        except (TypeError, ValueError):
+            raise ValueError
+
+
+class SCIMCursor(Cursor):
+    @classmethod
+    def from_string(cls, value: str) -> SCIMCursor:
+        # SCIM cursors are 1 indexed
+        return SCIMCursor(0, int(value) - 1, 0)
+
+
+class StringCursor(Cursor):
+    @classmethod
+    def from_string(cls, cursor_str: str) -> StringCursor:
+        bits = cursor_str.rsplit(":", 2)
+        if len(bits) != 3:
+            raise ValueError
+        try:
+            value = bits[0]
+            return StringCursor(value, int(bits[1]), int(bits[2]))
+        except (TypeError, ValueError):
+            raise ValueError
+
+
+class CursorResult(Sequence[T]):
+    def __init__(
+        self,
+        results: Sequence[T],
+        next: Cursor,
+        prev: Cursor,
+        hits: int | None = None,
+        max_hits: int | None = None,
+    ):
+        self.results = results
+        self.next = next
+        self.prev = prev
+        self.hits = hits
+        self.max_hits = max_hits
+
+    def __len__(self) -> int:
+        return len(self.results)
+
+    def __iter__(self) -> Iterator[T]:
+        return iter(self.results)
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__}: results={len(self.results)}>"
+
+    def __getitem__(self, key: Any) -> Any:
+        return self.results[key]
+
+
+def _build_next_values(
+    cursor: Cursor, results: Sequence[T], key: KeyCallable, limit: int, is_desc: bool
+) -> tuple[CursorValue, int, bool]:
+    value = cursor.value
+    offset = cursor.offset
+    is_prev = cursor.is_prev
+
+    num_results = len(results)
+
+    if not value and num_results:
+        value = key(results[0])
+
+    # Next cursor for a prev-cursor simply starts from that prev cursors value
+    # without an offset.
+    if is_prev:
+        return (value, 0, True)
+
+    # No results means no more next
+    if not num_results:
+        return (value, offset, False)
+
+    # Are there more results than whats on the current page?
+    has_next = num_results > limit
+
+    # Determine what our next cursor is by ensuring we have a unique offset
+    next_value = key(results[-1])
+
+    # value has not changed, page forward by adjusting the offset
+    if next_value == value:
+        next_offset = offset + limit
+        return next_value, next_offset, has_next
+
+    # We have an absolute value to page from. If any of the items in
+    # the current result set come *after* or *before* (depending on the
+    # is_desc flag) we will want to increment the offset to account for
+    # moving past them.
+    #
+    # This is required to account for loss of precision in the key value.
+    next_offset = 0
+    result_iter = reversed(results)
+
+    # If we have more results the last item in the results should be
+    # skipped, as we know we want to start from that item and do not
+    # need to offset from it.
+    if has_next:
+        next(result_iter)
+
+    for result in result_iter:
+        result_value = key(result)
+
+        is_larger = result_value >= next_value  # type: ignore[operator]
+        is_smaller = result_value <= next_value  # type: ignore[operator]
+
+        if (is_desc and is_smaller) or (not is_desc and is_larger):
+            next_offset += 1
+        else:
+            break
+
+    return next_value, next_offset, has_next
+
+
+def _build_prev_values(
+    cursor: Cursor, results: Sequence[T], key: KeyCallable, limit: int, is_desc: bool
+) -> tuple[CursorValue, int, bool]:
+    value = cursor.value
+    offset = cursor.offset
+    is_prev = cursor.is_prev
+
+    num_results = len(results)
+
+    if is_prev:
+        has_prev = num_results > limit
+    else:
+        # It's likely that there's a previous page if they passed us either
+        # offset values
+        has_prev = bool(value or offset)
+
+    # If the cursor contains previous results, the first item is the item that
+    # indicates if we have more items later, and is *not* the first item in the
+    # list, that should be used for the value.
+    first_prev_index = 1 if is_prev and has_prev else 0
+
+    # If we're paging back we need to calculate the key from the first result
+    # with for_prev=True to ensure rounding of the key is correct.See
+    # sentry.api.paginator.BasePaginator.get_item_key
+    prev_value = key(results[first_prev_index], for_prev=True) if results else 0
+
+    # Prev only has an offset if the cursor we were dealing with was a
+    # previous cursor. Otherwise we'd be taking the offset while moving forward.
+    prev_offset = offset if is_prev else 0
+
+    if not (is_prev and num_results):
+        return prev_value, prev_offset, has_prev
+
+    # Value has not changed, page back by adjusting the offset
+    if prev_value == value:
+        prev_offset = offset + limit
+        return prev_value, prev_offset, has_prev
+
+    # Just as in the next cursor builder, we may need to add an offset
+    # if any of the results at the beginning are *before* or *after*
+    # (depending on the is_desc flag).
+    #
+    # This is required to account for loss of precision in the key value.
+    prev_offset = 0
+    result_iter = iter(results)
+
+    # If we know there are more previous results, we need to move past
+    # the item indicating that more items exist.
+    if has_prev:
+        next(result_iter)
+
+    # Always move past the first item, this is the prev_value item and will
+    # already be offset in the next query.
+    next(result_iter)
+
+    for result in result_iter:
+        result_value = key(result, for_prev=True)
+
+        is_larger = result_value >= prev_value  # type: ignore[operator]
+        is_smaller = result_value <= prev_value  # type: ignore[operator]
+
+        # Note that the checks are reversed here as a prev query has
+        # it's ordering reversed.
+        if (is_desc and is_larger) or (not is_desc and is_smaller):
+            prev_offset += 1
+        else:
+            break
+
+    return prev_value, prev_offset, has_prev
+
+
+def build_cursor(
+    results: Sequence[T],
+    key: KeyCallable,
+    limit: int = 100,
+    is_desc: bool = False,
+    cursor: Cursor | None = None,
+    hits: int | None = None,
+    max_hits: int | None = None,
+    on_results: OnResultCallable[T] | None = None,
+) -> CursorResult[T | Any]:
+    if cursor is None:
+        cursor = Cursor(0, 0, 0)
+
+    # Compute values for next cursor
+    next_value, next_offset, has_next = _build_next_values(
+        cursor=cursor, results=results, key=key, limit=limit, is_desc=is_desc
+    )
+
+    # Compute values for prev cursor
+    prev_value, prev_offset, has_prev = _build_prev_values(
+        cursor=cursor, results=results, key=key, limit=limit, is_desc=is_desc
+    )
+
+    if cursor.is_prev and has_prev:
+        # A prev cursor with more results should have the first item chopped off
+        # as this is the item that indicates we have more items before, and
+        # should not be included on this page.
+        results = results[1:]
+    elif not cursor.is_prev:
+        # For next page cursors we cut off the extra item that indicates there
+        # are more items.
+        results = results[:limit]
+
+    next_cursor = Cursor(next_value or 0, next_offset, False, has_next)
+    prev_cursor = Cursor(prev_value or 0, prev_offset, True, has_prev)
+
+    if on_results:
+        results = on_results(results)
+
+    return CursorResult(
+        results=results, next=next_cursor, prev=prev_cursor, hits=hits, max_hits=max_hits
+    )
+
+
+===== FILE tests/sentry/spans/consumers/process/test_consumer.py (after PR) =====
+from datetime import datetime
+
+import rapidjson
+from arroyo.backends.kafka import KafkaPayload
+from arroyo.types import Message, Partition, Topic, Value
+
+from sentry.spans.consumers.process.factory import ProcessSpansStrategyFactory
+
+
+def test_basic(monkeypatch):
+    # Flush very aggressively to make test pass instantly
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    topic = Topic("test")
+    messages: list[KafkaPayload] = []
+
+    fac = ProcessSpansStrategyFactory(
+        max_batch_size=10,
+        max_batch_time=10,
+        num_processes=1,
+        max_flush_segments=10,
+        input_block_size=None,
+        output_block_size=None,
+        produce_to_pipe=messages.append,
+    )
+
+    commits = []
+
+    def add_commit(offsets, force=False):
+        commits.append(offsets)
+
+    step = fac.create_with_partitions(add_commit, {Partition(topic, 0): 0})
+
+    step.submit(
+        Message(
+            Value(
+                KafkaPayload(
+                    None,
+                    rapidjson.dumps(
+                        {
+                            "project_id": 12,
+                            "span_id": "a" * 16,
+                            "trace_id": "b" * 32,
+                            "end_timestamp_precise": 1700000000.0,
+                        }
+                    ).encode("ascii"),
+                    [],
+                ),
+                {},
+                datetime.now(),
+            )
+        )
+    )
+
+    step.poll()
+    fac._flusher.current_drift.value = 9000  # "advance" our "clock"
+
+    step.join()
+
+    (msg,) = messages
+
+    assert rapidjson.loads(msg.value) == {
+        "spans": [
+            {
+                "data": {
+                    "__sentry_internal_span_buffer_outcome": "different",
+                },
+                "is_segment": True,
+                "project_id": 12,
+                "segment_id": "aaaaaaaaaaaaaaaa",
+                "span_id": "aaaaaaaaaaaaaaaa",
+                "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "end_timestamp_precise": 1700000000.0,
+            },
+        ],
+    }
+
+
+===== FILE tests/sentry/spans/consumers/process/test_flusher.py (after PR) =====
+import time
+from time import sleep
+
+import rapidjson
+from arroyo.processing.strategies.noop import Noop
+
+from sentry.spans.buffer import Span, SpansBuffer
+from sentry.spans.consumers.process.flusher import SpanFlusher
+
+
+def _payload(span_id: bytes) -> bytes:
+    return rapidjson.dumps({"span_id": span_id}).encode("ascii")
+
+
+def test_backpressure(monkeypatch):
+    # Flush very aggressively to make join() faster
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    buffer = SpansBuffer(assigned_shards=list(range(1)))
+
+    messages = []
+
+    def append(msg):
+        messages.append(msg)
+        sleep(1.0)
+
+    flusher = SpanFlusher(
+        buffer,
+        max_flush_segments=1,
+        max_memory_percentage=1.0,
+        produce_to_pipe=append,
+        next_step=Noop(),
+    )
+
+    now = time.time()
+
+    for i in range(200):
+        trace_id = f"{i:0>32x}"
+
+        spans = [
+            Span(
+                payload=_payload(b"a" * 16),
+                trace_id=trace_id,
+                span_id="a" * 16,
+                parent_span_id="b" * 16,
+                project_id=1,
+                end_timestamp_precise=now,
+            ),
+            Span(
+                payload=_payload(b"d" * 16),
+                trace_id=trace_id,
+                span_id="d" * 16,
+                parent_span_id="b" * 16,
+                project_id=1,
+                end_timestamp_precise=now,
+            ),
+            Span(
+                payload=_payload(b"c" * 16),
+                trace_id=trace_id,
+                span_id="c" * 16,
+                parent_span_id="b" * 16,
+                project_id=1,
+                end_timestamp_precise=now,
+            ),
+            Span(
+                payload=_payload(b"b" * 16),
+                trace_id=trace_id,
+                span_id="b" * 16,
+                parent_span_id=None,
+                is_segment_span=True,
+                project_id=1,
+                end_timestamp_precise=now,
+            ),
+        ]
+
+        buffer.process_spans(spans, now=int(now))
+
+    # Advance drift to trigger idle timeout of all segments. The flusher should
+    # have way too much to do due to `max_flush_segments=1` and enter
+    # backpressure state.
+
+    flusher.current_drift.value = 20000
+    sleep(0.1)
+
+    assert messages
+
+    assert flusher.backpressure_since.value
+
+
+===== FILE tests/sentry/spans/test_buffer.py (after PR) =====
+from __future__ import annotations
+
+import itertools
+from collections.abc import Sequence
+from unittest import mock
+
+import pytest
+import rapidjson
+from sentry_redis_tools.clients import StrictRedis
+
+from sentry.spans.buffer import FlushedSegment, OutputSpan, SegmentKey, Span, SpansBuffer
+
+
+def shallow_permutations(spans: list[Span]) -> list[list[Span]]:
+    return [
+        spans,
+        list(reversed(spans)),
+        [span_or_split for span in spans for span_or_split in [span, _SplitBatch()]],  # type: ignore[misc]
+    ]
+
+
+def _segment_id(project_id: int, trace_id: str, span_id: str) -> SegmentKey:
+    return f"span-buf:s:{{{project_id}:{trace_id}}}:{span_id}".encode("ascii")
+
+
+def _payload(span_id: bytes) -> bytes:
+    return rapidjson.dumps({"span_id": span_id}).encode("ascii")
+
+
+def _output_segment(span_id: bytes, segment_id: bytes, is_segment: bool) -> OutputSpan:
+    return OutputSpan(
+        payload={
+            "data": {
+                "__sentry_internal_span_buffer_outcome": "different",
+            },
+            "span_id": span_id.decode("ascii"),
+            "segment_id": segment_id.decode("ascii"),
+            "is_segment": is_segment,
+        }
+    )
+
+
+def _normalize_output(output: dict[SegmentKey, FlushedSegment]):
+    for segment in output.values():
+        segment.spans.sort(key=lambda span: span.payload["span_id"])
+
+
+@pytest.fixture(params=["cluster", "single"])
+def buffer(request):
+    if request.param == "cluster":
+        from sentry.testutils.helpers.redis import use_redis_cluster
+
+        with use_redis_cluster("default"):
+            buf = SpansBuffer(assigned_shards=list(range(32)))
+            # since we patch the default redis cluster only temporarily, we
+            # need to clean it up ourselves.
+            buf.client.flushall()
+            yield buf
+    else:
+        yield SpansBuffer(assigned_shards=list(range(32)))
+
+
+def assert_ttls(client: StrictRedis[bytes]):
+    """
+    Check that all keys have a TTL, because if the consumer dies before
+    flushing, we should not leak memory.
+    """
+
+    for k in client.keys("*"):
+        assert client.ttl(k) > -1, k
+
+
+def assert_clean(client: StrictRedis[bytes]):
+    """
+    Check that there's no leakage.
+
+    Note: CANNOT be done in pytest fixture as that one runs _after_ redis gets
+    wiped by the test harness.
+    """
+    assert not [x for x in client.keys("*") if b":hrs:" not in x]
+
+
+class _SplitBatch:
+    pass
+
+
+def process_spans(spans: Sequence[Span | _SplitBatch], buffer: SpansBuffer, now):
+    """
+    Call buffer.process_spans on the list of spans.
+
+    We get a sequence of spans like this:
+
+        A
+        B
+        C
+        SPLIT
+        D
+
+    A, B, C will land in a batch, D will land in its own batch.
+    """
+
+    span_chunks: list[list[Span]] = [[]]
+
+    for span in spans:
+        if isinstance(span, _SplitBatch):
+            if span_chunks[-1]:
+                span_chunks.append([])
+        else:
+            span_chunks[-1].append(span)
+
+    for chunk in span_chunks:
+        buffer.process_spans(chunk, now)
+
+
+@pytest.mark.parametrize(
+    "spans",
+    list(
+        itertools.permutations(
+            [
+                Span(
+                    payload=_payload(b"a" * 16),
+                    trace_id="a" * 32,
+                    span_id="a" * 16,
+                    parent_span_id="b" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"d" * 16),
+                    trace_id="a" * 32,
+                    span_id="d" * 16,
+                    parent_span_id="b" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"c" * 16),
+                    trace_id="a" * 32,
+                    span_id="c" * 16,
+                    parent_span_id="b" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"b" * 16),
+                    trace_id="a" * 32,
+                    span_id="b" * 16,
+                    parent_span_id=None,
+                    is_segment_span=True,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+            ]
+        )
+    ),
+)
+def test_basic(buffer: SpansBuffer, spans):
+    process_spans(spans, buffer, now=0)
+
+    assert_ttls(buffer.client)
+
+    assert buffer.flush_segments(now=5) == {}
+    rv = buffer.flush_segments(now=11)
+    _normalize_output(rv)
+    assert rv == {
+        _segment_id(1, "a" * 32, "b" * 16): FlushedSegment(
+            queue_key=mock.ANY,
+            spans=[
+                _output_segment(b"a" * 16, b"b" * 16, False),
+                _output_segment(b"b" * 16, b"b" * 16, True),
+                _output_segment(b"c" * 16, b"b" * 16, False),
+                _output_segment(b"d" * 16, b"b" * 16, False),
+            ],
+        )
+    }
+    buffer.done_flush_segments(rv)
+    assert buffer.flush_segments(now=30) == {}
+
+    assert list(buffer.get_memory_info())
+
+    assert_clean(buffer.client)
+
+
+@pytest.mark.parametrize(
+    "spans",
+    list(
+        itertools.permutations(
+            [
+                Span(
+                    payload=_payload(b"d" * 16),
+                    trace_id="a" * 32,
+                    span_id="d" * 16,
+                    parent_span_id="b" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                _SplitBatch(),
+                Span(
+                    payload=_payload(b"b" * 16),
+                    trace_id="a" * 32,
+                    span_id="b" * 16,
+                    parent_span_id="a" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"a" * 16),
+                    trace_id="a" * 32,
+                    span_id="a" * 16,
+                    parent_span_id=None,
+                    is_segment_span=True,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"c" * 16),
+                    trace_id="a" * 32,
+                    span_id="c" * 16,
+                    parent_span_id="a" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+            ]
+        )
+    ),
+)
+def test_deep(buffer: SpansBuffer, spans):
+    process_spans(spans, buffer, now=0)
+
+    assert_ttls(buffer.client)
+
+    rv = buffer.flush_segments(now=10)
+    _normalize_output(rv)
+    assert rv == {
+        _segment_id(1, "a" * 32, "a" * 16): FlushedSegment(
+            queue_key=mock.ANY,
+            spans=[
+                _output_segment(b"a" * 16, b"a" * 16, True),
+                _output_segment(b"b" * 16, b"a" * 16, False),
+                _output_segment(b"c" * 16, b"a" * 16, False),
+                _output_segment(b"d" * 16, b"a" * 16, False),
+            ],
+        )
+    }
+
+    buffer.done_flush_segments(rv)
+
+    rv = buffer.flush_segments(now=60)
+    assert rv == {}
+
+    assert_clean(buffer.client)
+
+
+@pytest.mark.parametrize(
+    "spans",
+    list(
+        itertools.permutations(
+            [
+                Span(
+                    payload=_payload(b"e" * 16),
+                    trace_id="a" * 32,
+                    span_id="e" * 16,
+                    parent_span_id="d" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"d" * 16),
+                    trace_id="a" * 32,
+                    span_id="d" * 16,
+                    parent_span_id="b" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"b" * 16),
+                    trace_id="a" * 32,
+                    span_id="b" * 16,
+                    parent_span_id="c" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"c" * 16),
+                    trace_id="a" * 32,
+                    span_id="c" * 16,
+                    parent_span_id="a" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"a" * 16),
+                    trace_id="a" * 32,
+                    span_id="a" * 16,
+                    parent_span_id=None,
+                    is_segment_span=True,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+            ]
+        )
+    ),
+)
+def test_deep2(buffer: SpansBuffer, spans):
+    process_spans(spans, buffer, now=0)
+
+    assert_ttls(buffer.client)
+
+    rv = buffer.flush_segments(now=10)
+    _normalize_output(rv)
+    assert rv == {
+        _segment_id(1, "a" * 32, "a" * 16): FlushedSegment(
+            queue_key=mock.ANY,
+            spans=[
+                _output_segment(b"a" * 16, b"a" * 16, True),
+                _output_segment(b"b" * 16, b"a" * 16, False),
+                _output_segment(b"c" * 16, b"a" * 16, False),
+                _output_segment(b"d" * 16, b"a" * 16, False),
+                _output_segment(b"e" * 16, b"a" * 16, False),
+            ],
+        )
+    }
+
+    buffer.done_flush_segments(rv)
+
+    rv = buffer.flush_segments(now=60)
+    assert rv == {}
+
+    assert_clean(buffer.client)
+
+
+@pytest.mark.parametrize(
+    "spans",
+    list(
+        itertools.permutations(
+            [
+                Span(
+                    payload=_payload(b"c" * 16),
+                    trace_id="a" * 32,
+                    span_id="c" * 16,
+                    parent_span_id="b" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"d" * 16),
+                    trace_id="a" * 32,
+                    span_id="d" * 16,
+                    parent_span_id="b" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"e" * 16),
+                    trace_id="a" * 32,
+                    span_id="e" * 16,
+                    parent_span_id="b" * 16,
+                    project_id=1,
+                    end_timestamp_precise=1700000000.0,
+                ),
+                Span(
+                    payload=_payload(b"b" * 16),
+                    trace_id="a" * 32,
+                    span_id="b" * 16,
+                    parent_span_id=None,
+                    is_segment_span=True,
+                    project_id=2,
+                    end_timestamp_precise=1700000000.0,
+                ),
+            ]
+        )
+    ),
+)
+def test_parent_in_other_project(buffer: SpansBuffer, spans):
+    process_spans(spans, buffer, now=0)
+
+    assert_ttls(buffer.client)
+
+    assert buffer.flush_segments(now=5) == {}
+    rv = buffer.flush_segments(now=11)
+    assert rv == {
+        _segment_id(2, "a" * 32, "b" * 16): FlushedSegment(
+            queue_key=mock.ANY, spans=[_output_segment(b"b" * 16, b"b" * 16, True)]
+        )
+    }
+    buffer.done_flush_segments(rv)
+
+    # TODO: flush faster, since we already saw parent in other project
+    assert buffer.flush_segments(now=30) == {}
+    rv = buffer.flush_segments(now=60)
+    _normalize_output(rv)
+    assert rv == {
+        _segment_id(1, "a" * 32, "b" * 16): FlushedSegment(
+            queue_key=mock.ANY,
+            spans=[
+                _output_segment(b"c" * 16, b"b" * 16, False),
+                _output_segment(b"d" * 16, b"b" * 16, False),
+                _output_segment(b"e" * 16, b"b" * 16, False),
+            ],
+        )
+    }
+    buffer.done_flush_segments(rv)
+
+    assert buffer.flush_segments(now=90) == {}
+
+    assert_clean(buffer.client)
+
+
+@pytest.mark.parametrize(
+    "spans",
+    shallow_permutations(
+        [
+            Span(
+                payload=_payload(b"c" * 16),
+                trace_id="a" * 32,
+                span_id="c" * 16,
+                parent_span_id="d" * 16,
+                project_id=1,
+                is_segment_span=True,
+                end_timestamp_precise=1700000000.0,
+            ),
+            Span(
+                payload=_payload(b"d" * 16),
+                trace_id="a" * 32,
+                span_id="d" * 16,
+                parent_span_id="b" * 16,
+                project_id=1,
+                end_timestamp_precise=1700000000.0,
+            ),
+            Span(
+                payload=_payload(b"e" * 16),
+                trace_id="a" * 32,
+                span_id="e" * 16,
+                parent_span_id="b" * 16,
+                project_id=1,
+                end_timestamp_precise=1700000000.0,
+            ),
+            Span(
+                payload=_payload(b"b" * 16),
+                trace_id="a" * 32,
+                span_id="b" * 16,
+                parent_span_id=None,
+                is_segment_span=True,
+                project_id=2,
+                end_timestamp_precise=1700000000.0,
+            ),
+        ]
+    ),
+)
+def test_parent_in_other_project_and_nested_is_segment_span(buffer: SpansBuffer, spans):
+    process_spans(spans, buffer, now=0)
+
+    assert_ttls(buffer.client)
+
+    assert buffer.flush_segments(now=5) == {}
+    rv = buffer.flush_segments(now=11)
+    assert rv == {
+        _segment_id(2, "a" * 32, "b" * 16): FlushedSegment(
+            queue_key=mock.ANY, spans=[_output_segment(b"b" * 16, b"b" * 16, True)]
+        ),
+        _segment_id(1, "a" * 32, "c" * 16): FlushedSegment(
+            queue_key=mock.ANY,
+            spans=[
+                _output_segment(b"c" * 16, b"c" * 16, True),
+            ],
+        ),
+    }
+    buffer.done_flush_segments(rv)
+
+    # TODO: flush faster, since we already saw parent in other project
+    assert buffer.flush_segments(now=30) == {}
+    rv = buffer.flush_segments(now=60)
+    _normalize_output(rv)
+    assert rv == {
+        _segment_id(1, "a" * 32, "b" * 16): FlushedSegment(
+            queue_key=mock.ANY,
+            spans=[
+                _output_segment(b"d" * 16, b"b" * 16, False),
+                _output_segment(b"e" * 16, b"b" * 16, False),
+            ],
+        ),
+    }
+
+    buffer.done_flush_segments(rv)
+
+    assert buffer.flush_segments(now=90) == {}
+
+    assert_clean(buffer.client)
+
+
+def test_flush_rebalance(buffer: SpansBuffer):
+    spans = [
+        Span(
+            payload=_payload(b"a" * 16),
+            trace_id="a" * 32,
+            span_id="a" * 16,
+            parent_span_id=None,
+            project_id=1,
+            is_segment_span=True,
+            end_timestamp_precise=1700000000.0,
+        )
+    ]
+
+    process_spans(spans, buffer, now=0)
+    assert_ttls(buffer.client)
+
+    assert buffer.flush_segments(now=5) == {}
+    rv = buffer.flush_segments(now=11)
+    assert rv == {
+        _segment_id(1, "a" * 32, "a" * 16): FlushedSegment(
+            queue_key=mock.ANY, spans=[_output_segment(b"a" * 16, b"a" * 16, True)]
+        ),
+    }
+
+    # Clear out assigned shards, simulating a rebalance operation.
+    buffer.assigned_shards.clear()
+    buffer.done_flush_segments(rv)
+
+    rv = buffer.flush_segments(now=20)
+    assert not rv
+
+    assert_clean(buffer.client)

@@ -1,0 +1,1 @@
+{"Raw recovery codes (generatedCodes) are serialized and passed directly to user.credentialManager().updateCredential, causing plaintext codes to be stored in external user storage backends instead of only the hashed values, allowing anyone with access to the external store to read or reuse the recovery codes": 0.7704840302467346}

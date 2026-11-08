@@ -1,0 +1,1 @@
+{"In the join() method, when iterating over processes, if remaining_time <= 0 the loop breaks without terminating the remaining processes. While stopped.value is set, the processes that weren't reached in the iteration never have terminate() called on them, unlike the old single-process code which always terminated the process after waiting.": 0.839279294013977}

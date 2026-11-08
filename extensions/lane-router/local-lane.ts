@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { LANES_DIR, LOG_FILE, SUBQ_BASE_URL, SUBQ_MODEL } from "./constants.ts";
+import { prepareLocalCommands } from "./local-commands.ts";
 
 // A locally fine-tuned tiny model that handles the user's repetitive git mechanics without any cloud LLM.
 // It only exists once the distillation pipeline (distill/) has ADOPTED an adapter into distill/roster.json.
@@ -92,18 +93,20 @@ async function repoState(pi: ExtensionAPI, cwd: string): Promise<string | undefi
 }
 
 async function localCommands(state: string, request: string): Promise<string[] | undefined> {
+	const orderedRequest = request.replace(/push\s+and\s+commit/gi, "commit and push");
 	const response = await fetch(LOCAL_URL, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
-			messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: `${state}\n\nRequest: ${request}` }],
+			messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: `${state}\n\nRequest: ${orderedRequest}` }],
 			max_tokens: MAX_COMMAND_TOKENS,
 			temperature: 0,
 		}),
 		signal: AbortSignal.timeout(LOCAL_TIMEOUT_MS),
 	}).catch(() => undefined);
 	if (!response?.ok) return undefined;
-	const text = ((await response.json()) as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content ?? "";
+	const body = await response.json().catch(() => undefined) as { choices?: { message?: { content?: string } }[] } | undefined;
+	const text = body?.choices?.[0]?.message?.content ?? "";
 	const commands = text.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("```") && !line.startsWith("#"));
 	return commands.length > 0 ? commands : undefined;
 }
@@ -151,9 +154,13 @@ export function registerLocalLane(pi: ExtensionAPI): void {
 		if (intent.confidence < MIN_CONFIDENCE) return skip("low_confidence");
 
 		const state = await repoState(pi, ctx.cwd);
-		const commands = state ? await localCommands(state, event.text) : undefined;
-		const result = commands ? await runCommands(pi, ctx.cwd, commands) : { ok: false, output: "local model unavailable" };
-		const record = { type: "local", timestamp: new Date().toISOString(), prompt: event.text, lane: "local", model: local.name, intent, localProbability: probability, commands, ok: result.ok, ms: Date.now() - started };
+		const branch = await pi.exec("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: ctx.cwd });
+		if (branch.code !== 0) return skip("detached_head");
+		const generatedCommands = state ? await localCommands(state, event.text) : undefined;
+		const plan = generatedCommands ? prepareLocalCommands(generatedCommands, intent.intent, branch.stdout.trim()) : { ok: false as const, output: "local model unavailable" };
+		const commands = plan.ok ? plan.commands : undefined;
+		const result = plan.ok ? await runCommands(pi, ctx.cwd, plan.commands) : plan;
+		const record = { type: "local", timestamp: new Date().toISOString(), prompt: event.text, lane: "local", model: local.name, intent, localProbability: probability, generatedCommands, commands, ok: result.ok, output: result.output, ms: Date.now() - started };
 		log(ctx.cwd, record);
 
 		if (!result.ok) {
