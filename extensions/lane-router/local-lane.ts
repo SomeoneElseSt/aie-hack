@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { LANES_DIR, LOG_FILE, SUBQ_BASE_URL, SUBQ_MODEL, SUBQ_TIMEOUT_MS } from "./constants.ts";
+import { LANES_DIR, LOG_FILE, SUBQ_BASE_URL, SUBQ_MODEL } from "./constants.ts";
 
 // A locally fine-tuned tiny model that handles the user's repetitive git mechanics without any cloud LLM.
 // It only exists once the distillation pipeline (distill/) has ADOPTED an adapter into distill/roster.json.
@@ -12,6 +12,9 @@ const LOCAL_URL = process.env.LOCAL_MODEL_URL ?? "http://127.0.0.1:8089/v1/chat/
 const MAX_WORDS = 25;
 const MIN_CONFIDENCE = 0.8;
 const LOCAL_TIMEOUT_MS = 30_000;
+const GIT_INTENT_TIMEOUT_MS = 60_000;
+const GIT_INTENT_ATTEMPTS = 2;
+const MAX_COMMAND_TOKENS = 120;
 const FORBIDDEN = ["sudo", "rm -rf /", "rm -rf ~", "~/", "cd /", "cd ~", "curl ", "wget ", "--force", "push -f", "reset --hard origin"];
 
 // Must match distill/scenarios.py SYSTEM_PROMPT exactly: it is what the adapter was trained on.
@@ -25,7 +28,7 @@ const GIT_INTENTS: Record<string, string> = {
 	commit_push: "Commit the current changes and push them (e.g. 'commit and push', 'push it' with uncommitted work).",
 	push: "Push commits that are already made.",
 	undo_last_commit: "Undo the last commit but keep the changes.",
-	not_git_mechanics: "Anything else: questions, code work, git used only incidentally, or not doable with a few git commands.",
+	not_git_mechanics: "Any request requiring code/file edits, renaming an app command, implementation, tests, or other non-git work, EVEN IF it also asks to commit/push. Also questions and anything not fully satisfied by git commands.",
 };
 
 interface ActiveLocalModel {
@@ -35,12 +38,18 @@ interface ActiveLocalModel {
 }
 
 function activeLocalModel(): ActiveLocalModel | undefined {
-	if (!existsSync(ROSTER_PATH)) return undefined;
+	if (process.env.LANES_LOCAL === "off" || !existsSync(ROSTER_PATH)) return undefined;
 	const roster = JSON.parse(readFileSync(ROSTER_PATH, "utf8")) as { active?: ActiveLocalModel | null };
 	return roster.active ?? undefined;
 }
 
-async function gitIntent(text: string): Promise<{ intent: string; confidence: number } | undefined> {
+interface GitIntent {
+	intent: string;
+	confidence: number;
+	probabilities?: Record<string, number>;
+}
+
+async function requestGitIntent(text: string): Promise<GitIntent | undefined> {
 	const apiKey = process.env.SUBQ_API_KEY;
 	if (!apiKey) return undefined;
 	const response = await fetch(`${SUBQ_BASE_URL}/systemone`, {
@@ -49,13 +58,30 @@ async function gitIntent(text: string): Promise<{ intent: string; confidence: nu
 		body: JSON.stringify({
 			model: SUBQ_MODEL,
 			state: { message: text },
-			questions: { intent: { type: "choice", instructions: "Is this a routine git-mechanics request that a few git shell commands fully satisfy, and which one?", criteria: GIT_INTENTS } },
+			questions: { intent: { type: "choice", instructions: "Classify the ENTIRE request. Choose a git intent ONLY when git shell commands alone fully satisfy every part. Commit-message style and no-coauthor preferences are git mechanics. Requests to change code/files/app behavior (including renaming an app command) AND then commit/push MUST be not_git_mechanics. Example: rename settle-up to settle, then commit and push = not_git_mechanics.", criteria: GIT_INTENTS } },
 		}),
-		signal: AbortSignal.timeout(SUBQ_TIMEOUT_MS),
+		signal: AbortSignal.timeout(GIT_INTENT_TIMEOUT_MS),
 	}).catch(() => undefined);
 	if (!response?.ok) return undefined;
-	const answer = ((await response.json()) as { answers?: { intent?: { choice: string; confidence: number } } }).answers?.intent;
-	return answer ? { intent: answer.choice, confidence: answer.confidence } : undefined;
+	const body = await response.json().catch(() => undefined) as { answers?: { intent?: { choice?: string; confidence?: number; probabilities?: Record<string, number> } } } | undefined;
+	const answer = body?.answers?.intent;
+	if (typeof answer?.choice !== "string" || typeof answer.confidence !== "number") return undefined;
+	if (!Object.hasOwn(GIT_INTENTS, answer.choice) || !Number.isFinite(answer.confidence)) return undefined;
+	return { intent: answer.choice, confidence: answer.confidence, probabilities: answer.probabilities };
+}
+
+function localProbability(intent: GitIntent, intents: string[]): number | undefined {
+	const values = intents.map((name) => intent.probabilities?.[name]);
+	if (values.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)) return undefined;
+	return Math.min(1, (values as number[]).reduce((sum, value) => sum + value, 0));
+}
+
+async function gitIntent(text: string): Promise<GitIntent | undefined> {
+	for (let attempt = 0; attempt < GIT_INTENT_ATTEMPTS; attempt++) {
+		const intent = await requestGitIntent(text);
+		if (intent) return intent;
+	}
+	return undefined;
 }
 
 async function repoState(pi: ExtensionAPI, cwd: string): Promise<string | undefined> {
@@ -71,7 +97,7 @@ async function localCommands(state: string, request: string): Promise<string[] |
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
 			messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: `${state}\n\nRequest: ${request}` }],
-			max_tokens: 120,
+			max_tokens: MAX_COMMAND_TOKENS,
 			temperature: 0,
 		}),
 		signal: AbortSignal.timeout(LOCAL_TIMEOUT_MS),
@@ -105,23 +131,35 @@ function log(cwd: string, record: object): void {
  */
 export function registerLocalLane(pi: ExtensionAPI): void {
 	pi.on("input", async (event, ctx: ExtensionContext) => {
+		let probability: number | undefined;
+		const skip = (reason: string) => {
+			log(ctx.cwd, { type: "local_skip", reason, prompt: event.text, localProbability: probability });
+			return { action: "continue" as const };
+		};
+		// Active with the router (lanes/*), or in front of any single main model with LANES_LOCAL=force.
+		if (ctx.model?.provider !== "lanes" && process.env.LANES_LOCAL !== "force") return skip("not_router_or_forced");
 		const local = activeLocalModel();
-		if (!local || event.streamingBehavior || event.text.split(/\s+/).length > MAX_WORDS) return { action: "continue" };
+		if (!local) return skip("no_roster");
+		if (event.streamingBehavior) return skip("streaming");
+		if (event.text.trim().split(/\s+/).length > MAX_WORDS) return skip("too_long");
 
 		const started = Date.now();
 		const intent = await gitIntent(event.text);
-		if (!intent || !local.intents.includes(intent.intent) || intent.confidence < MIN_CONFIDENCE) return { action: "continue" };
+		if (!intent) return skip("subq_error");
+		probability = localProbability(intent, local.intents);
+		if (!local.intents.includes(intent.intent)) return skip("not_git");
+		if (intent.confidence < MIN_CONFIDENCE) return skip("low_confidence");
 
 		const state = await repoState(pi, ctx.cwd);
 		const commands = state ? await localCommands(state, event.text) : undefined;
 		const result = commands ? await runCommands(pi, ctx.cwd, commands) : { ok: false, output: "local model unavailable" };
-		const record = { type: "local", timestamp: new Date().toISOString(), prompt: event.text, lane: "local", model: local.name, intent, commands, ok: result.ok, ms: Date.now() - started };
+		const record = { type: "local", timestamp: new Date().toISOString(), prompt: event.text, lane: "local", model: local.name, intent, localProbability: probability, commands, ok: result.ok, ms: Date.now() - started };
 		log(ctx.cwd, record);
 
 		if (!result.ok) {
 			mkdirSync(dirname(FAILURES_PATH), { recursive: true });
 			appendFileSync(FAILURES_PATH, `${JSON.stringify({ ...record, state, output: result.output })}\n`);
-			return { action: "continue" };
+			return skip("local_failure");
 		}
 		// Shown in the chat and kept in context, so the cloud model knows what happened; no cloud turn runs.
 		pi.sendMessage({

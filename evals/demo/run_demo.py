@@ -55,7 +55,7 @@ def main() -> None:
     config, model = sys.argv[1], sys.argv[2]
     run_dir = DEMO_DIR / "runs" / config
     repo = prepare(run_dir)
-    prompts = json.loads((DEMO_DIR / "prompts.json").read_text())
+    prompts = json.loads((DEMO_DIR / os.environ.get("DEMO_PROMPTS", "prompts.json")).read_text())
     turns = []
     for index, item in enumerate(prompts):
         reply, seconds = run_turn(run_dir, repo, model, item["prompt"], index == 0)

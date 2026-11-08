@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 const POLL_MS = 300;
-const PROMPT_WIDTH = 48;
+const PROMPT_WIDTH = 28;
 const BAR_WIDTH = 8;
 const HEADER_LINES = 4;
 const DEFAULT_TERMINAL_ROWS = 30;
@@ -12,6 +12,8 @@ const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const CLEAR_SCREEN = "\x1b[2J\x1b[H";
+const LOCAL_COLOR = "\x1b[36m";
+const CELL_WIDTH = BAR_WIDTH + 5;
 
 const LANES = [
 	{ id: "one_shot", label: "ONE-SHOT", color: "\x1b[32m" },
@@ -23,11 +25,18 @@ interface LogRecord {
 	timestamp: string;
 	prompt: string;
 	lane: string;
+	localProbability?: number;
 	classification: { ok: boolean; probabilities?: Record<string, number>; latencyMs: number; error?: string };
 }
 
 const path = process.argv[2] ?? ".lanes/log.jsonl";
 const rows: string[] = [];
+let lastLocal: { prompt: string; probability?: number } | undefined;
+
+function localCell(probability?: number): string {
+	if (typeof probability !== "number" || !Number.isFinite(probability)) return "—".padEnd(CELL_WIDTH);
+	return probabilityCell(Math.max(0, Math.min(1, probability)), LOCAL_COLOR);
+}
 
 function laneTag(laneId: string): string {
 	const index = LANES.findIndex((lane) => lane.id === laneId);
@@ -61,6 +70,7 @@ function renderRow(record: LogRecord, turn: number): string {
 		fit(record.prompt, PROMPT_WIDTH),
 		`${laneTag(record.lane)} `,
 		renderProbabilities(record),
+		localCell(record.localProbability),
 		`${DIM}${latency}${RESET}`,
 	].join(" │ ");
 }
@@ -71,21 +81,22 @@ interface LocalRecord {
 	model: string;
 	ok: boolean;
 	ms: number;
+	localProbability?: number;
 }
 
 // Turns handled by the adopted local model: no cloud LLM call at all.
 function renderLocalRow(record: LocalRecord, turn: number): string {
 	const time = new Date(record.timestamp).toLocaleTimeString([], { hour12: false });
 	const status = record.ok ? `\x1b[1;36mLOCAL ${record.model}\x1b[0m on this Mac, no cloud call` : `local failed -> cloud fallback`;
-	return [`${DIM}${String(turn).padStart(2)}  ${time}${RESET}`, fit(record.prompt, PROMPT_WIDTH), `${BOLD}\x1b[36m(L)${RESET} `, status.padEnd(44), `${DIM}${`${record.ms}ms`.padStart(6)}${RESET}`].join(" │ ");
+	return [`${DIM}${String(turn).padStart(2)}  ${time}${RESET}`, fit(record.prompt, PROMPT_WIDTH), `${BOLD}\x1b[36m(L)${RESET} `, status.padEnd(44), localCell(record.localProbability), `${DIM}${`${record.ms}ms`.padStart(6)}${RESET}`].join(" │ ");
 }
 
 function renderHeader(): string[] {
 	const legend = LANES.map((lane, index) => `${BOLD}${lane.color}(${index + 1}) ${lane.label}${RESET}`).join("    ");
 	const cellWidth = BAR_WIDTH + 5;
 	const probabilityHeads = LANES.map((_, index) => `(${index + 1})`.padEnd(cellWidth)).join("  ");
-	const columns = `${BOLD} #  TIME     │ ${"PROMPT".padEnd(PROMPT_WIDTH)} │ LANE │ ${probabilityHeads} │ SUBQ${RESET}`;
-	return [`${BOLD}SubQ lane routing${RESET}   ${legend}    ${BOLD}\x1b[36m(L) LOCAL${RESET}`, "", columns, DIM + "─".repeat(118) + RESET];
+	const columns = `${BOLD} #  TIME     │ ${"PROMPT".padEnd(PROMPT_WIDTH)} │ LANE │ ${probabilityHeads} │ ${"(L)".padEnd(CELL_WIDTH)} │ SUBQ${RESET}`;
+	return [`${BOLD}SubQ lane routing${RESET}   ${legend}    ${BOLD}\x1b[36m(L) LOCAL${RESET}`, `${DIM}(L): separate local-git eligibility check; — = unavailable${RESET}`, columns, DIM + "─".repeat(116) + RESET];
 }
 
 function redraw(): void {
@@ -102,6 +113,10 @@ function ingest(chunk: string): void {
 		} catch {
 			continue;
 		}
+		if (record.type === "local_skip") {
+			lastLocal = { prompt: record.prompt, probability: record.localProbability };
+			continue;
+		}
 		if (record.type === "local") {
 			rows.push(renderLocalRow(record as unknown as LocalRecord, rows.length + 1));
 			continue;
@@ -109,6 +124,8 @@ function ingest(chunk: string): void {
 		// Usage records are kept for cost analysis; only classifications are shown.
 		if (record.type !== undefined && record.type !== "classification") continue;
 		if (!record.classification) continue;
+		if (lastLocal?.prompt === record.prompt) record.localProbability = lastLocal.probability;
+		lastLocal = undefined;
 		rows.push(renderRow(record, rows.length + 1));
 	}
 }
@@ -121,10 +138,13 @@ function poll(): void {
 	if (size < offset) {
 		offset = 0; // file was truncated / recreated
 		rows.length = 0;
+		pending = "";
+		lastLocal = undefined;
 	}
 	if (size === offset) return;
-	const text = pending + readFileSync(path, "utf8").slice(offset);
-	offset = size;
+	const contents = readFileSync(path);
+	const text = pending + contents.subarray(offset).toString("utf8");
+	offset = contents.length;
 	const lastNewline = text.lastIndexOf("\n");
 	pending = text.slice(lastNewline + 1);
 	ingest(text.slice(0, lastNewline + 1));

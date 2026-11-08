@@ -100,3 +100,34 @@ python3 evals/demo/run_demo.py naive lanes/naive
 python3 evals/demo/run_demo.py lanes lanes/auto
 python3 evals/demo/grade_demo.py wonder naive lanes
 ```
+
+
+## Wonder + local model
+
+Same 12-turn workflow with `prompts-git.json`. Always Wonder uses the existing `gitw`/`gitw2` baseline;
+Wonder + local uses `gitwl3`/`gitwl4`, run sequentially with `LANES_LOCAL=force` and adopted Qwen 1.5B adapter v1
+served through MLX on port 8089. Git turns are **3, 5, 8, 10**. The mixed request on turn 12
+("rename settle-up to settle. then commit and push") stays on Wonder.
+
+| Setup (two-run average) | Rubric | Git-turn cost | Other-turn cost | Total | Total change | Time | Local git turns |
+|---|---|---|---|---|---|---|---|
+| Always Wonder (`gitw`, `gitw2`) | 11/11 | $0.096 | $1.363 | $1.459 | baseline | 308s | 0/4 |
+| Wonder + local (`gitwl3`, `gitwl4`) | 11/11 | $0.000 | $1.396 | $1.396 | −4.3% | 293s | 4/4 |
+
+| Run | Rubric | Git-turn cost | Other-turn cost | Total | Time | Local git turns |
+|---|---|---|---|---|---|---|
+| gitwl3 | 11/11 | $0.000 | $1.480 | $1.480 | 284s | 4/4 |
+| gitwl4 | 11/11 | $0.000 | $1.312 | $1.312 | 302s | 4/4 |
+
+All eight git turns executed successfully locally (`type: "local"`, `ok: true`), with no cloud usage on those
+turns. Both mixed rename requests logged `local_skip: not_git` and ran on Wonder. The local classifier now
+retries once with a 60-second timeout per attempt and logs every skip reason, including API/response failures.
+Git-turn cloud cost fell 100%; total cost fell 4.3% and time fell 4.9%. With only two runs, the total-cost difference
+is small relative to run-to-run variation.
+
+Costs follow `costsplit.py`: provider-reported cloud usage, excluding local compute and the local lane's SubQ
+intent-classification calls (not recorded by the existing cost accounting). Baseline rubric comes from the task's
+recorded 11/11 scores. New independent judge reports: `results/report-wonder-local.json`; raw runs:
+`runs/gitwl3/` and `runs/gitwl4/` (gitignored). Grading uses `UV_CACHE_DIR=/tmp/aie-hack-uv-cache` because the sandbox
+cannot write UV's default cache; the initial `gitwl4` test-check failure was a cache-permission error, and all 85
+of its tests pass with the writable cache.

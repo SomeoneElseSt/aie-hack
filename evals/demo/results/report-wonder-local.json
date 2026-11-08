@@ -1,0 +1,86 @@
+{
+  "gitwl3": {
+    "score": 11,
+    "out_of": 11,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_6": 1
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "Equal splits produce correct balances for all involved users.",
+        "settle_min": "Settle command outputs correct minimum transactions for a 4-person test case.",
+        "shares_split": "Splitting by custom shares correctly calculates proportional balances.",
+        "exact_and_cents": "Exact amounts correctly divide the total, and equal splits appropriately distribute leftover cents.",
+        "cli_persistence": "Multiple invocations update and read data correctly from the underlying JSON file.",
+        "rename": "Settle command is named 'settle' and 'settle-up' errors out as invalid.",
+        "dashboard": "Dashboard creates a proper static HTML report mapping out balances and expenses per person."
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.4795,
+      "router_overhead": 0.0,
+      "total_cost": 1.4795,
+      "requests": 70,
+      "cache_hit": 0.972,
+      "requests_by_model": {
+        "muse-wonder-1.0": 70
+      },
+      "lanes": []
+    }
+  },
+  "gitwl4": {
+    "score": 11,
+    "out_of": 11,
+    "objective": {
+      "commits": 1,
+      "pushed_latest": 1,
+      "own_tests_pass": 1,
+      "answer_turn_6": 1
+    },
+    "judge": {
+      "scores": {
+        "equal_split": 1,
+        "settle_min": 1,
+        "shares_split": 1,
+        "exact_and_cents": 1,
+        "cli_persistence": 1,
+        "rename": 1,
+        "dashboard": 1
+      },
+      "notes": {
+        "equal_split": "Equal splits produce correct balances.",
+        "settle_min": "Settle output minimizes the number of payments correctly.",
+        "shares_split": "Splitting by shares works perfectly.",
+        "exact_and_cents": "Fractional amounts round to cents correctly and exact amounts work.",
+        "cli_persistence": "CLI saves to and restores from JSON correctly.",
+        "rename": "Settle command is successfully renamed.",
+        "dashboard": "Generates complete and correct static HTML dashboard."
+      },
+      "raw_tail": ""
+    },
+    "cost": {
+      "agent_cost": 1.3117,
+      "router_overhead": 0.0,
+      "total_cost": 1.3117,
+      "requests": 61,
+      "cache_hit": 0.969,
+      "requests_by_model": {
+        "muse-wonder-1.0": 61
+      },
+      "lanes": []
+    }
+  }
+}

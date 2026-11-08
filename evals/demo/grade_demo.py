@@ -131,7 +131,7 @@ def costs(run_dir: Path) -> dict:
 
 
 def main() -> None:
-	prompts = json.loads((DEMO_DIR / "prompts.json").read_text())
+	prompts = json.loads((DEMO_DIR / os.environ.get("DEMO_PROMPTS", "prompts.json")).read_text())
 	report = {}
 	for config in sys.argv[1:] or ["wonder", "naive", "lanes"]:
 		run_dir = DEMO_DIR / "runs" / config
