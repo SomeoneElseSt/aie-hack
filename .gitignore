@@ -9,3 +9,4 @@ evals/EvoCodeBench/
 __pycache__/
 distill/data/
 distill/adapters/
+*.log
