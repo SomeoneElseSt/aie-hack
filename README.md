@@ -4,3 +4,7 @@
 
 
 [Video w/Demo](https://drive.google.com/drive/folders/1eKetSz-5PWnpmOKuiILc7s_lK12ZGBE4)
+
+## How it works
+
+![How Lanes works](docs/lanes-diagram.png)
