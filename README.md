@@ -5,8 +5,8 @@ versus $0.835 at always-high effort) in a scripted 12-turn coding session. The r
 scored 11/12, compared with 12/12 at always-high. Always-medium cost $0.679 and scored
 11/12, so routing did not beat that fixed-effort baseline.
 
-This is a small experiment, not a general savings guarantee. On Meta, effort routing cost
-13% more than always-high. See the [full results](evals/demo/RESULTS.md).
+On Meta, effort routing cost 13% more than always-high. See the
+[full results](evals/demo/RESULTS.md).
 
 Route each turn of a coding session to the model or effort that fits it, without throwing
 away the provider's prompt cache. SubQ Snap classifies every user turn; the router sends it
@@ -22,6 +22,19 @@ Design: [docs/PROJECT.md](docs/PROJECT.md) · Illustrated: [docs/lane-architectu
 - **Meta model routing is about break-even.** Lanes $1.282 vs always-Wonder $1.295 (−1%), 11.5/12 vs 12/12; two always-Wonder runs differ by 12% from each other, so that gap is noise. The well-supported figure is per small turn: −65% ($0.092 vs $0.259), 7 of the 12 turns.
 - **Cache locality is the point.** Lanes is ~29% cheaper than naive switching ($1.807), the same model choices on one shared thread, losing the cache on every switch. Isolating every lane was worse ($1.647); letting the complex lane keep the full conversation fixed it.
 - **It does not pay off everywhere.** With Flash-Lite/Flash/Pro, lanes averaged $1.104 versus $0.679 for always-Pro, about 63% more. Flash is only ~25% cheaper than Pro and needed far more requests in this test.
+
+## Local model for routine git turns
+
+We mined routine git requests from real sessions, generated teacher examples and kept only
+commands that passed execution checks. We then LoRA-trained a 4-bit Qwen2.5-Coder-1.5B
+model locally and gated candidates on held-out cases. The adopted v1 passed all held-out
+cases. A later candidate scored 88% and was rolled back. See [distillation results](distill/README.md).
+
+In the 12-turn git workflow, Wonder with the local model and always-Wonder both scored
+**11/11**, averaged across two runs each. The local model reduced recorded total cloud cost
+by **4.3%** ($1.396 vs $1.459), with $0.000 recorded for git turns versus $0.096.
+These costs exclude local compute and the local lane's SubQ classification calls. The
+sample is small, and the 18% Google result above is a separate effort-routing experiment.
 
 ## The process
 
