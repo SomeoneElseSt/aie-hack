@@ -64,6 +64,31 @@ LANES_MAPPING=google ./run.sh --model lanes/auto
 node scripts/lanes-view.ts          # live view of .lanes/log.jsonl
 ```
 
+### Use it in your own Pi
+
+The extension is a single TypeScript entry point, so you do not need this repo's
+`run.sh` to try it:
+
+```bash
+# global: loads in every project
+mkdir -p ~/.pi/agent/extensions/lane-router
+cp -r extensions/lane-router/* ~/.pi/agent/extensions/lane-router/
+# or project-local (loaded once the project is trusted)
+mkdir -p .pi/extensions/lane-router && cp -r extensions/lane-router/* .pi/extensions/lane-router/
+# or one-off
+pi -e /path/to/extensions/lane-router/index.ts
+```
+
+Then export `SUBQ_API_KEY` (required — it classifies every turn) and your provider
+key, pick a lane set with `LANES_MAPPING=<name>`, and select a router model such as
+`lanes/auto`. Define your own lanes in `mappings.json`: each set maps
+`one_shot`, `straightforward` and `complex` to a `{provider, model, thinking?}`,
+with `direct` as the fallback.
+
+Optional local lane: set `LOCAL_MODEL_URL` (default
+`http://127.0.0.1:8089/v1/chat/completions`), place an active model in
+`distill/roster.json`, and disable it any time with `LANES_LOCAL=off`.
+
 Reproduce: `python3 evals/demo/run_demo.py lanes lanes/auto`, then
 `python3 evals/demo/grade_demo.py lanes` (runs land in gitignored `evals/demo/runs/`).
 
@@ -79,6 +104,5 @@ One scripted 12-turn session, one to three runs per setup; per-turn numbers beat
 | `evals/`, `distill/`, `gate/` | Demo + EvoCode-Bench runners; distillation and LoRA gate; SubQ merge-gate experiments |
 | `ioi/`, `docs/`, `vendors/` | IOI solutions with checkers; design notes and architecture page; `pi`, `opencode` submodules |
 
-- [Presentation with results](https://claude.ai/artifact/MsLRftvtL428kM6kMcLd82)
 - [Video with demo](https://drive.google.com/drive/folders/1eKetSz-5PWnpmOKuiILc7s_lK12ZGBE4)
 - Pi: [github.com/earendil-works/pi](https://github.com/earendil-works/pi)
